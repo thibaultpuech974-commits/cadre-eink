@@ -265,8 +265,17 @@ async function routeEtat(url, env) {
   etat.maj = deux(w.hh) + ':' + deux(w.mi);
 
   if (!pourInterface) {
+    // L'offre gratuite limite les ecritures (~1 000 par jour) : l'etat du cadre n'est enregistre
+    // que toutes les 10 min, ou quand quelque chose d'important change (mode, version, batterie).
     const bat = parseFloat(url.searchParams.get('bat'));
-    await env.CADRE.put('statut', JSON.stringify({ vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode }));
+    const ancien = JSON.parse((await env.CADRE.get('statut')) || 'null');
+    const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode,
+      fw: url.searchParams.get('fw') || (ancien && ancien.fw) || null };
+    const aEcrire = !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
+      ancien.fw !== nouveau.fw || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
+    if (aEcrire) {
+      try { await env.CADRE.put('statut', JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
+    }
   }
   return json(etat);
 }
@@ -626,7 +635,12 @@ async function construireTableau(cfg, maintenant, env) {
     }
   }
   if (presents.has('bus')) {
-    try { res.bus = await prochainsBus(cfg.bus, maintenant, env, false); }
+    try {
+      res.bus = await prochainsBus(cfg.bus, maintenant, env, false);
+      // Les minutes restantes ne sont pas affichees : on les retire pour que la signature
+      // ne change pas a chaque minute (sinon l'ecran clignoterait a chaque reveil)
+      for (const p of res.bus.passages || []) delete p.m;
+    }
     catch (e) { res.bus = { erreur: 'Bus indisponibles' }; }
   }
   return res;
