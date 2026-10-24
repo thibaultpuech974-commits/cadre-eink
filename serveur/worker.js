@@ -13,6 +13,8 @@
 //   - une variable secrete           CLE   (ton mot de passe)
 // =====================================================================
 
+import CIRCUITS from './circuits.js';
+
 const LARGEUR = 960, HAUTEUR = 680, OCTETS = (LARGEUR / 8) * HAUTEUR;   // 81 600 octets
 const TZ = 'Europe/Paris';
 const MODES = ['tableau', 'photo', 'pochette', 'blanc'];
@@ -29,7 +31,9 @@ const CONFIG_DEFAUT = {
     vent: true, details: true, soleil: true,
     heures: true, pasHeures: 3, nbHeures: 6,
     jours: true, nbJours: 4,
+    courbeHeures: 24,              // graphique de temperature : 12, 24, 36 ou 48 h
   },
+  f1: { semaine: false },          // true : bloc F1 affiche seulement la semaine du Grand Prix
   agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [] },
   // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
   disposition: [
@@ -62,6 +66,7 @@ const CONFIG_DEFAUT = {
 const MARGE = 24, GOUTTIERE = 16;
 const WIDGETS = {               // taille minimale de chaque widget (en cases)
   date: { w: 3, h: 1 }, meteo: { w: 4, h: 2 }, heures: { w: 4, h: 2 }, jours: { w: 3, h: 2 }, agenda: { w: 3, h: 1 }, bus: { w: 3, h: 2 },
+  courbe: { w: 4, h: 2 }, f1: { w: 3, h: 2 },
 };
 const ROTATIONS = [0, 1, 3];
 // Taille et police du texte, reglables bloc par bloc
@@ -666,6 +671,12 @@ async function construireTableau(cfg, maintenant, env) {
   let dispo = validerDisposition(busActif && speciale && speciale.length ? speciale : normale, g);
   const busPrevu = [normale, speciale].some(l => (l || []).some(d => d.id === 'bus'));
   if (!busActif) dispo = dispo.filter(d => d.id !== 'bus');
+  // Grand Prix de F1 (le bloc peut n'apparaitre que la semaine de la course)
+  let f1 = null;
+  if (dispo.some(d => d.id === 'f1')) {
+    try { f1 = await grandPrix(maintenant); } catch (e) { f1 = { erreur: 'Calendrier F1 indisponible' }; }
+    if (cfg.f1 && cfg.f1.semaine && !f1.semaine) dispo = dispo.filter(d => d.id !== 'f1');
+  }
   const presents = new Set(dispo.map(d => d.id));
   const res = {
     date: JOURS_LONGS[w.js] + ' ' + w.d + ' ' + MOIS[w.m - 1],
@@ -676,9 +687,11 @@ async function construireTableau(cfg, maintenant, env) {
     busActif: busActif && presents.has('bus') ? 1 : 0,
     busPrevu: busPrevu ? 1 : 0,
   };
-  if (presents.has('meteo') || presents.has('heures') || presents.has('jours')) {
+  if (presents.has('f1')) { delete f1.semaine; res.f1 = f1; }
+  if (presents.has('meteo') || presents.has('heures') || presents.has('jours') || presents.has('courbe')) {
     try {
-      res.meteo = await meteo(Object.assign({}, cfg.meteo, { heures: presents.has('heures'), jours: presents.has('jours') }));
+      res.meteo = await meteo(Object.assign({}, cfg.meteo,
+        { heures: presents.has('heures'), jours: presents.has('jours'), courbe: presents.has('courbe') }));
     } catch (e) {
       res.meteo = { erreur: 'Météo indisponible' };
     }
@@ -775,6 +788,24 @@ async function meteo(o) {
       });
     }
   }
+  if (o.courbe) {
+    // Graphique : temperature (en dixiemes de degre), risque de pluie et nuit, heure par heure
+    const nb = [12, 24, 36, 48].includes(o.courbeHeures) ? o.courbeHeures : 24;
+    let i0 = d.hourly.time.indexOf(c.time.slice(0, 13) + ':00');
+    if (i0 < 0) i0 = 0;
+    const fin = Math.min(d.hourly.time.length, i0 + nb + 1);
+    const g = { h0: parseInt(d.hourly.time[i0].slice(11, 13), 10), t: [], p: [], n: [], j: [] };
+    for (let i = i0; i < fin; i++) {
+      g.t.push(Math.round(d.hourly.temperature_2m[i] * 10));
+      g.p.push(d.hourly.precipitation_probability[i] ?? 0);
+      g.n.push(d.hourly.is_day[i] ? 0 : 1);
+      if (i > i0 && d.hourly.time[i].slice(11, 13) === '00') {      // nom des jours suivants, a minuit
+        const [y, m, j] = d.hourly.time[i].slice(0, 10).split('-').map(Number);
+        g.j.push(JOURS_COURTS[new Date(Date.UTC(y, m - 1, j)).getUTCDay()] + ' ' + j);
+      }
+    }
+    res.courbe = g;
+  }
   if (o.jours) {
     const nb = Math.max(1, Math.min(6, o.nbJours | 0 || 4));
     res.jours = [];
@@ -859,6 +890,62 @@ function titreF1(t) {
   let session = '';
   for (const [re, nom] of SESSIONS_F1) if (re.test(t)) { session = nom; break; }
   return session ? meilleur + ' - ' + session : meilleur;
+}
+
+// ---------------------------------------------------------------------
+//  Prochain Grand Prix de F1 : calendrier Jolpica (ex-Ergast), trace du circuit integre
+// ---------------------------------------------------------------------
+async function calendrierF1(annee) {
+  const r = await fetch('https://api.jolpi.ca/ergast/f1/' + annee + '.json?limit=40', { cf: { cacheTtl: 21600, cacheEverything: true } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return (((await r.json()).MRData || {}).RaceTable || {}).Races || [];
+}
+const SESSIONS_JOLPICA = [['FirstPractice', 'Essais libres 1'], ['SecondPractice', 'Essais libres 2'],
+  ['ThirdPractice', 'Essais libres 3'], ['SprintQualifying', 'Qualif. sprint'], ['SprintShootout', 'Qualif. sprint'],
+  ['Sprint', 'Sprint'], ['Qualifying', 'Qualifications']];
+const instantF1 = s => (s && s.date ? Date.parse(s.date + 'T' + (s.time || '12:00:00Z')) : NaN);
+// Circuit integre le plus proche des coordonnees donnees par le calendrier
+function circuitProche(lat, lon) {
+  let meilleur = null, dMin = Infinity;
+  for (const id in CIRCUITS) {
+    const c = CIRCUITS[id];
+    const d = Math.hypot((c.lat - lat) * 111, (c.lon - lon) * 111 * Math.cos(lat * Math.PI / 180));
+    if (d < dMin) { dMin = d; meilleur = c; }
+  }
+  return dMin < 10 ? meilleur : null;          // a moins de 10 km
+}
+const numJour = w => Date.UTC(w.y, w.m - 1, w.d) / 86400e3;
+async function grandPrix(maintenant) {
+  const an = mural(maintenant).y;
+  // Le GP reste affiche jusqu'a 3 h apres le depart de la course
+  let gp = (await calendrierF1(an)).find(c => instantF1(c) + 3 * 3600e3 > maintenant);
+  if (!gp) { try { gp = (await calendrierF1(an + 1))[0]; } catch (e) { /* pas encore publie */ } }
+  if (!gp) return { erreur: 'Saison de F1 terminée' };
+  const course = instantF1(gp);
+  const sessions = SESSIONS_JOLPICA.filter(([k]) => gp[k]).map(([k, n]) => [instantF1(gp[k]), n, 3600e3]);
+  sessions.push([course, 'Course', 2 * 3600e3]);
+  sessions.sort((a, b) => a[0] - b[0]);
+  const auj = numJour(mural(maintenant));
+  const ecart = numJour(mural(sessions[0][0])) - auj;
+  const ecartCourse = numJour(mural(course)) - auj;
+  const quand = ecart > 1 ? 'Dans ' + ecart + ' jours' : ecart === 1 ? 'Demain' : ecartCourse > 0 ? 'Ce week-end' : maintenant < course ? "Aujourd'hui" : 'Terminé';
+  const loc = (gp.Circuit && gp.Circuit.Location) || {};
+  const c = circuitProche(parseFloat(loc.lat), parseFloat(loc.long));
+  const wC = mural(course);
+  return {
+    gp: pourEcran(titreF1(gp.raceName || '')),
+    manche: +gp.round || 0,
+    circuit: pourEcran(c ? c.nom : (gp.Circuit || {}).circuitName),
+    lieu: pourEcran(loc.locality || ''),
+    quand,
+    sessions: sessions.map(([t, n, duree]) => {
+      const w = mural(t);
+      return { j: JOURS_COURTS[w.js] + ' ' + w.d, h: w.hh + 'h' + deux(w.mi), n, f: t + duree < maintenant ? 1 : 0 };
+    }),
+    trace: c ? { l: c.l, h: c.h, p: c.p } : null,
+    // semaine du Grand Prix : du lundi 0 h a la fin de la course
+    semaine: auj >= numJour(wC) - ((wC.js + 6) % 7),
+  };
 }
 
 // Prochaine occurrence de chaque anniversaire (evenement "journee entiere")
@@ -1170,6 +1257,9 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <label>Prochains jours : jusqu'à
     <select id="mNbJours" style="width:auto"><option>3</option><option>4</option><option>5</option><option>6</option></select> jours</label>
   <p class="aide">Le nombre de colonnes réellement affichées dépend de la largeur du bloc.</p>
+  <label>Graphique de température sur les
+    <select id="mCourbe" style="width:auto"><option>12</option><option>24</option><option>36</option><option>48</option></select> prochaines heures</label>
+  <p class="aide">Le graphique montre la température heure par heure, le risque de pluie (barres hachurées) et la nuit (fond grisé). Ajoute le bloc « Graphique de température » dans la Disposition.</p>
   <button class="principal" onclick="enregistrerMeteo()">Enregistrer la météo</button>
   <div class="msg" id="msgMeteo"></div>
 </details>
@@ -1224,6 +1314,14 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <button style="width:100%;margin-top:8px" onclick="testerBus()">Voir les prochains passages maintenant</button>
   <div class="msg" id="msgBus"></div>
   <pre id="busTest" class="cache"></pre>
+</details>
+
+<details class="menu" id="menu-f1">
+  <summary>Grand Prix de F1</summary>
+  <p class="aide">Le bloc « Grand Prix de F1 » (à ajouter dans la Disposition) montre le tracé du circuit du prochain Grand Prix, le compte à rebours et les horaires des séances, à l'heure française. Les séances terminées sont barrées.</p>
+  <label><input type="checkbox" id="f1Semaine"> Afficher le bloc seulement pendant la semaine du Grand Prix (du lundi à la course)</label>
+  <button class="principal" onclick="enregistrer({ f1: { semaine: $('f1Semaine').checked } }, 'msgF1')">Enregistrer</button>
+  <div class="msg" id="msgF1"></div>
 </details>
 
 <details class="menu" id="menu-photo">
@@ -1340,7 +1438,9 @@ var INFOS = {
   heures: { nom: 'Prochaines heures', ex: '22h · 1h · 4h · 7h…', min: [4, 2] },
   jours: { nom: 'Prochains jours', ex: 'Sam · Dim · Lun…', min: [3, 2] },
   agenda: { nom: 'Agenda', ex: 'Demain 18:30 Colle…', min: [3, 1] },
-  bus: { nom: 'Prochains bus', ex: 'Ligne 4 → Gare  12:42', min: [3, 2] }
+  bus: { nom: 'Prochains bus', ex: 'Ligne 4 → Gare  12:42', min: [3, 2] },
+  courbe: { nom: 'Graphique de température', ex: 'Courbe des prochaines 24 h', min: [4, 2] },
+  f1: { nom: 'Grand Prix de F1', ex: 'Tracé du circuit et horaires', min: [3, 2] }
 };
 var DISPO_DEFAUT = {
   0: [ { id: 'date', x: 0, y: 0, w: 12, h: 1 }, { id: 'meteo', x: 0, y: 1, w: 12, h: 2 },
@@ -1907,6 +2007,8 @@ function remplirMeteo() {
   $('villeChoisie').textContent = 'Ville actuelle : ' + m.ville + ' (' + m.lat + ', ' + m.lon + ')';
   $('mVent').checked = m.vent; $('mDetails').checked = m.details; $('mSoleil').checked = m.soleil;
   $('mPas').value = String(m.pasHeures); $('mNbJours').value = String(m.nbJours); $('mNbHeures').value = String(m.nbHeures || 6);
+  $('mCourbe').value = String(m.courbeHeures || 24);
+  $('f1Semaine').checked = !!(config.f1 && config.f1.semaine);
 }
 function remplirAgenda() {
   $('aUrls').value = config.agenda.urls.join('\\n');
@@ -1949,7 +2051,7 @@ function chercherVille() {
 }
 function enregistrerMeteo() {
   var m = { vent: $('mVent').checked, details: $('mDetails').checked, soleil: $('mSoleil').checked,
-    pasHeures: +$('mPas').value, nbHeures: +$('mNbHeures').value, nbJours: +$('mNbJours').value };
+    pasHeures: +$('mPas').value, nbHeures: +$('mNbHeures').value, nbJours: +$('mNbJours').value, courbeHeures: +$('mCourbe').value };
   if (villeTemp) { m.ville = villeTemp.ville; m.lat = villeTemp.lat; m.lon = villeTemp.lon; villeTemp = null; }
   enregistrer({ meteo: m }, 'msgMeteo');
 }

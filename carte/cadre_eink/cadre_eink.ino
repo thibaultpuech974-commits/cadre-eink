@@ -527,6 +527,217 @@ void widgetBus(JsonVariant bus, Boite b) {
   }
 }
 
+// Trame "gris clair" ou "gris moyen" dans un rectangle (l'ecran n'a que du noir et blanc)
+void trame(int x0, int y0, int w, int h, int pas) {
+  for (int y = y0; y < y0 + h; y++)
+    for (int x = x0; x < x0 + w; x++)
+      if (pas == 4 ? ((x % 4 == 0) && (y % 4 == 0)) : ((x + y) % pas == 0)) canvas.drawPixel(x, y, NOIR);
+}
+void ligneHPointillee(int x0, int x1, int y) { for (int x = x0; x < x1; x += 6) canvas.drawFastHLine(x, y, 2, NOIR); }
+void ligneVPointillee(int x, int y0, int y1) { for (int y = y0; y < y1; y += 6) canvas.drawFastVLine(x, y, 3, NOIR); }
+
+// Graphique de temperature : courbe heure par heure, risque de pluie (barres hachurees), nuit (fond grise)
+void widgetCourbe(JsonVariant g, Boite b) {
+  JsonArray T = g["t"], P = g["p"], N = g["n"], J = g["j"];
+  int n = T.size();
+  if (n < 2) return;
+  float tMin = 1e9, tMax = -1e9; int iMin = 0, iMax = 0;
+  for (int i = 0; i < n; i++) {
+    float t = T[i].as<int>() / 10.0f;
+    if (t < tMin) { tMin = t; iMin = i; }
+    if (t > tMax) { tMax = t; iMax = i; }
+  }
+  policeT(14, false); int aL = asc();
+  int lg = largeurTexte("-88°") + 8;                     // colonne des graduations
+  int x0 = b.x + lg, x1 = b.x + b.w - 6;
+  int y0 = b.y + aL + 14, y1 = b.y + b.h - aL - 10;     // place pour les etiquettes min/max et les heures
+  if (y1 - y0 < 30) return;
+  // Echelle : pas "rond" de 1, 2, 5 ou 10 degres, 2 a 5 graduations
+  float plage = max(2.0f, tMax - tMin);
+  int pasT = plage <= 4 ? 1 : plage <= 9 ? 2 : plage <= 20 ? 5 : 10;
+  if ((y1 - y0) / (plage / pasT) < aL * 1.6f && pasT < 10) pasT = pasT == 1 ? 2 : pasT == 2 ? 5 : 10;
+  float bas = floorf(tMin / pasT) * pasT, haut = ceilf(tMax / pasT) * pasT;
+  if (haut - bas < pasT) haut = bas + pasT;
+  auto X = [&](float i) { return x0 + i * (x1 - x0) / (n - 1); };
+  auto Y = [&](float t) { return y1 - (t - bas) * (y1 - y0) / (haut - bas); };
+  float dx = (float)(x1 - x0) / (n - 1);
+  // Nuit : fond grise
+  for (int i = 0; i < n - 1; i++)
+    if (N[i].as<int>() == 1) { int xa = X(i), xb = X(i + 1); trame(xa, y0, xb - xa, y1 - y0, 4); }
+  // Risque de pluie : barres hachurees (100 % = 45 % de la hauteur)
+  bool pluie = false;
+  for (int i = 0; i < n; i++) {
+    int p = P[i] | 0;
+    if (p < 5) continue;
+    pluie = true;
+    int hb = p * (y1 - y0) * 45 / 10000, lb = max(3, (int)(dx * 0.6f));
+    int xb = X(i) - lb / 2;
+    xb = max(x0, min(xb, x1 - lb));
+    trame(xb, y1 - hb, lb, hb, 3);
+    canvas.drawFastHLine(xb, y1 - hb, lb, NOIR);
+  }
+  // Graduations
+  char t[24];
+  for (float v = bas; v <= haut + 0.01f; v += pasT) {
+    int y = Y(v);
+    ligneHPointillee(x0, x1, y);
+    snprintf(t, sizeof t, "%d°", (int)v);
+    texteDroite(x0 - 6, y + aL / 2, t);
+  }
+  canvas.fillRect(x0, y1, x1 - x0 + 1, 2, NOIR);
+  // Heures en bas (une etiquette toutes les k heures) ; a minuit, le nom du jour
+  int h0 = g["h0"] | 0;
+  const int pas[] = {1, 2, 3, 4, 6, 12};
+  int k = 12;
+  for (int i = 0; i < 6; i++) if (dx * pas[i] >= largeurTexte("88h") + 14) { k = pas[i]; break; }
+  int jour = 0, finJours = 0;       // bord droit du dernier nom de jour (pour placer la legende)
+  int debutJours = 99999;
+  for (int i = 0; i < n; i++) {
+    int h = (h0 + i) % 24;
+    int x = X(i);
+    if (h == 0 && i > 0) {
+      ligneVPointillee(x, y0 - 4, y1);
+      const char* nom = J[jour++] | "";
+      policeT(14, true);
+      int lt = largeurTexte(nom);
+      int xn = min(x + 4, b.x + b.w - lt);
+      texte(xn, y0 - 6, nom);      // nom du jour en haut, a droite de minuit
+      debutJours = min(debutJours, xn); finJours = max(finJours, xn + lt);
+      policeT(14, false);
+      continue;
+    }
+    if (h % k) continue;
+    snprintf(t, sizeof t, "%dh", h);
+    int lt = largeurTexte(t);
+    canvas.drawFastVLine(x, y1, 5, NOIR);
+    texte(max(b.x + lg - lt / 2, min(x - lt / 2, b.x + b.w - lt)), y1 + 8 + aL, t);
+  }
+  // Courbe epaisse
+  float e = max(3.0f, b.h / 70.0f);
+  for (int i = 0; i < n - 1; i++) trait(X(i), Y(T[i].as<int>() / 10.0f), X(i + 1), Y(T[i + 1].as<int>() / 10.0f), e);
+  // Minimum et maximum
+  policeT(17, true);
+  int aV = asc();
+  int idx[2] = {iMax, iMin};
+  for (int k2 = 0; k2 < 2; k2++) {
+    int i = idx[k2];
+    float v = T[i].as<int>() / 10.0f;
+    int x = X(i), y = Y(v);
+    canvas.fillCircle(x, y, e * 1.4f, NOIR);
+    canvas.fillCircle(x, y, e * 0.6f, BLANC);
+    snprintf(t, sizeof t, "%d°", (int)lroundf(v));
+    int lt = largeurTexte(t);
+    int xt = max(x0 + 2, min(x - lt / 2, x1 - lt));
+    int yt = k2 == 0 ? y - e * 1.4f - 6 : y + e * 1.4f + 6 + aV;
+    if (yt < b.y + aV || yt > y1 - 4) {          // pas la place au-dessus / en dessous : a cote du point
+      xt = x + e * 2 + 6 + lt <= x1 ? x + e * 2 + 6 : x - e * 2 - 6 - lt;
+      yt = k2 == 0 ? y + aV / 2 : y - 6;
+      yt = max(b.y + aV, min(yt, y1 - 4));
+    }
+    canvas.fillRect(xt - 3, yt - aV - 2, lt + 6, aV + 5, BLANC);     // fond blanc sous le chiffre
+    texte(xt, yt, t);
+  }
+  // Legende de la pluie, si besoin
+  policeT(14, false);
+  int xLeg = b.x + b.w - largeurTexte("pluie") - 26;
+  if (pluie && (finJours < xLeg - 8 || debutJours > b.x + b.w)) {
+    int lt = largeurTexte("pluie");
+    trame(b.x + b.w - lt - 26, b.y + 2, 16, aL, 3);
+    canvas.drawRect(b.x + b.w - lt - 26, b.y + 2, 16, aL, NOIR);
+    texte(b.x + b.w - lt, b.y + 2 + aL, "pluie");
+  }
+}
+
+// Trace d'un circuit (points 0..999, dans le sens de la course) dans le rectangle donne
+void dessinerCircuit(JsonVariant tr, int x, int y, int w, int h) {
+  JsonArray p = tr["p"];
+  int n = p.size() / 2;
+  if (n < 3) return;
+  float l = tr["l"] | 999, ht = tr["h"] | 999;
+  float e = max(4.0f, min(w, h) / 40.0f);
+  float k = min((w - 3 * e) / l, (h - 3 * e) / ht);
+  float ox = x + (w - l * k) / 2, oy = y + (h - ht * k) / 2;
+  auto PX = [&](int i) { return ox + p[2 * (i % n)].as<int>() * k; };
+  auto PY = [&](int i) { return oy + p[2 * (i % n) + 1].as<int>() * k; };
+  for (int i = 0; i < n; i++) trait(PX(i), PY(i), PX(i + 1), PY(i + 1), e);
+  // Ligne de depart : barre en travers de la piste, et fleche du sens de course
+  float dx = PX(1) - PX(0), dy = PY(1) - PY(0), d = sqrtf(dx * dx + dy * dy);
+  if (d < 1) return;
+  dx /= d; dy /= d;
+  float sx = PX(0), sy = PY(0);
+  trait(sx - dy * e * 2.2f, sy + dx * e * 2.2f, sx + dy * e * 2.2f, sy - dx * e * 2.2f, e * 0.9f);
+  float ax = sx + dx * e * 4 - dy * e * 3.2f, ay = sy + dy * e * 4 + dx * e * 3.2f;     // a cote de la piste
+  float s = e * 1.6f;
+  canvas.fillTriangle(ax + dx * s, ay + dy * s, ax - dx * s * 0.6f - dy * s * 0.8f, ay - dy * s * 0.6f + dx * s * 0.8f,
+                      ax - dx * s * 0.6f + dy * s * 0.8f, ay - dy * s * 0.6f - dx * s * 0.8f, NOIR);
+}
+
+// Prochain Grand Prix de F1 : trace du circuit, compte a rebours, horaires des seances
+void widgetF1(JsonVariant f, Boite b) {
+  if (f.isNull()) return;
+  policeT(20, false);
+  if (f["erreur"].is<const char*>()) { texteTronque(b.x, b.y + asc() + 6, f["erreur"].as<const char*>(), b.w); return; }
+  JsonArray S = f["sessions"];
+  int ns = S.size();
+  // Hauteur des textes
+  policeT(14, false); int aP = asc();
+  policeT(17, false); int aS = asc();
+  int ligneS = aS + max(8, aS / 2);
+  // Disposition : trace a gauche si le bloc est large, sinon au-dessus
+  bool cote = b.w >= b.h * 1.35f;
+  Boite txt = b, tr = b;
+  if (cote) { tr.w = min(b.h, b.w * 45 / 100); txt.x = b.x + tr.w + 16; txt.w = b.w - tr.w - 16; }
+  else {
+    int hTexte = aP * 3 + 40 + ns * ligneS;            // titre, circuit, compte a rebours, seances
+    tr.h = max(b.h * 35 / 100, b.h - hTexte);
+    txt.y = b.y + tr.h + 12; txt.h = b.h - tr.h - 12;
+  }
+  if (!f["trace"].isNull() && tr.h >= 40 && tr.w >= 40) dessinerCircuit(f["trace"], tr.x, tr.y, tr.w, tr.h);
+  else if (cote) { txt = b; }                       // pas de trace : tout le bloc pour le texte
+  if (cote) {                                       // texte centre en hauteur a cote du trace
+    const char* g0 = f["gp"] | "";
+    const int tl[] = {30, 25, 20, 17, 14};
+    for (int i = 0; i < 5; i++) { policeT(tl[i], true); if (largeurTexte(g0) <= txt.w) break; }
+    int aT = asc();
+    policeT(20, true); int aQ = asc();
+    int hTexte = aT + aP + 10 + aQ + 20 + ns * ligneS;
+    if (hTexte < txt.h) { int dec = (txt.h - hTexte) / 2; txt.y += dec; txt.h -= dec; }
+  }
+  // Titre : le plus grand qui tient
+  const char* gp = f["gp"] | "";
+  const int tailles[] = {30, 25, 20, 17, 14};
+  for (int i = 0; i < 5; i++) { policeT(tailles[i], true); if (largeurTexte(gp) <= txt.w) break; }
+  int y = txt.y + asc();
+  texteTronque(txt.x, y, gp, txt.w);
+  char t[96];
+  policeT(14, false);
+  int m = f["manche"] | 0;
+  if (m) snprintf(t, sizeof t, "Manche %d - %s", m, (const char*)(f["circuit"] | ""));
+  else snprintf(t, sizeof t, "%s", (const char*)(f["circuit"] | ""));
+  y += aP + 10;
+  if (y <= txt.y + txt.h) texteTronque(txt.x, y, t, txt.w);
+  policeT(20, true);
+  y += asc() + 12;
+  if (y <= txt.y + txt.h) texte(txt.x, y, f["quand"] | "");
+  y += 8;
+  // Seances : on garde les prochaines si la place manque
+  int place = (txt.y + txt.h - y) / ligneS;
+  int premier = 0;
+  if (place < ns) { premier = ns - max(0, place); for (int i = 0; i < ns && premier > 0; i++) if (!(S[i]["f"] | 0)) { premier = min(premier, i); break; } }
+  policeT(17, true);  int lJ = largeurTexte("Mer 88") + 12;
+  policeT(17, false); int lH = largeurTexte("88h88") + 14;
+  for (int i = premier; i < ns && i - premier < place; i++) {
+    JsonObject o = S[i];
+    y += ligneS;
+    bool fini = (o["f"] | 0) == 1, course = !strcmp(o["n"] | "", "Course");
+    policeT(17, course);
+    texte(txt.x, y, o["j"] | "");
+    texte(txt.x + lJ, y, o["h"] | "");
+    texteTronque(txt.x + lJ + lH, y, o["n"] | "", txt.w - lJ - lH);
+    if (fini) canvas.fillRect(txt.x, y - aS / 2 - 1, min(txt.w, lJ + lH + (int)largeurTexte(o["n"] | "")), 2, NOIR);   // barre
+  }
+}
+
 void dessinerTableau(JsonVariant e, float vBat) {
   canvas.fillScreen(BLANC);
   JsonArray dispo = e["disposition"];
@@ -565,6 +776,11 @@ void dessinerTableau(JsonVariant e, float vBat) {
     }
     else if (!strcmp(id, "agenda")) widgetAgenda(e["agenda"], b);
     else if (!strcmp(id, "bus")) widgetBus(e["bus"], b);
+    else if (!strcmp(id, "f1")) widgetF1(e["f1"], b);
+    else if (!strcmp(id, "courbe")) {
+      if (meteoKO || m["courbe"].isNull()) { policeT(20, false); texteTronque(b.x, b.y + asc() + 6, "Météo indisponible", b.w); }
+      else widgetCourbe(m["courbe"], b);
+    }
   }
   st.e = 1.0f; st.f = 0;
 }

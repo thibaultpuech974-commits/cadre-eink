@@ -135,6 +135,18 @@ Les horaires théoriques sont corrigés par le **temps réel** quand il est disp
 
 ---
 
+## 7. Graphique de température et Grand Prix de F1
+
+Deux blocs à ajouter dans **Disposition** :
+
+- **Graphique de température** : la courbe heure par heure sur les 12, 24, 36 ou 48 prochaines heures (réglage dans **Météo**). Les barres hachurées montrent le risque de pluie, le fond grisé la nuit, et le minimum et le maximum sont indiqués. Le nom du jour s'affiche à minuit. Taille conseillée : au moins 6 × 3 cases.
+- **Grand Prix de F1** : le tracé du circuit du prochain Grand Prix (la barre marque la ligne de départ, la flèche le sens de course), le compte à rebours (« Dans 4 jours », « Ce week-end ») et les horaires des séances à l'heure française. Les séances terminées sont barrées. Le GP reste affiché jusqu'à 3 h après le départ de la course, puis le suivant prend sa place. Dans la section **Grand Prix de F1**, tu peux choisir de n'afficher le bloc que la semaine de la course.
+
+Le calendrier vient de l'API libre Jolpica (ex-Ergast). Les tracés viennent du projet libre [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits) (licence MIT) et sont intégrés au serveur (`serveur/circuits.js`). Pour les mettre à jour quand un nouveau circuit arrive :
+`git clone --depth 1 https://github.com/bacinger/f1-circuits /tmp/f1c && python3 outils/circuits.py /tmp/f1c`
+
+---
+
 ## Fonctionnement et autonomie
 
 - Le cadre se réveille selon l'intervalle choisi dans l'interface (10 min par défaut), se connecte quelques secondes, puis se rendort. Il retient les réglages de la connexion Wi-Fi précédente pour se reconnecter en 1 s environ.
