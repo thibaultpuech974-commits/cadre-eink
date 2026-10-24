@@ -1,0 +1,134 @@
+# Cadre e-ink : guide d'installation
+
+Le projet a trois parties :
+
+| Partie | Fichier | Rôle |
+|---|---|---|
+| Serveur web | `worker.js` | Interface web, météo, agenda, photo, pochette, aperçu |
+| Carte ESP32 | `cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
+| Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
+
+Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou la retirer.
+
+---
+
+## 1. Mettre le serveur en ligne (Cloudflare, gratuit)
+
+1. Crée un compte gratuit sur **dash.cloudflare.com**.
+2. Menu **Workers & Pages** → **Créer** → **Créer un Worker**. Nomme-le `cadre`, puis **Déployer**.
+3. Clique sur **Modifier le code**. Efface tout, colle le contenu de `worker.js`, puis **Déployer**.
+4. Crée l'espace de stockage : menu **Stockage et bases de données** → **KV** → **Créer** → nom `cadre-donnees`.
+5. Retourne dans ton Worker → **Paramètres** → **Liaisons** → **Ajouter** → **Espace de noms KV** :
+   - Nom de la variable : `CADRE` (en majuscules, exactement)
+   - Espace de noms KV : `cadre-donnees`
+6. Toujours dans **Paramètres** → **Variables et secrets** → **Ajouter** :
+   - Type : **Secret**
+   - Nom : `CLE`
+   - Valeur : un mot de passe de ton choix (il protège ton cadre)
+7. Ton adresse est affichée en haut de la page du Worker, du type
+   `https://cadre.ton-nom.workers.dev`. Ouvre-la et connecte-toi avec ton mot de passe.
+
+L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager → Sur l'écran d'accueil** la transforme en « app ».
+
+---
+
+## 2. Programmer la carte
+
+1. Dans l'IDE Arduino, installe les bibliothèques **GxEPD2**, **U8g2_for_Adafruit_GFX**, **ArduinoJson** (Benoit Blanchon) et **JPEGDEC** (bitbank2).
+2. **Outils → PSRAM → OPI PSRAM** : indispensable pour les pochettes.
+3. En haut de `cadre_eink.ino`, remplis :
+   - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
+   - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
+   - `CLE` : le même mot de passe que dans Cloudflare
+   - `ECRAN_PRESENT` : mets **0** tant que tu n'as pas la nouvelle dalle. La carte dessine quand même et envoie l'image à l'aperçu web.
+4. Téléverse, puis ouvre le moniteur série (115200 bauds) pour suivre le premier réveil.
+5. Quelques secondes plus tard, l'aperçu apparaît dans l'interface web.
+
+**Pour téléverser à nouveau** : la carte dort presque tout le temps. Deux solutions :
+- active le **Mode développement** dans la section **Réveil du cadre** de la page web. La carte ne se met plus en veille, vérifie toutes les 15 à 60 s, et le téléversement marche normalement. À utiliser branché en USB, et à désactiver une fois fini. Il prend effet au prochain réveil, ou tout de suite si tu appuies sur le bouton **R** de la carte ;
+- ou débranche-la, maintiens le bouton **B (BOOT)** en la rebranchant, puis téléverse.
+
+---
+
+## 3. Brancher l'agenda iCloud
+
+1. Sur l'iPhone, ouvre **Calendrier** → **Calendriers** (en bas).
+2. Touche le **(i)** à côté du calendrier voulu.
+3. Active **Calendrier public**, puis **Partager le lien…** → **Copier**.
+4. Colle le lien (il commence par `webcal://`) dans la section **Agenda** de l'interface web, puis **Enregistrer**. Tu peux mettre plusieurs calendriers, un par ligne.
+
+À savoir : un calendrier public est consultable par toute personne qui a le lien. Le lien est long et introuvable par hasard, mais ne le partage pas.
+
+**Calendriers auxquels tu es abonné** (F1, sport, vacances scolaires…) : dans Réglages → Apps → Calendrier → Comptes → Calendriers avec abonnement, copie le champ **Serveur** et ajoute-le sur sa propre ligne. S'il ne commence pas par `webcal://` ou `https://`, ajoute `https://` devant. Les titres de Formule 1 sont réécrits automatiquement avec le nom du GP en premier, sans le sponsor : « GP des Pays-Bas - Qualifications ».
+
+**Anniversaires** : le calendrier « Anniversaires » de l'iPhone (issu des contacts) ne peut pas être partagé. Saisis-les plutôt dans le champ **Anniversaires** de la section Agenda, un par ligne : `Léa 14/03/2005` ou `Mamie 02/11`. Si tu donnes l'année, le cadre affiche l'âge, par exemple « Anniversaire de Léa (21 ans) ». Ils apparaissent dans l'agenda dans les 14 jours qui précèdent, même sans calendrier iCloud.
+
+---
+
+## 4. Raccourci iPhone pour la pochette Apple Music
+
+Dans l'app **Raccourcis**, crée un nouveau raccourci « Pochette sur le cadre » avec ces actions, dans l'ordre :
+
+1. **Obtenir le morceau en cours**
+2. **Obtenir les détails des médias** → **Illustration** (de « Morceau en cours »)
+3. **Redimensionner l'image** → largeur **640**, hauteur **640**
+4. **Convertir l'image** → **JPEG**
+5. **Obtenir les détails des médias** → **Titre** (de « Morceau en cours »), puis **Encoder en URL**
+6. **Obtenir les détails des médias** → **Artiste**, puis **Encoder en URL**
+7. **Obtenir les détails des médias** → **Titre de l'album**, puis **Encoder en URL**
+8. **Texte** : colle l'adresse affichée dans la section « Pochette » de l'interface web, puis ajoute
+   `&titre=` [résultat de l'étape 5] `&artiste=` [étape 6] `&album=` [étape 7]
+   (les crochets = variables à insérer en touchant le champ)
+9. **Obtenir le contenu de l'URL** :
+   - URL : le **Texte** de l'étape 8
+   - Méthode : **POST**
+   - Corps de la requête : **Fichier** → l'**image convertie** de l'étape 4
+
+Lance-le pendant que la musique joue : le cadre passe en mode Pochette à son prochain réveil.
+
+Limite d'iOS : un raccourci ne peut pas se déclencher tout seul à chaque changement de morceau. Lance-le à la main, via Siri (« Pochette sur le cadre »), un widget ou le bouton Action. Tu peux aussi créer une automatisation **Quand l'app Musique est ouverte**.
+
+---
+
+## 5. Disposition du tableau de bord
+
+Dans la section **Disposition** de l'interface :
+- fais glisser un bloc pour le déplacer (au doigt ou à la souris) ;
+- tire son **coin en bas à droite** pour l'agrandir ou le réduire ;
+- coche ou décoche un bloc pour l'ajouter ou le retirer ;
+- **Traits de séparation** dessine des lignes entre les blocs.
+
+L'écran est découpé en une grille de 12 × 8 cases, et les blocs ne peuvent pas se chevaucher. Le contenu de chaque bloc s'adapte à sa taille : polices, taille des icônes, nombre de colonnes d'heures ou de jours, nombre de lignes d'agenda. Clique sur **Enregistrer**, et le cadre applique la disposition à son prochain réveil.
+
+**Orientation** : les boutons **Paysage**, **Portrait** et **Portrait inversé** choisissent le sens du cadre. Les deux portraits correspondent aux deux façons d'accrocher le cadre en hauteur : prends celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition (grille de 8 × 12 cases en portrait). Une photo est préparée dans l'orientation active au moment de l'envoi : renvoie-la si tu changes d'orientation.
+
+**Texte d'un bloc** : touche un bloc sans le déplacer, puis choisis sa **taille** (Petite, Normale, Grande, Très grande) et sa **police** (Moderne, Helvetica, Classique, Machine à écrire). Helvetica, Classique et Machine à écrire n'existent qu'en tailles moyennes : pour les très grands textes, Moderne reste plus grand.
+
+Le curseur **Contour de l'aperçu** ne règle que l'épaisseur du cadre noir dessiné autour de l'aperçu sur la page web. Il ne change rien sur l'écran.
+
+---
+
+## 6. Prochains bus (Tango)
+
+1. Dans la section **Prochains bus**, clique sur **Choisir mes arrêts**. La page télécharge les horaires officiels de Tango (données ouvertes de Nîmes Métropole), ce qui prend quelques secondes.
+2. Tape le nom de ton arrêt, choisis-le (2 arrêts au maximum), puis **Utiliser ces arrêts**.
+3. Coche les lignes et les sens à afficher, le nombre de passages et l'horizon. Ajoute un ou plusieurs **créneaux**, par exemple « Ven, de 18:00 à 20:00 », et choisis la fréquence de mise à jour pendant ces créneaux (3 min par défaut). Clique ensuite sur **Enregistrer**.
+4. **Voir les prochains passages maintenant** affiche tout de suite ce que le cadre recevra.
+5. Dans **Disposition**, coche le bloc **Prochains bus** et place-le où tu veux.
+
+Les horaires théoriques sont corrigés par le **temps réel** quand il est disponible. Sur l'écran, « à 18h42 » est une heure en temps réel, et « vers 18h42 » une heure théorique. Un bus annulé s'affiche « supprimé ». Les horaires Tango changent quelques fois par an (rentrée, vacances) : refais alors l'étape 1 pour recharger les arrêts.
+
+**Affichage et réveil dynamiques**
+- Dans **Disposition**, le bouton **Pendant les créneaux bus** permet de préparer une deuxième disposition, utilisée seulement pendant les créneaux (par exemple, les bus en grand à la place de l'agenda). Si tu la laisses vide, la disposition normale est utilisée.
+- En dehors des créneaux, le bloc bus disparaît toujours.
+- Pendant un créneau, le cadre se met à jour souvent (3 à 10 min, au choix). En dehors, il reprend son rythme normal, réglé dans « Réveil du cadre ». Il se réveille aussi tout seul au début du créneau suivant, pour que les bus apparaissent à l'heure.
+
+---
+
+## Fonctionnement et autonomie
+
+- Le cadre se réveille selon l'intervalle choisi dans l'interface (10 min par défaut), se connecte quelques secondes, puis se rendort.
+- L'écran ne se rafraîchit **que si le contenu a changé** (environ une fois par heure pour la météo), et au moins une fois par jour pour le préserver.
+- Les changements faits dans l'interface s'appliquent au prochain réveil.
+- **Avant une longue absence** : bouton **Écran blanc**, attends que l'aperçu devienne blanc, puis débranche la batterie. Au retour, rebranche-la et choisis un mode dans l'interface.
+- L'offre gratuite de Cloudflare limite le nombre d'écritures par jour : garde un intervalle d'au moins 5 minutes.
