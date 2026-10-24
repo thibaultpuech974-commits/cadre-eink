@@ -1039,7 +1039,16 @@ body{margin:0;background:var(--fond);color:var(--texte);font:16px/1.5 -apple-sys
 main{max-width:760px;margin:0 auto;padding:16px}
 h1{font-size:22px;font-weight:600;margin:8px 0 16px}
 h2{font-size:17px;font-weight:600;margin:0 0 12px}
-section{background:var(--carte);border:1px solid var(--trait);border-radius:14px;padding:16px;margin-bottom:14px}
+section,details.menu{background:var(--carte);border:1px solid var(--trait);border-radius:14px;padding:16px;margin-bottom:14px}
+details.menu{padding:0 16px}
+details.menu>summary{list-style:none;cursor:pointer;font-size:17px;font-weight:600;padding:16px;margin:0 -16px;display:flex;justify-content:space-between;align-items:center;-webkit-user-select:none;user-select:none}
+details.menu>summary::-webkit-details-marker{display:none}
+details.menu>summary::after{content:'';width:9px;height:9px;border-right:2px solid var(--doux);border-bottom:2px solid var(--doux);transform:rotate(45deg);transition:transform .2s;margin:0 4px 4px 12px}
+details.menu[open]>summary::after{transform:rotate(-135deg);margin-bottom:-4px}
+details.menu[open]>summary{padding-bottom:8px}
+details.menu[open]{padding-bottom:16px}
+.outilsMenus{display:flex;justify-content:flex-end;gap:14px;margin:4px 2px 8px;font-size:14px}
+.outilsMenus a{color:var(--doux)}
 .ecran{width:100%;aspect-ratio:960/680;background:#fff;border:var(--bord,10px) solid #2a2927;border-radius:6px;display:block;image-rendering:auto;box-sizing:content-box;max-width:calc(100% - 2 * var(--bord,10px))}
 .ecran.editeur{border-width:8px;max-width:calc(100% - 16px)}
 .editeur{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden;margin-top:6px}
@@ -1062,10 +1071,11 @@ button.actif{background:var(--accent);color:var(--fond);border-color:var(--accen
 button.principal{background:var(--accent);color:var(--fond);border-color:var(--accent);width:100%;margin-top:12px}
 button.danger{color:var(--alerte)}
 label{display:flex;align-items:center;gap:8px;margin:6px 0}
-input[type=text],input[type=password],textarea,select{font:inherit;width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--trait);background:var(--fond);color:var(--texte)}
+input[type=text],input[type=password],input[type=time],textarea,select{font:inherit;width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--trait);background:var(--fond);color:var(--texte)}
 textarea{min-height:80px;font-size:13px}
 .ligne{display:flex;gap:8px;align-items:center}
-.ligne>*{flex:1}
+.ligne>*{flex:1;min-width:0}
+.ligne>button[style*="flex:0"]{flex:none!important}
 .aide{color:var(--doux);font-size:14px;margin:6px 0 0}
 .resultats div{padding:6px 8px;border-radius:8px;cursor:pointer}
 .resultats div:hover{background:var(--fond)}
@@ -1107,8 +1117,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide" id="aideMode"></p>
 </section>
 
-<section>
-  <h2>Disposition du tableau de bord</h2>
+<div class="outilsMenus"><a href="#" onclick="toutesLesSections(true);return false">Tout ouvrir</a><a href="#" onclick="toutesLesSections(false);return false">Tout fermer</a></div>
+
+<details class="menu" id="menu-dispo">
+  <summary>Disposition du tableau de bord</summary>
   <p class="aide">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
   <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
     <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
@@ -1141,10 +1153,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     <button class="principal" style="margin-top:0" onclick="enregistrerDispo()">Enregistrer</button>
   </div>
   <div class="msg" id="msgDispo"></div>
-</section>
+</details>
 
-<section>
-  <h2>Météo</h2>
+<details class="menu" id="menu-meteo">
+  <summary>Météo</summary>
   <div class="ligne"><input type="text" id="ville" placeholder="Rechercher une ville"><button style="flex:0" onclick="chercherVille()">Chercher</button></div>
   <div class="resultats" id="resultatsVille"></div>
   <p class="aide" id="villeChoisie"></p>
@@ -1160,10 +1172,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Le nombre de colonnes réellement affichées dépend de la largeur du bloc.</p>
   <button class="principal" onclick="enregistrerMeteo()">Enregistrer la météo</button>
   <div class="msg" id="msgMeteo"></div>
-</section>
+</details>
 
-<section>
-  <h2>Agenda</h2>
+<details class="menu" id="menu-agenda">
+  <summary>Agenda</summary>
   <p class="aide">Liens de calendriers publics iCloud, un par ligne (ils commencent par webcal://).</p>
   <textarea id="aUrls" placeholder="webcal://p00-caldav.icloud.com/published/2/..."></textarea>
   <p class="aide">Anniversaires, un par ligne : prénom puis date (l'année est facultative, elle sert à afficher l'âge).</p>
@@ -1175,10 +1187,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <button style="width:100%;margin-top:8px" onclick="tester()">Voir les données envoyées au cadre</button>
   <div class="msg" id="msgAgenda"></div>
   <pre id="donnees" class="cache"></pre>
-</section>
+</details>
 
-<section>
-  <h2>Prochains bus (Tango)</h2>
+<details class="menu" id="menu-bus">
+  <summary>Prochains bus (Tango)</summary>
   <p class="aide" id="busEtat"></p>
   <button style="width:100%" onclick="chargerGTFS()">Choisir mes arrêts (charge les horaires Tango)</button>
   <div id="busChoix" class="cache" style="margin-top:8px">
@@ -1190,7 +1202,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   </div>
   <p class="aide" style="margin-top:12px">Lignes et sens affichés :</p>
   <div id="busLignes" class="puces"></div>
-  <label>Afficher
+  <label style="flex-wrap:wrap">Afficher
     <select id="busNb" style="width:auto"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option></select>
     passages, sur les
     <select id="busHorizon" style="width:auto"><option>30</option><option>60</option><option>90</option><option>120</option><option>180</option></select>
@@ -1212,10 +1224,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <button style="width:100%;margin-top:8px" onclick="testerBus()">Voir les prochains passages maintenant</button>
   <div class="msg" id="msgBus"></div>
   <pre id="busTest" class="cache"></pre>
-</section>
+</details>
 
-<section>
-  <h2>Photo plein écran</h2>
+<details class="menu" id="menu-photo">
+  <summary>Photo plein écran</summary>
   <input type="file" id="fichier" accept="image/*">
   <div class="ligne" style="margin-top:8px">
     <label><input type="radio" name="cadrage" value="remplir" checked> Remplir</label>
@@ -1226,39 +1238,39 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <canvas class="photo" id="photoTramee" width="960" height="680"></canvas>
   <button class="principal" onclick="envoyerPhoto()">Envoyer au cadre</button>
   <div class="msg" id="msgPhoto"></div>
-</section>
+</details>
 
-<section>
-  <h2>Pochette Apple Music</h2>
+<details class="menu" id="menu-pochette">
+  <summary>Pochette Apple Music</summary>
   <p class="aide" id="pochetteActuelle">Aucune pochette reçue pour l'instant.</p>
   <p class="aide">Adresse à mettre dans le raccourci iPhone :</p>
   <p><code id="urlPochette"></code></p>
-</section>
+</details>
 
-<section>
-  <h2>Réveil du cadre</h2>
+<details class="menu" id="menu-reveil">
+  <summary>Réveil du cadre</summary>
   <label>En temps normal, le cadre vérifie s'il y a du nouveau toutes les
     <select id="reveil" style="width:auto"><option>5</option><option>10</option><option>15</option><option>30</option><option>60</option></select> min</label>
   <p class="aide">Plus c'est court, plus le cadre réagit vite, mais plus la batterie se vide.</p>
   <label style="margin-top:12px"><input type="checkbox" id="dev"> Mode développement : la carte ne se met plus en veille et vérifie toutes les
     <select id="devSecondes" style="width:auto"><option>15</option><option>30</option><option>60</option></select> s</label>
   <p class="aide">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
-  <label style="margin-top:12px"><input type="checkbox" id="nuitActif"> Mode nuit de
-    <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto">,
-    réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
+  <label style="margin-top:12px"><input type="checkbox" id="nuitActif"> Mode nuit</label>
+  <label>De <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto"></label>
+  <label>Réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
   <p class="aide">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
   <button class="principal" onclick="enregistrerReveil()">Enregistrer</button>
   <div class="msg" id="msgReveil"></div>
-</section>
+</details>
 
-<section>
-  <h2>Programme de la carte</h2>
+<details class="menu" id="menu-programme">
+  <summary>Programme de la carte</summary>
   <p class="aide" id="fwInfo">Version installée : inconnue.</p>
   <input type="file" id="fichierFw" accept=".bin">
   <button class="principal" onclick="envoyerFirmware()">Envoyer le programme</button>
   <div class="msg" id="msgFw"></div>
   <p class="aide">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
-</section>
+</details>
 
 <p class="aide" style="text-align:center"><a href="#" onclick="deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
 </div>
@@ -1759,7 +1771,7 @@ function ajouterCreneau(c) {
   });
   var heures = document.createElement('div');
   heures.className = 'ligne';
-  heures.innerHTML = '<label>de <input type="time" class="cDebut" style="width:auto"></label><label>à <input type="time" class="cFin" style="width:auto"></label><button style="flex:0;padding:8px 12px" title="Supprimer ce créneau" aria-label="Supprimer ce créneau">✕</button>';
+  heures.innerHTML = '<label>de <input type="time" class="cDebut" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><label>à <input type="time" class="cFin" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><button style="flex:0;padding:8px 12px" title="Supprimer ce créneau" aria-label="Supprimer ce créneau">✕</button>';
   heures.querySelector('.cDebut').value = c.debut;
   heures.querySelector('.cFin').value = c.fin;
   heures.querySelector('button').onclick = function () { bloc.remove(); };
@@ -2070,6 +2082,20 @@ function envoyerFirmware() {
     return rafraichir();
   }).catch(function (e) { message('msgFw', 'Erreur : ' + e.message); });
 }
+
+// --- Menus deroulants : on retient ceux qui sont ouverts (sur cet appareil) ---
+var menus = document.querySelectorAll('details.menu');
+var menusOuverts = [];
+try { menusOuverts = JSON.parse(localStorage.getItem('cadre-menus') || '[]'); } catch (e) {}
+for (var i = 0; i < menus.length; i++) {
+  if (menusOuverts.indexOf(menus[i].id) >= 0) menus[i].open = true;
+  menus[i].addEventListener('toggle', function () {
+    var ouverts = [];
+    for (var k = 0; k < menus.length; k++) if (menus[k].open) ouverts.push(menus[k].id);
+    try { localStorage.setItem('cadre-menus', JSON.stringify(ouverts)); } catch (e) {}
+  });
+}
+function toutesLesSections(ouvrir) { for (var k = 0; k < menus.length; k++) menus[k].open = ouvrir; }
 
 demarrer();
 setInterval(function () { if (config) rafraichir().catch(function () {}); }, 60000);
