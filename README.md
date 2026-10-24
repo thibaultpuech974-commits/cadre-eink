@@ -28,6 +28,8 @@ Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou l
 7. Ton adresse est affichée en haut de la page du Worker, du type
    `https://cadre.ton-nom.workers.dev`. Ouvre-la et connecte-toi avec ton mot de passe.
 
+**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur : plus besoin de copier-coller `worker.js`. Le secret `CLE` reste dans Cloudflare.
+
 L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager → Sur l'écran d'accueil** la transforme en « app ».
 
 ---
