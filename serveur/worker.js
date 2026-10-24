@@ -141,6 +141,9 @@ export default {
       if (chemin === '/api/apercu' && m === 'GET') return await routeLireApercu(env);
       if (chemin === '/api/gtfs' && m === 'GET') return await routeGTFS();
       if (chemin === '/api/bus-index' && m === 'POST') return await routeIndexBus(req, env);
+      if (chemin === '/api/firmware' && m === 'POST') return await routeEnvoyerFirmware(req, url, env);
+      if (chemin === '/api/firmware' && m === 'DELETE') return await routeRetirerFirmware(env);
+      if (chemin === '/api/firmware.bin' && m === 'GET') return await routeBinaire(env, 'firmware', 'application/octet-stream');
       if (chemin === '/api/bus-test' && m === 'GET') return json(await prochainsBus((await lireConfig(env)).bus, Date.now(), env, true));
       return texte('Route inconnue', 404);
     } catch (e) {
@@ -266,6 +269,10 @@ async function routeEtat(url, env) {
   // La signature change seulement quand le contenu a afficher change :
   // le cadre ne rafraichit l'ecran que dans ce cas.
   etat.sig = await empreinte(cfg.mode + JSON.stringify(contenu));
+  // Mise a jour par Wi-Fi : proposee seulement si le programme envoye est plus recent que celui de la carte
+  // (versions "AAAAMMJJ-hhmmss" : date de compilation)
+  const fwCarte = VERSION_FW.test(url.searchParams.get('fw') || '') ? url.searchParams.get('fw') : null;
+  if (cfg.firmware && fwCarte && cfg.firmware.version > fwCarte) etat.fw = cfg.firmware.version;
   const w = mural(maintenant);
   etat.maj = deux(w.hh) + ':' + deux(w.mi);
 
@@ -275,7 +282,7 @@ async function routeEtat(url, env) {
     const bat = parseFloat(url.searchParams.get('bat'));
     const ancien = JSON.parse((await env.CADRE.get('statut')) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil,
-      fw: url.searchParams.get('fw') || (ancien && ancien.fw) || null };
+      fw: fwCarte || (ancien && ancien.fw) || null };
     const aEcrire = !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
     if (aEcrire) {
@@ -393,6 +400,29 @@ async function routeBinaire(env, cle, type) {
   const donnees = await env.CADRE.get(cle, 'arrayBuffer');
   if (!donnees) return texte('Rien a envoyer', 404);
   return new Response(donnees, { headers: { 'content-type': type, 'cache-control': 'no-store' } });
+}
+
+// --- Programme de la carte (mise a jour par Wi-Fi) ---
+const VERSION_FW = /^\d{8}-\d{6}$/;
+async function routeEnvoyerFirmware(req, url, env) {
+  const version = url.searchParams.get('v') || '';
+  if (!VERSION_FW.test(version)) return texte('Version du programme manquante', 400);
+  const donnees = await req.arrayBuffer();
+  if (donnees.byteLength < 100000 || donnees.byteLength > 8 * 1048576 || new Uint8Array(donnees)[0] !== 0xE9) {
+    return texte("Ce fichier n'est pas un programme ESP32", 400);
+  }
+  await env.CADRE.put('firmware', donnees);
+  const cfg = await lireConfig(env);
+  cfg.firmware = { version, taille: donnees.byteLength, t: Date.now(), nom: (url.searchParams.get('nom') || '').slice(0, 80) };
+  await ecrireConfig(env, cfg);
+  return json({ firmware: cfg.firmware });
+}
+async function routeRetirerFirmware(env) {
+  const cfg = await lireConfig(env);
+  delete cfg.firmware;
+  await ecrireConfig(env, cfg);
+  await env.CADRE.delete('firmware');
+  return json({ ok: true });
 }
 
 async function routeEnvoyerApercu(req, url, env) {
@@ -1212,13 +1242,22 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Plus c'est court, plus le cadre réagit vite, mais plus la batterie se vide.</p>
   <label style="margin-top:12px"><input type="checkbox" id="dev"> Mode développement : la carte ne se met plus en veille et vérifie toutes les
     <select id="devSecondes" style="width:auto"><option>15</option><option>30</option><option>60</option></select> s</label>
+  <p class="aide">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
   <label style="margin-top:12px"><input type="checkbox" id="nuitActif"> Mode nuit de
     <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto">,
     réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
   <p class="aide">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
-  <p class="aide">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
   <button class="principal" onclick="enregistrerReveil()">Enregistrer</button>
   <div class="msg" id="msgReveil"></div>
+</section>
+
+<section>
+  <h2>Programme de la carte</h2>
+  <p class="aide" id="fwInfo">Version installée : inconnue.</p>
+  <input type="file" id="fichierFw" accept=".bin">
+  <button class="principal" onclick="envoyerFirmware()">Envoyer le programme</button>
+  <div class="msg" id="msgFw"></div>
+  <p class="aide">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
 </section>
 
 <p class="aide" style="text-align:center"><a href="#" onclick="deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
@@ -1798,6 +1837,7 @@ function afficherStatut(s, maintenant) {
     if (prochain > 0) t += ' Prochain réveil dans ' + Math.max(1, Math.round(prochain / 60000)) + ' min environ.';
   }
   $('statut').textContent = t;
+  afficherFirmware(s);
   var boutons = document.querySelectorAll('[data-mode]');
   for (var i = 0; i < boutons.length; i++) boutons[i].classList.toggle('actif', boutons[i].getAttribute('data-mode') === config.mode);
   var aide = '';
@@ -1982,6 +2022,53 @@ function envoyerPhoto() {
   api('/api/photo?r=' + rotationPhoto, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: logVersPhys(bitsPhoto, rotationPhoto) })
     .then(function () { message('msgPhoto', 'Photo envoyée : elle s\\'affichera au prochain réveil du cadre.'); return rafraichir(); })
     .catch(function (e) { message('msgPhoto', 'Erreur : ' + e.message); });
+}
+
+// --- Programme de la carte ---
+function texteVersion(v) { return v.slice(6, 8) + '/' + v.slice(4, 6) + '/' + v.slice(0, 4) + ' à ' + v.slice(9, 11) + 'h' + v.slice(11, 13); }
+function afficherFirmware(s) {
+  var inst = s && s.fw, f = config.firmware;
+  var t = 'Version installée sur la carte : ' + (inst ? 'compilée le ' + texteVersion(inst) : 'inconnue (ancien programme, ou pas encore connectée)') + '.';
+  if (f) {
+    t += ' Programme envoyé : compilé le ' + texteVersion(f.version) + ' (' + Math.round(f.taille / 1024) + ' Ko), ';
+    if (inst === f.version) t += 'installé.';
+    else if (inst && inst > f.version) t += 'plus ancien que celui de la carte : ignoré.';
+    else t += 'en attente du prochain réveil.';
+  }
+  $('fwInfo').textContent = t;
+}
+// Retrouve la date de compilation ecrite par le programme ("CADRE_FW:Oct 24 2026 14:03:22")
+function versionDans(o) {
+  var m = 'CADRE_FW:', d2 = function (n) { return (n < 10 ? '0' : '') + n; };
+  for (var i = 0; i + 29 < o.length; i++) {
+    if (o[i] !== 67) continue;
+    var k = 1; while (k < 9 && o[i + k] === m.charCodeAt(k)) k++;
+    if (k < 9) continue;
+    var s = ''; for (var j = 0; j < 20; j++) s += String.fromCharCode(o[i + 9 + j]);
+    var mois = 'JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(s.slice(0, 3)) / 3 + 1;
+    var jour = parseInt(s.slice(4, 6), 10), an = s.slice(7, 11);
+    if (mois < 1 || !jour) return null;
+    return an + d2(mois) + d2(jour) + '-' + s.slice(12, 14) + s.slice(15, 17) + s.slice(18, 20);
+  }
+  return null;
+}
+function envoyerFirmware() {
+  var f = $('fichierFw').files[0];
+  if (!f) { message('msgFw', "Choisis d'abord le fichier .bin."); return; }
+  if (/merged|bootloader|partitions/i.test(f.name)) { message('msgFw', 'Ce n\\'est pas le bon fichier : prends cadre_eink.ino.bin.'); return; }
+  var version;
+  f.arrayBuffer().then(function (buf) {
+    var o = new Uint8Array(buf);
+    if (o[0] !== 0xE9) throw new Error("ce n'est pas un programme ESP32");
+    version = versionDans(o);
+    if (!version) throw new Error('ce programme ne vient pas du cadre (version introuvable)');
+    $('msgFw').textContent = 'Envoi…';
+    return api('/api/firmware?v=' + version + '&nom=' + encodeURIComponent(f.name),
+      { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: buf });
+  }).then(function () {
+    message('msgFw', 'Programme du ' + texteVersion(version) + ' envoyé : la carte l\\'installera à son prochain réveil.');
+    return rafraichir();
+  }).catch(function (e) { message('msgFw', 'Erreur : ' + e.message); });
 }
 
 demarrer();

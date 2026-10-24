@@ -35,7 +35,7 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
 ## 2. Programmer la carte
 
 1. Dans l'IDE Arduino, installe les bibliothèques **GxEPD2**, **U8g2_for_Adafruit_GFX**, **ArduinoJson** (Benoit Blanchon) et **JPEGDEC** (bitbank2).
-2. **Outils → PSRAM → OPI PSRAM** : indispensable pour les pochettes.
+2. **Outils → PSRAM → OPI PSRAM** : indispensable pour les pochettes. Garde le **Partition Scheme** par défaut (il faut un schéma avec OTA pour la mise à jour par Wi-Fi, donc pas « Huge APP (no OTA) »).
 3. En haut de `cadre_eink.ino`, remplis :
    - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
@@ -47,6 +47,14 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
 **Pour téléverser à nouveau** : la carte dort presque tout le temps. Deux solutions :
 - active le **Mode développement** dans la section **Réveil du cadre** de la page web. La carte ne se met plus en veille, vérifie toutes les 15 à 60 s, et le téléversement marche normalement. À utiliser branché en USB, et à désactiver une fois fini. Il prend effet au prochain réveil, ou tout de suite si tu appuies sur le bouton **R** de la carte ;
 - ou débranche-la, maintiens le bouton **B (BOOT)** en la rebranchant, puis téléverse.
+
+**Mettre à jour la carte par Wi-Fi** (une fois ce programme installé par câble) :
+1. Dans l'IDE Arduino, **Croquis → Exporter les binaires compilés**.
+2. Dans le dossier du croquis, ouvre `build`, puis le sous-dossier de la carte : le fichier à prendre est `cadre_eink.ino.bin` (pas `merged`, `bootloader` ni `partitions`).
+3. Dans la page web, section **Programme de la carte**, choisis ce fichier puis **Envoyer le programme**.
+4. Au réveil suivant, la carte le télécharge (la petite LED orange s'allume environ 30 s), redémarre et redessine l'écran. La section affiche alors « installé ».
+
+La carte ne se met à jour que si sa batterie dépasse 3,6 V, et seulement vers un programme plus récent que le sien. Si un programme envoyé plante au démarrage, la carte ne peut plus se mettre à jour par Wi-Fi : il faut la reprogrammer par câble (bouton BOOT). Teste donc d'abord par câble les grosses modifications.
 
 ---
 
@@ -127,8 +135,9 @@ Les horaires théoriques sont corrigés par le **temps réel** quand il est disp
 
 ## Fonctionnement et autonomie
 
-- Le cadre se réveille selon l'intervalle choisi dans l'interface (10 min par défaut), se connecte quelques secondes, puis se rendort.
+- Le cadre se réveille selon l'intervalle choisi dans l'interface (10 min par défaut), se connecte quelques secondes, puis se rendort. Il retient les réglages de la connexion Wi-Fi précédente pour se reconnecter en 1 s environ.
+- **Mode nuit** (section Réveil du cadre) : pendant la plage choisie, par exemple de 23:00 à 07:00, le cadre ne se réveille que toutes les 30, 60 ou 120 min. Il se réveille tout seul à la fin de la nuit, et au début d'un créneau de bus.
 - L'écran ne se rafraîchit **que si le contenu a changé** (environ une fois par heure pour la météo), et au moins une fois par jour pour le préserver.
 - Les changements faits dans l'interface s'appliquent au prochain réveil.
 - **Avant une longue absence** : bouton **Écran blanc**, attends que l'aperçu devienne blanc, puis débranche la batterie. Au retour, rebranche-la et choisis un mode dans l'interface.
-- L'offre gratuite de Cloudflare limite le nombre d'écritures par jour : garde un intervalle d'au moins 5 minutes.
+- L'offre gratuite de Cloudflare limite le nombre d'écritures (environ 1 000 par jour). Le serveur n'enregistre l'état du cadre que toutes les 10 min, ou quand la batterie, le mode ou le programme change, ce qui laisse de la marge même en mode développement.

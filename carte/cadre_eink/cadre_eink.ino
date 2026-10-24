@@ -11,6 +11,8 @@
 //    GxEPD2, U8g2_for_Adafruit_GFX, ArduinoJson, JPEGDEC (bitbank2)
 //
 //  Reglage obligatoire dans l'IDE : Outils -> PSRAM -> "OPI PSRAM"
+//  Pour la mise a jour par Wi-Fi : Outils -> Partition Scheme -> un schema
+//  avec OTA (celui par defaut convient ; pas "Huge APP (no OTA)")
 // =====================================================================
 
 // ======================= A PERSONNALISER ==============================
@@ -25,6 +27,7 @@ const char* CLE         = "TON_MOT_DE_PASSE";                    // la meme que 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <HTTPUpdate.h>
 #include <GxEPD2_BW.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
@@ -693,6 +696,20 @@ void preparerDessin() {
 GxEPD2_BW<GxEPD2_1330_GDEM133T91, GxEPD2_1330_GDEM133T91::HEIGHT> display(
   GxEPD2_1330_GDEM133T91(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 
+// Version du programme = date de compilation. La page web la relit dans le fichier .bin
+// envoye, et la carte se met a jour si ce fichier est plus recent qu'elle.
+const char MARQUEUR_VERSION[] = "CADRE_FW:" __DATE__ " " __TIME__;
+char versionCarte[16];   // "AAAAMMJJ-hhmmss"
+void calculerVersion() {
+  const char* d = MARQUEUR_VERSION + 9;          // "Oct 24 2026 14:03:22"
+  const char* mois = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  char m3[4] = { d[0], d[1], d[2], 0 };
+  const char* p = strstr(mois, m3);
+  int m = p ? (p - mois) / 3 + 1 : 0;
+  snprintf(versionCarte, sizeof versionCarte, "%.4s%02d%02d-%c%c%c%c%c%c",
+           d + 7, m, atoi(d + 4), d[12], d[13], d[15], d[16], d[18], d[19]);
+}
+
 // Conserve pendant la veille profonde
 RTC_DATA_ATTR char     derniereSig[16] = "";
 RTC_DATA_ATTR uint32_t secondesDepuisAffichage = 0;
@@ -706,17 +723,89 @@ float lireBatterie() {
   return (somme / 16.0f) * 2.0f / 1000.0f;   // x2 : pont diviseur
 }
 
-bool connecterWifi() {
-  if (WiFi.status() == WL_CONNECTED) return true;   // deja connecte (mode developpement)
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_MDP);
+// Connexion rapide : on garde en memoire (pendant la veille) le canal, la borne et
+// l'adresse IP obtenus a la derniere connexion. Cela evite de scanner les canaux et
+// d'attendre la box (DHCP) : environ 1 s au lieu de 3 a 5 s, donc moins de batterie.
+// Toutes les 12 h (ou en cas d'echec), on refait une connexion normale.
+struct MemoWifi { uint32_t magie; uint8_t borne[6]; int32_t canal; uint32_t ip, passerelle, masque, dns; uint32_t age; };
+RTC_DATA_ATTR MemoWifi memoWifi = { 0 };
+const uint32_t MAGIE_WIFI = 0xCAD3E1A7;
+
+bool attendreWifi(uint32_t ms) {
   unsigned long debut = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - debut > 15000) { Serial.println("Wi-Fi : echec"); return false; }
-    delay(200);
+    if (millis() - debut > ms) return false;
+    delay(20);
   }
-  Serial.println("Wi-Fi : connecte");
   return true;
+}
+
+bool connecterWifi() {
+  if (WiFi.status() == WL_CONNECTED) return true;   // deja connecte (mode developpement)
+  unsigned long t0 = millis();
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  if (memoWifi.magie == MAGIE_WIFI && memoWifi.age < 12 * 3600) {
+    WiFi.config(IPAddress(memoWifi.ip), IPAddress(memoWifi.passerelle), IPAddress(memoWifi.masque), IPAddress(memoWifi.dns));
+    WiFi.begin(WIFI_SSID, WIFI_MDP, memoWifi.canal, memoWifi.borne);
+    if (attendreWifi(5000)) {
+      Serial.printf("Wi-Fi : connecte (rapide, %lu ms)\n", millis() - t0);
+      return true;
+    }
+    Serial.println("Wi-Fi : connexion rapide impossible, connexion normale");
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.mode(WIFI_STA);
+    WiFi.config(IPAddress(), IPAddress(), IPAddress());   // retour au DHCP
+  }
+  memoWifi.magie = 0;
+  WiFi.begin(WIFI_SSID, WIFI_MDP);
+  if (!attendreWifi(15000)) { Serial.println("Wi-Fi : echec"); return false; }
+  // On retient tout pour la prochaine fois
+  memcpy(memoWifi.borne, WiFi.BSSID(), 6);
+  memoWifi.canal = WiFi.channel();
+  memoWifi.ip = (uint32_t)WiFi.localIP();
+  memoWifi.passerelle = (uint32_t)WiFi.gatewayIP();
+  memoWifi.masque = (uint32_t)WiFi.subnetMask();
+  memoWifi.dns = (uint32_t)WiFi.dnsIP(0);
+  memoWifi.age = 0;
+  memoWifi.magie = MAGIE_WIFI;
+  Serial.printf("Wi-Fi : connecte (%lu ms)\n", millis() - t0);
+  return true;
+}
+
+// Encode le mot de passe pour le mettre dans une adresse
+String encoderURL(const char* s) {
+  String r;
+  for (; *s; s++) {
+    char c = *s;
+    if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') r += c;
+    else { char h[4]; snprintf(h, sizeof h, "%%%02X", (unsigned char)c); r += h; }
+  }
+  return r;
+}
+
+// Mise a jour du programme par Wi-Fi. Un echec est retente au plus 3 fois par version.
+RTC_DATA_ATTR char versionEchouee[16] = "";
+RTC_DATA_ATTR uint8_t echecsMaj = 0;
+void mettreAJourProgramme(const char* version) {
+  if (strcmp(version, versionEchouee) == 0 && echecsMaj >= 3) return;
+  Serial.printf("Mise a jour du programme : %s -> %s\n", versionCarte, version);
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(30);
+  httpUpdate.rebootOnUpdate(false);
+  httpUpdate.setLedPin(LED_BUILTIN, LOW);   // la petite LED s'allume pendant l'ecriture
+  t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin?cle=" + encoderURL(CLE));
+  if (r == HTTP_UPDATE_OK) {
+    Serial.println("Mise a jour terminee : redemarrage");
+    Serial.flush();
+    derniereSig[0] = 0;          // redessiner apres le redemarrage
+    ESP.restart();
+  }
+  Serial.printf("Mise a jour : echec (%d) %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+  if (strcmp(version, versionEchouee) != 0) { strncpy(versionEchouee, version, sizeof versionEchouee - 1); echecsMaj = 0; }
+  echecsMaj++;
 }
 
 // Telecharge une ressource du serveur. Renvoie la taille lue (0 si erreur).
@@ -786,6 +875,7 @@ void dormir(uint32_t secondes) {
   WiFi.mode(WIFI_OFF);
   Serial.printf("Veille profonde pendant %u s\n", secondes);
   Serial.flush();
+  memoWifi.age += secondes;
   esp_sleep_enable_timer_wakeup((uint64_t)secondes * 1000000ULL);
   esp_deep_sleep_start();
 }
@@ -824,8 +914,8 @@ uint32_t cycle() {
 
   // 1. Que faut-il afficher ?
   uint8_t* brut = nullptr;
-  char chemin[48];
-  snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f", vBat);
+  char chemin[80];
+  snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
   int n = telecharger(chemin, &brut, 32768);
   if (!n) { free(brut); return reveilSecondes; }
   JsonDocument etat;
@@ -839,6 +929,11 @@ uint32_t cycle() {
   const char* mode = etat["mode"] | "tableau";
   int rotation = etat["rotation"] | 0;      // 0 = paysage, 1 ou 3 = portrait
   Serial.printf("Mode %s, signature %s%s\n", mode, sig, modeDev ? " (developpement)" : "");
+
+  // Nouveau programme disponible ? (seulement si la batterie est assez chargee :
+  // l'ecriture dure environ 30 s. Sur USB sans batterie, la mesure est ignoree.)
+  const char* fw = etat["fw"] | "";
+  if (fw[0] && (vBat > 3.6 || vBat < 2.5)) mettreAJourProgramme(fw);
 
   // 2. Rien de nouveau ? (on rafraichit quand meme au moins 1 fois par jour)
   bool nouveau = strcmp(sig, derniereSig) != 0;
@@ -879,6 +974,8 @@ uint32_t cycle() {
 void setup() {
   Serial.begin(115200);
   delay(300);
+  calculerVersion();
+  Serial.printf("Cadre e-ink, programme du %s\n", versionCarte);
   preparerDessin();
   while (true) {
     uint32_t s = cycle();
