@@ -33,7 +33,9 @@ const CONFIG_DEFAUT = {
     jours: true, nbJours: 4,
     courbeHeures: 24,              // graphique de temperature : 12, 24, 36 ou 48 h
   },
-  f1: { semaine: false },          // true : bloc F1 affiche seulement la semaine du Grand Prix
+  // Scenes : dispositions affichees pendant une periode (creneaux, Grand Prix, dates), par ordre de priorite.
+  // Hors de toute scene, c'est la disposition "par defaut" (disposition / dispositionPortrait).
+  scenes: [],
   agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [] },
   // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
   disposition: [
@@ -53,13 +55,8 @@ const CONFIG_DEFAUT = {
   affichage: { traits: true, bordureApercu: 10, rotation: 0 },
   photo: { version: 0, t: 0 },
   pochette: { version: 0, titre: '', artiste: '', album: '', t: 0 },
-  // Prochains bus : arrets choisis sur la page web, lignes (null = toutes), creneau d'affichage
-  bus: { arrets: [], options: [], lignes: null, nb: 4, horizon: 90,
-    toujours: false, creneaux: [{ jours: [0, 0, 0, 0, 1, 0, 0], debut: '18:00', fin: '20:00' }],
-    reveilMin: 3,                  // pendant un creneau : reveil toutes les 3 min
-    sourceRT: '' },
-  // Disposition utilisee pendant les creneaux des bus (vide = disposition normale)
-  dispositionBus: [], dispositionBusPortrait: [],
+  // Prochains bus : arrets choisis sur la page web, lignes (null = toutes)
+  bus: { arrets: [], options: [], lignes: null, nb: 4, horizon: 90, sourceRT: '' },
 };
 
 // --- Grille de disposition (memes valeurs dans l'interface web) ---
@@ -182,8 +179,34 @@ function fusionner(cible, source) {
 }
 async function lireConfig(env) {
   const brut = await env.CADRE.get('config');
-  const cfg = fusionner(JSON.parse(JSON.stringify(CONFIG_DEFAUT)), brut ? JSON.parse(brut) : {});
+  const lu = brut ? JSON.parse(brut) : {};
+  const cfg = fusionner(JSON.parse(JSON.stringify(CONFIG_DEFAUT)), lu);
+  if (!Array.isArray(lu.scenes)) migrerScenes(cfg, lu);
   return cfg;
+}
+// Anciens reglages (disposition "pendant les creneaux bus", option F1 "semaine du GP") -> scenes
+function migrerScenes(cfg, lu) {
+  const copie = o => JSON.parse(JSON.stringify(o || []));
+  const sans = (l, id) => (l || []).filter(d => d.id !== id);
+  const avec = (l, id) => (l || []).some(d => d.id === id);
+  const b = lu.bus || {};
+  cfg.scenes = [];
+  const dB = lu.dispositionBus || [], dBP = lu.dispositionBusPortrait || [];
+  const busUtilise = avec(cfg.disposition, 'bus') || avec(cfg.dispositionPortrait, 'bus') || dB.length || dBP.length;
+  if (busUtilise && !b.toujours) {
+    const cr = Array.isArray(b.creneaux) ? b.creneaux : b.jours ? [{ jours: b.jours, debut: b.debut, fin: b.fin }]
+      : [{ jours: [0, 0, 0, 0, 1, 0, 0], debut: '18:00', fin: '20:00' }];
+    cfg.scenes.push({ id: 'bus', nom: 'Bus', creneaux: cr, f1: '', du: '', au: '', reveilMin: b.reveilMin || 3,
+      disposition: copie(dB.length ? dB : cfg.disposition), dispositionPortrait: copie(dBP.length ? dBP : cfg.dispositionPortrait) });
+    cfg.disposition = sans(cfg.disposition, 'bus'); cfg.dispositionPortrait = sans(cfg.dispositionPortrait, 'bus');
+  }
+  if (lu.f1 && lu.f1.semaine && (avec(cfg.disposition, 'f1') || avec(cfg.dispositionPortrait, 'f1'))) {
+    cfg.scenes.push({ id: 'gp', nom: 'Grand Prix', creneaux: [], f1: 'semaine', du: '', au: '', reveilMin: 0,
+      disposition: copie(cfg.disposition), dispositionPortrait: copie(cfg.dispositionPortrait) });
+    cfg.disposition = sans(cfg.disposition, 'f1'); cfg.dispositionPortrait = sans(cfg.dispositionPortrait, 'f1');
+  }
+  for (const k of ['dispositionBus', 'dispositionBusPortrait', 'f1']) delete cfg[k];
+  for (const k of ['toujours', 'creneaux', 'reveilMin', 'jours', 'debut', 'fin']) delete cfg.bus[k];
 }
 async function ecrireConfig(env, cfg) {
   await env.CADRE.put('config', JSON.stringify(cfg));
@@ -249,14 +272,13 @@ async function routeEtat(url, env) {
   if (cfg.mode === 'tableau') {
     contenu = await construireTableau(cfg, maintenant, env);
     Object.assign(etat, contenu);
-    // Reveil dynamique : court pendant un creneau des bus, et cale sur le debut du prochain creneau
-    if (!cfg.dev && !contenu.busActif) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
-    if (!cfg.dev && contenu.busPrevu) {
-      if (contenu.busActif) etat.reveil = Math.max(3, cfg.bus.reveilMin || 3) * 60;
-      else if (!cfg.bus.toujours) {
-        const debut = prochainDebutCreneau(cfg.bus, maintenant);
-        if (debut) etat.reveil = Math.min(etat.reveil, Math.max(60, Math.ceil((debut - maintenant) / 1000) + 5));
-      }
+    // Scene affichee : son rythme (ou le rythme normal / de nuit), et reveil cale sur le prochain changement de scene
+    const sc = contenu.scene;
+    delete contenu.scene; delete etat.scene;
+    etat.scene = sc.nom;
+    if (!cfg.dev) {
+      etat.reveil = sc.reveilMin ? Math.max(3, sc.reveilMin) * 60 : reveilNuit(cfg, maintenant, etat.reveil);
+      if (sc.changement) etat.reveil = Math.min(etat.reveil, Math.max(60, Math.ceil((sc.changement - maintenant) / 1000) + 5));
     }
   } else if (cfg.mode === 'photo') {
     if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
@@ -286,10 +308,10 @@ async function routeEtat(url, env) {
     // que toutes les 10 min, ou quand quelque chose d'important change (mode, version, batterie).
     const bat = parseFloat(url.searchParams.get('bat'));
     const ancien = JSON.parse((await env.CADRE.get('statut')) || 'null');
-    const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil,
+    const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null };
     const aEcrire = !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
-      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
+      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
     if (aEcrire) {
       try { await env.CADRE.put('statut', JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
     }
@@ -310,15 +332,8 @@ async function routeEcrireConfig(req, env) {
   if (modif.mode && !MODES.includes(modif.mode)) return texte('Mode inconnu', 400);
   if (modif.disposition !== undefined) modif.disposition = validerDisposition(modif.disposition, grille(0));
   if (modif.dispositionPortrait !== undefined) modif.dispositionPortrait = validerDisposition(modif.dispositionPortrait, grille(1));
-  if (modif.dispositionBus !== undefined) modif.dispositionBus = validerDisposition(modif.dispositionBus, grille(0));
-  if (modif.dispositionBusPortrait !== undefined) modif.dispositionBusPortrait = validerDisposition(modif.dispositionBusPortrait, grille(1));
-  if (modif.bus && Array.isArray(modif.bus.creneaux)) {
-    const heure = h => /^\d{1,2}:\d{2}$/.test(String(h)) ? String(h) : null;
-    modif.bus.creneaux = modif.bus.creneaux.map(c => ({
-      jours: [0, 1, 2, 3, 4, 5, 6].map(i => (c.jours || [])[i] ? 1 : 0),
-      debut: heure(c.debut) || '07:00', fin: heure(c.fin) || '08:00',
-    })).filter(c => c.jours.some(Boolean) && enMinutes(c.fin) > enMinutes(c.debut)).slice(0, 8);
-  }
+  if (modif.scenes !== undefined) modif.scenes = validerScenes(modif.scenes);
+  delete modif.dispositionBus; delete modif.dispositionBusPortrait; delete modif.f1;
   if (modif.affichage && modif.affichage.rotation !== undefined && !ROTATIONS.includes(modif.affichage.rotation)) delete modif.affichage.rotation;
   if (modif.agenda && Array.isArray(modif.agenda.urls)) {
     modif.agenda.urls = modif.agenda.urls.map(u => String(u).trim()).filter(Boolean);
@@ -571,13 +586,13 @@ function dansCreneau(o, maintenant) {
   return listeCreneaux(o).some(c => (c.jours || [])[jour] && min >= enMinutes(c.debut) && min < enMinutes(c.fin));
 }
 // Instant (ms) du debut du prochain creneau, ou null
-function prochainDebutCreneau(o, maintenant) {
+function prochainDebutCreneau(o, maintenant, champ = 'debut') {
   let meilleur = null;
   for (let k = 0; k <= 7; k++) {
     const w = mural(maintenant + k * 86400e3), jour = (w.js + 6) % 7;
     for (const c of listeCreneaux(o)) {
       if (!(c.jours || [])[jour]) continue;
-      const m = enMinutes(c.debut);
+      const m = enMinutes(c[champ]);
       const t = versUTC({ y: w.y, m: w.m, d: w.d, hh: Math.floor(m / 60), mi: m % 60 }, TZ);
       if (t > maintenant && (meilleur === null || t < meilleur)) meilleur = t;
     }
@@ -609,6 +624,65 @@ function texteCreneaux(o) {
   const J = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
   return listeCreneaux(o).map(c => J.filter((x, i) => (c.jours || [])[i]).join(', ') + ' ' +
     String(c.debut).replace(':', 'h') + '-' + String(c.fin).replace(':', 'h')).join(' ; ');
+}
+
+// --- Scenes ---
+const heureOK = h => (/^\d{1,2}:\d{2}$/.test(String(h)) ? String(h) : null);
+const dateOK = d => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d) : '');
+function validerCreneaux(liste) {
+  return (Array.isArray(liste) ? liste : []).map(c => ({
+    jours: [0, 1, 2, 3, 4, 5, 6].map(i => (c && c.jours || [])[i] ? 1 : 0),
+    debut: heureOK(c && c.debut) || '07:00', fin: heureOK(c && c.fin) || '08:00',
+  })).filter(c => c.jours.some(Boolean) && enMinutes(c.fin) > enMinutes(c.debut)).slice(0, 8);
+}
+function validerScenes(liste) {
+  const vus = new Set();
+  return (Array.isArray(liste) ? liste : []).slice(0, 8).map((sc, i) => {
+    let id = String(sc && sc.id || '').replace(/[^a-z0-9-]/gi, '').slice(0, 20) || 's' + i;
+    while (vus.has(id)) id += 'x';
+    vus.add(id);
+    return {
+      id, nom: String(sc.nom || '').trim().slice(0, 40) || 'Scène ' + (i + 1),
+      creneaux: validerCreneaux(sc.creneaux),
+      f1: ['semaine', 'weekend'].includes(sc.f1) ? sc.f1 : '',
+      du: dateOK(sc.du), au: dateOK(sc.au),
+      reveilMin: [0, 3, 5, 10, 15, 30, 60].includes(+sc.reveilMin) ? +sc.reveilMin : 0,
+      disposition: validerDisposition(sc.disposition, grille(0)),
+      dispositionPortrait: validerDisposition(sc.dispositionPortrait, grille(1)),
+    };
+  });
+}
+const dateDuJour = w => w.y + '-' + deux(w.m) + '-' + deux(w.d);
+// Une scene est active si toutes ses conditions sont remplies (sans condition : toujours active)
+function sceneActive(sc, maintenant, gp) {
+  const jour = dateDuJour(mural(maintenant));
+  if (sc.du && jour < sc.du) return false;
+  if (sc.au && jour > sc.au) return false;
+  if (sc.f1) {
+    const p = gp && gp.periodes && gp.periodes[sc.f1];
+    if (!p || maintenant < p[0] || maintenant >= p[1]) return false;
+  }
+  if ((sc.creneaux || []).length && !dansCreneau({ creneaux: sc.creneaux }, maintenant)) return false;
+  return true;
+}
+// Prochain instant ou une scene peut commencer ou finir (pour que le cadre se reveille pile a ce moment)
+function prochainChangementScene(scenes, maintenant, gp) {
+  const t = [];
+  for (const sc of scenes) {
+    if ((sc.creneaux || []).length) {
+      t.push(prochainDebutCreneau({ creneaux: sc.creneaux }, maintenant, 'debut'));
+      t.push(prochainDebutCreneau({ creneaux: sc.creneaux }, maintenant, 'fin'));
+    }
+    const p = sc.f1 && gp && gp.periodes && gp.periodes[sc.f1];
+    if (p) t.push(p[0], p[1]);
+    for (const [d, lendemain] of [[sc.du, 0], [sc.au, 1]]) {
+      if (!d) continue;
+      const [y, m, j] = d.split('-').map(Number);
+      t.push(versUTC({ y, m, d: j + lendemain }, TZ));
+    }
+  }
+  const futurs = t.filter(x => x && x > maintenant);
+  return futurs.length ? Math.min(...futurs) : null;
 }
 
 async function prochainsBus(o, maintenant, env, ignorerCreneau) {
@@ -664,19 +738,19 @@ async function construireTableau(cfg, maintenant, env) {
   const w = mural(maintenant);
   const rotation = ROTATIONS.includes(cfg.affichage.rotation) ? cfg.affichage.rotation : 0;
   const g = grille(rotation);
-  // Pendant un creneau des bus : disposition dediee (si definie) ; en dehors, le bloc bus disparait
-  const busActif = !!(cfg.bus.toujours || dansCreneau(cfg.bus, maintenant));
-  const normale = rotation ? cfg.dispositionPortrait : cfg.disposition;
-  const speciale = rotation ? cfg.dispositionBusPortrait : cfg.dispositionBus;
-  let dispo = validerDisposition(busActif && speciale && speciale.length ? speciale : normale, g);
-  const busPrevu = [normale, speciale].some(l => (l || []).some(d => d.id === 'bus'));
-  if (!busActif) dispo = dispo.filter(d => d.id !== 'bus');
-  // Grand Prix de F1 (le bloc peut n'apparaitre que la semaine de la course)
+  // Grand Prix de F1 : utile pour le bloc F1 et pour les scenes "semaine / week-end de GP"
+  const scenes = cfg.scenes || [];
   let f1 = null;
-  if (dispo.some(d => d.id === 'f1')) {
-    try { f1 = await grandPrix(maintenant); } catch (e) { f1 = { erreur: 'Calendrier F1 indisponible' }; }
-    if (cfg.f1 && cfg.f1.semaine && !f1.semaine) dispo = dispo.filter(d => d.id !== 'f1');
-  }
+  const chargerGP = async () => {
+    if (!f1) { try { f1 = await grandPrix(maintenant); } catch (e) { f1 = { erreur: 'Calendrier F1 indisponible' }; } }
+    return f1;
+  };
+  if (scenes.some(sc => sc.f1)) await chargerGP();
+  // Scene affichee : la premiere active de la liste, sinon la disposition par defaut
+  const active = scenes.find(sc => sceneActive(sc, maintenant, f1));
+  const cle = rotation ? 'dispositionPortrait' : 'disposition';
+  let dispo = validerDisposition(active ? active[cle] : cfg[cle], g);
+  if (dispo.some(d => d.id === 'f1')) await chargerGP();
   const presents = new Set(dispo.map(d => d.id));
   const res = {
     date: JOURS_LONGS[w.js] + ' ' + w.d + ' ' + MOIS[w.m - 1],
@@ -684,10 +758,10 @@ async function construireTableau(cfg, maintenant, env) {
     disposition: dispo.map(d => enPixels(d, g)),
     gouttiere: GOUTTIERE,
     traits: cfg.affichage.traits ? 1 : 0,
-    busActif: busActif && presents.has('bus') ? 1 : 0,
-    busPrevu: busPrevu ? 1 : 0,
+    scene: { nom: active ? active.nom : 'Par défaut', reveilMin: active ? active.reveilMin : 0,
+      changement: prochainChangementScene(scenes, maintenant, f1) },
   };
-  if (presents.has('f1')) { delete f1.semaine; res.f1 = f1; }
+  if (presents.has('f1')) { res.f1 = Object.assign({}, f1); delete res.f1.periodes; }
   if (presents.has('meteo') || presents.has('heures') || presents.has('jours') || presents.has('courbe')) {
     try {
       res.meteo = await meteo(Object.assign({}, cfg.meteo,
@@ -705,7 +779,7 @@ async function construireTableau(cfg, maintenant, env) {
   }
   if (presents.has('bus')) {
     try {
-      res.bus = await prochainsBus(cfg.bus, maintenant, env, false);
+      res.bus = await prochainsBus(cfg.bus, maintenant, env, true);
       // Les minutes restantes ne sont pas affichees : on les retire pour que la signature
       // ne change pas a chaque minute (sinon l'ecran clignoterait a chaque reveil)
       for (const p of res.bus.passages || []) delete p.m;
@@ -943,8 +1017,12 @@ async function grandPrix(maintenant) {
       return { j: JOURS_COURTS[w.js] + ' ' + w.d, h: w.hh + 'h' + deux(w.mi), n, f: t + duree < maintenant ? 1 : 0 };
     }),
     trace: c ? { l: c.l, h: c.h, p: c.p } : null,
-    // semaine du Grand Prix : du lundi 0 h a la fin de la course
-    semaine: auj >= numJour(wC) - ((wC.js + 6) % 7),
+    // Periodes pour les scenes : semaine (du lundi 0 h) et week-end (du jour de la 1re seance, 0 h)
+    // jusqu'a 3 h apres le depart de la course
+    periodes: {
+      semaine: [versUTC({ y: wC.y, m: wC.m, d: wC.d - (wC.js + 6) % 7 }, TZ), course + 3 * 3600e3],
+      weekend: [versUTC(Object.assign({}, mural(sessions[0][0]), { hh: 0, mi: 0, ss: 0 }), TZ), course + 3 * 3600e3],
+    },
   };
 }
 
@@ -1207,7 +1285,27 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
 <div class="outilsMenus"><a href="#" onclick="toutesLesSections(true);return false">Tout ouvrir</a><a href="#" onclick="toutesLesSections(false);return false">Tout fermer</a></div>
 
 <details class="menu" id="menu-dispo">
-  <summary>Disposition du tableau de bord</summary>
+  <summary>Scènes et disposition</summary>
+  <p class="aide">Une scène est une disposition des blocs, affichée pendant une période que tu choisis (par exemple « Bus » le vendredi de 18:00 à 20:00, ou « Grand Prix » la semaine d'une course). En dehors de toute scène, c'est la scène <b>Par défaut</b> qui s'affiche.</p>
+  <div class="puces" id="listeScenes" style="margin:8px 0"></div>
+  <div id="reglagesScene" class="cache" style="padding:10px 12px;border:1px solid var(--trait);border-radius:10px;margin-bottom:10px">
+    <label>Nom <input type="text" id="sceneNom" maxlength="40"></label>
+    <p class="aide" style="margin:8px 0 2px"><b>Quand l'afficher</b> (toutes les conditions remplies doivent l'être) :</p>
+    <div id="sceneCreneaux"></div>
+    <button style="margin-top:6px" onclick="ajouterCreneau(null, 'sceneCreneaux')">+ Ajouter un créneau</button>
+    <p class="aide" style="margin:10px 0 2px">Formule 1 :</p>
+    <select id="sceneF1"><option value="">peu importe</option><option value="semaine">la semaine d'un Grand Prix</option><option value="weekend">le week-end d'un Grand Prix</option></select>
+    <label>Du <input type="date" id="sceneDu" style="width:auto;flex:1;min-width:0"> au <input type="date" id="sceneAu" style="width:auto;flex:1;min-width:0"></label>
+    <label>Mise à jour toutes les
+      <select id="sceneReveil" style="width:auto"><option value="0">(rythme normal)</option><option>3</option><option>5</option><option>10</option><option>15</option><option>30</option><option>60</option></select> min</label>
+    <p class="aide" id="sceneResume"></p>
+    <div class="ligne" style="margin-top:6px">
+      <button onclick="monterScene()">Plus prioritaire</button>
+      <button onclick="copierDefaut()">Copier « Par défaut »</button>
+      <button class="danger" onclick="supprimerScene()">Supprimer</button>
+    </div>
+  </div>
+  <p class="aide" id="aideDefaut">Scène affichée quand aucune autre n'est active. Son rythme se règle dans « Réveil du cadre ».</p>
   <p class="aide">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
   <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
     <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
@@ -1215,14 +1313,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
   </div>
   <p class="aide">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
-  <div class="modes" style="grid-template-columns:repeat(2,1fr);margin:8px 0 6px">
-    <button data-var="0" onclick="choisirVariante(0)">Disposition normale</button>
-    <button data-var="1" onclick="choisirVariante(1)">Pendant les créneaux bus</button>
-  </div>
-  <div id="aideVariante" class="cache">
-    <p class="aide">Cette disposition remplace la normale pendant les créneaux des bus (réglés plus bas). Laisse-la vide pour garder la disposition normale ; en dehors des créneaux, le bloc bus disparaît dans tous les cas.</p>
-    <button style="width:100%;margin-bottom:6px" onclick="copierNormale()">Partir de la disposition normale</button>
-  </div>
+  <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
   <div id="editeur" class="ecran editeur"></div>
   <p class="aide">Touche un bloc (sans le déplacer) pour régler la taille et la police de son texte.</p>
   <div id="styleBloc" class="cache" style="margin-top:8px;padding:10px 12px;border:1px solid var(--trait);border-radius:10px">
@@ -1297,15 +1388,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     passages, sur les
     <select id="busHorizon" style="width:auto"><option>30</option><option>60</option><option>90</option><option>120</option><option>180</option></select>
     prochaines minutes</label>
-  <label><input type="checkbox" id="busToujours"> Afficher les bus tout le temps</label>
-  <div id="busCreneau">
-    <p class="aide" style="margin:2px 0">Sinon, seulement pendant ces créneaux :</p>
-    <div id="busCreneaux"></div>
-    <button style="margin-top:6px" onclick="ajouterCreneau()">+ Ajouter un créneau</button>
-  </div>
-  <label style="margin-top:10px">Pendant un créneau, le cadre se met à jour toutes les
-    <select id="busReveil" style="width:auto"><option>3</option><option>4</option><option>5</option><option>10</option></select> min</label>
-  <p class="aide">En dehors des créneaux, le bloc bus disparaît, le cadre reprend son rythme normal (réglé dans « Réveil du cadre ») et se réveille tout seul au début du créneau suivant.</p>
+  <p class="aide">Le bloc « Prochains bus » s'affiche dans les scènes où tu le places (section « Scènes et disposition ») : crée par exemple une scène « Bus » pour les heures où tu prends le bus, avec une mise à jour toutes les 3 min.</p>
   <details style="margin-top:6px"><summary class="aide">Réglage avancé</summary>
     <label>Source du temps réel (laisser vide pour la source par défaut)</label>
     <input type="text" id="busSource" placeholder="https://…">
@@ -1314,14 +1397,6 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <button style="width:100%;margin-top:8px" onclick="testerBus()">Voir les prochains passages maintenant</button>
   <div class="msg" id="msgBus"></div>
   <pre id="busTest" class="cache"></pre>
-</details>
-
-<details class="menu" id="menu-f1">
-  <summary>Grand Prix de F1</summary>
-  <p class="aide">Le bloc « Grand Prix de F1 » (à ajouter dans la Disposition) montre le tracé du circuit du prochain Grand Prix, le compte à rebours et les horaires des séances, à l'heure française. Les séances terminées sont barrées.</p>
-  <label><input type="checkbox" id="f1Semaine"> Afficher le bloc seulement pendant la semaine du Grand Prix (du lundi à la course)</label>
-  <button class="principal" onclick="enregistrer({ f1: { semaine: $('f1Semaine').checked } }, 'msgF1')">Enregistrer</button>
-  <div class="msg" id="msgF1"></div>
 </details>
 
 <details class="menu" id="menu-photo">
@@ -1450,23 +1525,110 @@ var DISPO_DEFAUT = {
        { id: 'heures', x: 0, y: 3, w: 8, h: 2 }, { id: 'jours', x: 0, y: 5, w: 8, h: 2 },
        { id: 'agenda', x: 0, y: 7, w: 8, h: 5 } ]
 };
-// Dispositions : '0' paysage, '1' portrait ; suffixe 'b' = pendant les creneaux des bus
-var dispos = { '0': [], '1': [], '0b': [], '1b': [] };
-var variante = 0;
-function cleCourante() { return cleOri(rot) + (variante ? 'b' : ''); }
-function choisirVariante(v) {
-  dispos[cleCourante()] = dispo;
-  variante = v;
-  var b = document.querySelectorAll('[data-var]');
-  for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', +b[i].getAttribute('data-var') === v);
-  $('aideVariante').classList.toggle('cache', !v);
+// Dispositions de la scene "Par defaut" : '0' paysage, '1' portrait ; les autres scenes ont les leurs
+var dispos = { '0': [], '1': [] };
+var scenes = [];
+var sceneCourante = -1;               // -1 = Par defaut
+function cleDispo() { return cleOri(rot) ? 'dispositionPortrait' : 'disposition'; }
+function ranger() {                   // range la disposition en cours d'edition a sa place
+  if (sceneCourante < 0) dispos[cleOri(rot)] = dispo; else scenes[sceneCourante][cleDispo()] = dispo;
+}
+function dispoCourante() { return sceneCourante < 0 ? dispos[cleOri(rot)] : (scenes[sceneCourante][cleDispo()] || []); }
+var NOMS_J = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
+function resumeScene(sc) {
+  var t = [];
+  (sc.creneaux || []).forEach(function (c) {
+    var j = NOMS_J.filter(function (x, i) { return c.jours[i]; }).join(', ');
+    t.push(j + ' de ' + c.debut + ' à ' + c.fin);
+  });
+  if (sc.f1) t.push(sc.f1 === 'semaine' ? "la semaine d'un Grand Prix" : "le week-end d'un Grand Prix");
+  if (sc.du || sc.au) t.push((sc.du ? 'du ' + sc.du.split('-').reverse().join('/') : '') + (sc.au ? ' au ' + sc.au.split('-').reverse().join('/') : ''));
+  var r = t.length ? 'Affichée : ' + t.join(' ; ') + '.' : 'Aucune condition : cette scène est affichée tout le temps (et remplace « Par défaut »).';
+  r += sc.reveilMin ? ' Mise à jour toutes les ' + sc.reveilMin + ' min.' : ' Rythme de mise à jour normal.';
+  return r;
+}
+function lireFormScene() {
+  if (sceneCourante < 0) return;
+  var sc = scenes[sceneCourante];
+  sc.nom = $('sceneNom').value.trim() || sc.nom;
+  sc.creneaux = lireCreneaux('sceneCreneaux');
+  sc.f1 = $('sceneF1').value; sc.du = $('sceneDu').value; sc.au = $('sceneAu').value;
+  sc.reveilMin = +$('sceneReveil').value;
+}
+var dernierStatut = null;
+function dessinerPuces() {
+  var z = $('listeScenes'); z.innerHTML = '';
+  var affichee = (dernierStatut && dernierStatut.sc) || '';
+  var ajouter = function (nom, i) {
+    var b = document.createElement('button');
+    b.textContent = nom + (nom === affichee ? ' •' : '');
+    b.title = nom === affichee ? 'Scène affichée en ce moment' : '';
+    b.classList.toggle('actif', i === sceneCourante);
+    b.onclick = function () { choisirScene(i); };
+    z.appendChild(b);
+  };
+  ajouter('Par défaut', -1);
+  scenes.forEach(function (sc, i) { ajouter(sc.nom, i); });
+  var plus = document.createElement('button');
+  plus.textContent = '+ Nouvelle scène';
+  plus.onclick = nouvelleScene;
+  if (scenes.length < 8) z.appendChild(plus);
+}
+function afficherScenes() {
+  dessinerPuces();
+  $('titreEditeur').textContent = 'Blocs de la scène « ' + (sceneCourante < 0 ? 'Par défaut' : scenes[sceneCourante].nom) + ' »';
+  $('reglagesScene').classList.toggle('cache', sceneCourante < 0);
+  $('aideDefaut').classList.toggle('cache', sceneCourante >= 0);
+  if (sceneCourante >= 0) {
+    var sc = scenes[sceneCourante];
+    $('sceneNom').value = sc.nom;
+    $('sceneCreneaux').innerHTML = '';
+    (sc.creneaux || []).forEach(function (c) { ajouterCreneau(c, 'sceneCreneaux'); });
+    $('sceneF1').value = sc.f1 || ''; $('sceneDu').value = sc.du || ''; $('sceneAu').value = sc.au || '';
+    $('sceneReveil').value = String(sc.reveilMin || 0);
+    $('sceneResume').textContent = resumeScene(sc);
+  }
+}
+// Le resume et le nom se mettent a jour pendant la saisie
+$('reglagesScene').addEventListener('change', function () { lireFormScene(); if (sceneCourante >= 0) $('sceneResume').textContent = resumeScene(scenes[sceneCourante]); });
+$('sceneNom').addEventListener('input', function () { if (sceneCourante >= 0 && this.value.trim()) { scenes[sceneCourante].nom = this.value.trim(); dessinerPuces();
+  $('titreEditeur').textContent = 'Blocs de la scène « ' + scenes[sceneCourante].nom + ' »'; } });
+function choisirScene(i) {
+  lireFormScene(); ranger();
+  sceneCourante = i;
+  afficherScenes();
   appliquerRotation(rot);
 }
-function copierNormale() {
+function nouvelleScene() {
+  lireFormScene(); ranger();
+  scenes.push({ id: 's' + Date.now().toString(36), nom: 'Scène ' + (scenes.length + 1),
+    creneaux: [{ jours: [1, 1, 1, 1, 1, 0, 0], debut: '07:00', fin: '08:00' }], f1: '', du: '', au: '', reveilMin: 0,
+    disposition: copie(dispos['0']), dispositionPortrait: copie(dispos['1']) });
+  sceneCourante = scenes.length - 1;
+  afficherScenes(); appliquerRotation(rot);
+  message('msgDispo', 'Scène créée à partir de « Par défaut » : choisis sa période et ses blocs, puis enregistre.');
+}
+function supprimerScene() {
+  if (sceneCourante < 0) return;
+  var nom = scenes[sceneCourante].nom;
+  scenes.splice(sceneCourante, 1);
+  sceneCourante = -1;
+  afficherScenes(); appliquerRotation(rot);
+  message('msgDispo', 'Scène « ' + nom + ' » supprimée : enregistre pour confirmer (ou recharge la page pour annuler).');
+}
+function monterScene() {
+  if (sceneCourante <= 0) { message('msgDispo', 'Cette scène est déjà la plus prioritaire.'); return; }
+  lireFormScene(); ranger();
+  var sc = scenes.splice(sceneCourante, 1)[0];
+  scenes.splice(sceneCourante - 1, 0, sc);
+  sceneCourante--;
+  afficherScenes();
+  message('msgDispo', "Si plusieurs scènes sont actives en même temps, celle de gauche l'emporte.");
+}
+function copierDefaut() {
   dispo = copie(dispos[cleOri(rot)]);
-  dispos[cleCourante()] = dispo;
-  dessinerEditeur();
-  message('msgDispo', 'Copiée : ajoute maintenant le bloc « Prochains bus », puis enregistre.');
+  ranger(); dessinerEditeur();
+  message('msgDispo', 'Disposition « Par défaut » copiée dans cette scène (orientation actuelle).');
 }
 var dispo = [];
 var choisi = null;                    // bloc selectionne pour regler son texte
@@ -1526,22 +1688,21 @@ function formeEcran(el, r) {
 function remplirDispo() {
   dispos['0'] = copie(config.disposition || []);
   dispos['1'] = copie(config.dispositionPortrait || []);
-  dispos['0b'] = copie(config.dispositionBus || []);
-  dispos['1b'] = copie(config.dispositionBusPortrait || []);
-  var bv = document.querySelectorAll('[data-var]');
-  for (var i = 0; i < bv.length; i++) bv[i].classList.toggle('actif', +bv[i].getAttribute('data-var') === variante);
+  scenes = copie(config.scenes || []);
+  if (sceneCourante >= scenes.length) sceneCourante = -1;
+  afficherScenes();
   $('traits').checked = !!config.affichage.traits;
   appliquerRotation(config.affichage.rotation || 0);
 }
 function appliquerRotation(r) {
-  rot = r; G = grilleUI(r); dispo = dispos[cleCourante()];
+  rot = r; G = grilleUI(r); dispo = dispoCourante();
   choisi = null; $('styleBloc').classList.add('cache');
   var b = document.querySelectorAll('[data-rot]');
   for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', +b[i].getAttribute('data-rot') === r);
   formeEcran($('editeur'), r);
   dessinerEditeur();
 }
-function choisirRotation(r) { dispos[cleCourante()] = dispo; appliquerRotation(r); }
+function choisirRotation(r) { ranger(); appliquerRotation(r); }
 function dessinerEditeur() {
   var ed = $('editeur');
   ed.innerHTML = '';
@@ -1618,20 +1779,25 @@ function basculer(id, actif) {
     dispo = dispo.filter(function (d) { return d.id !== id; });
     if (choisi === id) { choisi = null; $('styleBloc').classList.add('cache'); }
   }
-  dispos[cleCourante()] = dispo;
+  ranger();
   dessinerEditeur();
 }
 function reinitialiserDispo() {
-  dispo = variante ? [] : copie(DISPO_DEFAUT[cleOri(rot)]);
-  dispos[cleCourante()] = dispo;
+  dispo = copie(DISPO_DEFAUT[cleOri(rot)]);
+  ranger();
   $('traits').checked = true;
   dessinerEditeur();
   message('msgDispo', 'Disposition par défaut rétablie : pense à enregistrer.');
 }
 function enregistrerDispo() {
-  dispos[cleCourante()] = dispo;
-  enregistrer({ disposition: dispos['0'], dispositionPortrait: dispos['1'], dispositionBus: dispos['0b'], dispositionBusPortrait: dispos['1b'],
-    affichage: { traits: $('traits').checked, rotation: rot } }, 'msgDispo');
+  lireFormScene(); ranger();
+  var avant = scenes.map(function (sc) { return (sc.creneaux || []).length; });
+  enregistrer({ disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
+    affichage: { traits: $('traits').checked, rotation: rot } }, 'msgDispo')
+    .then(function () {
+      var perdu = (config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; });
+      if (perdu) message('msgDispo', 'Enregistré, mais un créneau a été ignoré : coche au moins un jour et mets une fin après le début.');
+    });
 }
 
 // --- Conversion entre l'image "physique" de l'ecran (960 x 680) et l'image "a l'endroit" ---
@@ -1848,15 +2014,9 @@ function remplirBus() {
     z.appendChild(l);
   });
   $('busNb').value = String(b.nb); $('busHorizon').value = String(b.horizon);
-  $('busToujours').checked = !!b.toujours;
-  $('busReveil').value = String(b.reveilMin || 3);
   $('busSource').value = b.sourceRT || '';
-  var liste = Array.isArray(b.creneaux) ? b.creneaux : (b.jours ? [{ jours: b.jours, debut: b.debut, fin: b.fin }] : []);
-  $('busCreneaux').innerHTML = '';
-  liste.forEach(ajouterCreneau);
-  $('busCreneau').style.opacity = b.toujours ? '0.4' : '1';
 }
-function ajouterCreneau(c) {
+function ajouterCreneau(c, conteneur) {
   c = c && c.jours ? c : { jours: [1, 1, 1, 1, 1, 0, 0], debut: '07:00', fin: '08:00' };
   var bloc = document.createElement('div');
   bloc.className = 'creneau';
@@ -1876,10 +2036,10 @@ function ajouterCreneau(c) {
   heures.querySelector('.cFin').value = c.fin;
   heures.querySelector('button').onclick = function () { bloc.remove(); };
   bloc.appendChild(jours); bloc.appendChild(heures);
-  $('busCreneaux').appendChild(bloc);
+  $(conteneur).appendChild(bloc);
 }
-function lireCreneaux() {
-  var res = [], blocs = $('busCreneaux').querySelectorAll('.creneau');
+function lireCreneaux(conteneur) {
+  var res = [], blocs = $(conteneur).querySelectorAll('.creneau');
   for (var i = 0; i < blocs.length; i++) {
     var j = [], cases = blocs[i].querySelectorAll('.puces input');
     for (var k = 0; k < cases.length; k++) j.push(cases[k].checked ? 1 : 0);
@@ -1887,19 +2047,12 @@ function lireCreneaux() {
   }
   return res;
 }
-$('busToujours').onchange = function () { $('busCreneau').style.opacity = this.checked ? '0.4' : '1'; };
 function enregistrerBus() {
   var cases = $('busLignes').querySelectorAll('input'), choisies = [], toutes = true;
   for (var i = 0; i < cases.length; i++) { if (cases[i].checked) choisies.push(cases[i].value); else toutes = false; }
-  var cr = lireCreneaux();
   enregistrer({ bus: { lignes: toutes ? null : choisies, nb: +$('busNb').value, horizon: +$('busHorizon').value,
-    toujours: $('busToujours').checked, creneaux: cr, reveilMin: +$('busReveil').value,
     sourceRT: $('busSource').value.trim() } }, 'msgBus')
-    .then(function () {
-      if (!$('busToujours').checked && config.bus.creneaux.length < cr.length)
-        message('msgBus', 'Enregistré, mais un créneau a été ignoré : coche au moins un jour et mets une fin après le début.');
-      remplirBus();
-    });
+    .then(function () { remplirBus(); });
 }
 function testerBus() {
   var z = $('busTest');
@@ -1940,10 +2093,13 @@ function duree(ms) {
 }
 var NOMS = { tableau: 'tableau de bord', photo: 'photo', pochette: 'pochette', blanc: 'écran blanc' };
 function afficherStatut(s, maintenant) {
+  dernierStatut = s;
+  if (config.mode === 'tableau' && s && s.sc) setTimeout(dessinerPuces, 0);
   var t = 'Mode demandé : ' + NOMS[config.mode] + '. ';
   if (!s) t += "Le cadre ne s'est pas encore connecté.";
   else {
     t += 'Dernière connexion du cadre ' + duree(maintenant - s.vu) + '.';
+    if (config.mode === 'tableau' && s.sc) t += ' Scène affichée : ' + s.sc + '.';
     if (s.bat && s.bat > 2.5) t += ' Batterie ' + pourcentage(s.bat) + ' % (' + s.bat.toFixed(2).replace('.', ',') + ' V).';
     var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
     if (prochain > 0) t += ' Prochain réveil dans ' + Math.max(1, Math.round(prochain / 60000)) + ' min environ.';
@@ -2008,7 +2164,7 @@ function remplirMeteo() {
   $('mVent').checked = m.vent; $('mDetails').checked = m.details; $('mSoleil').checked = m.soleil;
   $('mPas').value = String(m.pasHeures); $('mNbJours').value = String(m.nbJours); $('mNbHeures').value = String(m.nbHeures || 6);
   $('mCourbe').value = String(m.courbeHeures || 24);
-  $('f1Semaine').checked = !!(config.f1 && config.f1.semaine);
+
 }
 function remplirAgenda() {
   $('aUrls').value = config.agenda.urls.join('\\n');

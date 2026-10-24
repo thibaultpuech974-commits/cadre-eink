@@ -100,9 +100,18 @@ Limite d'iOS : un raccourci ne peut pas se déclencher tout seul à chaque chang
 
 ---
 
-## 5. Disposition du tableau de bord
+## 5. Scènes et disposition du tableau de bord
 
-Dans la section **Disposition** de l'interface :
+**Scènes** : une scène est une disposition des blocs affichée pendant une période choisie. La scène **Par défaut** s'affiche quand aucune autre n'est active. Dans la section **Scènes et disposition** :
+- **+ Nouvelle scène** crée une scène (copie de « Par défaut ») ; donne-lui un nom ;
+- **Quand l'afficher** : des créneaux (jours + heures, par exemple « ven de 18:00 à 20:00 »), et/ou la semaine ou le week-end d'un Grand Prix de F1, et/ou des dates (du … au …). Toutes les conditions remplies doivent l'être ; une scène sans condition est affichée tout le temps ;
+- **Mise à jour toutes les …** : rythme propre à la scène (3 min pour les bus, par exemple). « Rythme normal » garde celui de « Réveil du cadre » (et le mode nuit) ;
+- **Plus prioritaire** : si plusieurs scènes sont actives en même temps, celle de gauche l'emporte ;
+- le cadre se réveille tout seul au début et à la fin de chaque scène.
+
+Exemples : « Bus » (ven 18:00-20:00, mise à jour 3 min, bloc bus en grand), « Grand Prix » (week-end d'un GP, bloc F1), « Vacances » (du 17/10 au 01/11, sans l'agenda des cours). La page indique la scène affichée en ce moment (point • à côté de son nom). Tes anciens réglages ont été convertis : la disposition « Pendant les créneaux bus » est devenue la scène « Bus ».
+
+Pour les blocs de la scène choisie :
 - fais glisser un bloc pour le déplacer (au doigt ou à la souris) ;
 - tire son **coin en bas à droite** pour l'agrandir ou le réduire ;
 - coche ou décoche un bloc pour l'ajouter ou le retirer ;
@@ -122,16 +131,11 @@ Le curseur **Contour de l'aperçu** ne règle que l'épaisseur du cadre noir des
 
 1. Dans la section **Prochains bus**, clique sur **Choisir mes arrêts**. La page télécharge les horaires officiels de Tango (données ouvertes de Nîmes Métropole), ce qui prend quelques secondes.
 2. Tape le nom de ton arrêt, choisis-le (2 arrêts au maximum), puis **Utiliser ces arrêts**.
-3. Coche les lignes et les sens à afficher, le nombre de passages et l'horizon. Ajoute un ou plusieurs **créneaux**, par exemple « Ven, de 18:00 à 20:00 », et choisis la fréquence de mise à jour pendant ces créneaux (3 min par défaut). Clique ensuite sur **Enregistrer**.
+3. Coche les lignes et les sens à afficher, le nombre de passages et l'horizon, puis **Enregistrer**.
 4. **Voir les prochains passages maintenant** affiche tout de suite ce que le cadre recevra.
-5. Dans **Disposition**, coche le bloc **Prochains bus** et place-le où tu veux.
+5. Dans **Scènes et disposition**, crée une scène « Bus » avec tes créneaux et une mise à jour toutes les 3 min, et places-y le bloc **Prochains bus** (ou mets-le dans la scène Par défaut pour le voir tout le temps).
 
 Les horaires théoriques sont corrigés par le **temps réel** quand il est disponible. Sur l'écran, « à 18h42 » est une heure en temps réel, et « vers 18h42 » une heure théorique. Un bus annulé s'affiche « supprimé ». Les horaires Tango changent quelques fois par an (rentrée, vacances) : refais alors l'étape 1 pour recharger les arrêts.
-
-**Affichage et réveil dynamiques**
-- Dans **Disposition**, le bouton **Pendant les créneaux bus** permet de préparer une deuxième disposition, utilisée seulement pendant les créneaux (par exemple, les bus en grand à la place de l'agenda). Si tu la laisses vide, la disposition normale est utilisée.
-- En dehors des créneaux, le bloc bus disparaît toujours.
-- Pendant un créneau, le cadre se met à jour souvent (3 à 10 min, au choix). En dehors, il reprend son rythme normal, réglé dans « Réveil du cadre ». Il se réveille aussi tout seul au début du créneau suivant, pour que les bus apparaissent à l'heure.
 
 ---
 
@@ -140,7 +144,7 @@ Les horaires théoriques sont corrigés par le **temps réel** quand il est disp
 Deux blocs à ajouter dans **Disposition** :
 
 - **Graphique de température** : la courbe heure par heure sur les 12, 24, 36 ou 48 prochaines heures (réglage dans **Météo**). Les barres hachurées montrent le risque de pluie, le fond grisé la nuit, et le minimum et le maximum sont indiqués. Le nom du jour s'affiche à minuit. Taille conseillée : au moins 6 × 3 cases.
-- **Grand Prix de F1** : le tracé du circuit du prochain Grand Prix (la barre marque la ligne de départ, la flèche le sens de course), le compte à rebours (« Dans 4 jours », « Ce week-end ») et les horaires des séances à l'heure française. Les séances terminées sont barrées. Le GP reste affiché jusqu'à 3 h après le départ de la course, puis le suivant prend sa place. Dans la section **Grand Prix de F1**, tu peux choisir de n'afficher le bloc que la semaine de la course.
+- **Grand Prix de F1** : le tracé du circuit du prochain Grand Prix (la barre marque la ligne de départ, la flèche le sens de course), le compte à rebours (« Dans 4 jours », « Ce week-end ») et les horaires des séances à l'heure française. Les séances terminées sont barrées. Le GP reste affiché jusqu'à 3 h après le départ de la course, puis le suivant prend sa place. Pour ne l'afficher que pendant les Grands Prix, place-le dans une scène dont la condition Formule 1 est « la semaine » ou « le week-end d'un Grand Prix ».
 
 Le calendrier vient de l'API libre Jolpica (ex-Ergast). Les tracés viennent du projet libre [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits) (licence MIT) et sont intégrés au serveur (`serveur/circuits.js`). Pour les mettre à jour quand un nouveau circuit arrive :
 `git clone --depth 1 https://github.com/bacinger/f1-circuits /tmp/f1c && python3 outils/circuits.py /tmp/f1c`
@@ -150,7 +154,7 @@ Le calendrier vient de l'API libre Jolpica (ex-Ergast). Les tracés viennent du 
 ## Fonctionnement et autonomie
 
 - Le cadre se réveille selon l'intervalle choisi dans l'interface (10 min par défaut), se connecte quelques secondes, puis se rendort. Il retient les réglages de la connexion Wi-Fi précédente pour se reconnecter en 1 s environ.
-- **Mode nuit** (section Réveil du cadre) : pendant la plage choisie, par exemple de 23:00 à 07:00, le cadre ne se réveille que toutes les 30, 60 ou 120 min. Il se réveille tout seul à la fin de la nuit, et au début d'un créneau de bus.
+- **Mode nuit** (section Réveil du cadre) : pendant la plage choisie, par exemple de 23:00 à 07:00, le cadre ne se réveille que toutes les 30, 60 ou 120 min. Il se réveille tout seul à la fin de la nuit, et au début de chaque scène. Une scène qui a son propre rythme l'emporte sur le mode nuit.
 - L'écran ne se rafraîchit **que si le contenu a changé** (environ une fois par heure pour la météo), et au moins une fois par jour pour le préserver.
 - Les changements faits dans l'interface s'appliquent au prochain réveil.
 - **Avant une longue absence** : bouton **Écran blanc**, attends que l'aperçu devienne blanc, puis débranche la batterie. Au retour, rebranche-la et choisis un mode dans l'interface.
