@@ -590,8 +590,8 @@ void widgetCourbe(JsonVariant g, Boite b) {
   const int pas[] = {1, 2, 3, 4, 6, 12};
   int k = 12;
   for (int i = 0; i < 6; i++) if (dx * pas[i] >= largeurTexte("88h") + 14) { k = pas[i]; break; }
-  int jour = 0, finJours = 0;       // bord droit du dernier nom de jour (pour placer la legende)
-  int debutJours = 99999;
+  int jour = 0;
+  Boite occ[8]; int nOcc = 0;       // places deja prises par du texte (noms des jours, etiquettes)
   for (int i = 0; i < n; i++) {
     int h = (h0 + i) % 24;
     int x = X(i);
@@ -602,7 +602,7 @@ void widgetCourbe(JsonVariant g, Boite b) {
       int lt = largeurTexte(nom);
       int xn = min(x + 4, b.x + b.w - lt);
       texte(xn, y0 - 6, nom);      // nom du jour en haut, a droite de minuit
-      debutJours = min(debutJours, xn); finJours = max(finJours, xn + lt);
+      if (nOcc < 8) occ[nOcc++] = { xn, y0 - 6 - aL, lt, aL + 2 };
       policeT(14, false);
       continue;
     }
@@ -615,7 +615,14 @@ void widgetCourbe(JsonVariant g, Boite b) {
   // Courbe epaisse
   float e = max(3.0f, b.h / 70.0f);
   for (int i = 0; i < n - 1; i++) trait(X(i), Y(T[i].as<int>() / 10.0f), X(i + 1), Y(T[i + 1].as<int>() / 10.0f), e);
-  // Minimum et maximum
+  // Minimum, maximum et legende : chaque etiquette va a la premiere place libre
+  // (au-dessus ou en dessous du point, puis a droite, puis a gauche)
+  auto chevauche = [&](Boite r) {
+    for (int q = 0; q < nOcc; q++)
+      if (r.x < occ[q].x + occ[q].w + 4 && occ[q].x < r.x + r.w + 4 && r.y < occ[q].y + occ[q].h + 2 && occ[q].y < r.y + r.h + 2) return true;
+    return false;
+  };
+  auto dedans = [&](Boite r) { return r.x >= b.x && r.x + r.w <= b.x + b.w && r.y >= b.y && r.y + r.h <= y1 - 2; };
   policeT(17, true);
   int aV = asc();
   int idx[2] = {iMax, iMin};
@@ -626,25 +633,36 @@ void widgetCourbe(JsonVariant g, Boite b) {
     canvas.fillCircle(x, y, e * 1.4f, NOIR);
     canvas.fillCircle(x, y, e * 0.6f, BLANC);
     snprintf(t, sizeof t, "%d°", (int)lroundf(v));
-    int lt = largeurTexte(t);
-    int xt = max(x0 + 2, min(x - lt / 2, x1 - lt));
-    int yt = k2 == 0 ? y - e * 1.4f - 6 : y + e * 1.4f + 6 + aV;
-    if (yt < b.y + aV || yt > y1 - 4) {          // pas la place au-dessus / en dessous : a cote du point
-      xt = x + e * 2 + 6 + lt <= x1 ? x + e * 2 + 6 : x - e * 2 - 6 - lt;
-      yt = k2 == 0 ? y + aV / 2 : y - 6;
-      yt = max(b.y + aV, min(yt, y1 - 4));
+    int lt = largeurTexte(t), r = e * 1.4f + 6;
+    int xc = max(x0 + 2, min(x - lt / 2, x1 - lt));
+    Boite essais[4] = {
+      { xc, k2 == 0 ? y - r - aV : y + r, lt, aV },            // au-dessus (max) / en dessous (min)
+      { xc, k2 == 0 ? y + r : y - r - aV, lt, aV },            // de l'autre cote
+      { x + r, y - aV / 2, lt, aV },                           // a droite
+      { x - r - lt, y - aV / 2, lt, aV },                      // a gauche
+    };
+    for (int q = 0; q < 4; q++) {
+      if (!dedans(essais[q]) || chevauche(essais[q])) continue;
+      Boite z = essais[q];
+      canvas.fillRect(z.x - 3, z.y - 2, z.w + 6, z.h + 5, BLANC);     // fond blanc sous le chiffre
+      texte(z.x, z.y + aV, t);
+      if (nOcc < 8) occ[nOcc++] = z;
+      break;
     }
-    canvas.fillRect(xt - 3, yt - aV - 2, lt + 6, aV + 5, BLANC);     // fond blanc sous le chiffre
-    texte(xt, yt, t);
   }
-  // Legende de la pluie, si besoin
-  policeT(14, false);
-  int xLeg = b.x + b.w - largeurTexte("pluie") - 26;
-  if (pluie && (finJours < xLeg - 8 || debutJours > b.x + b.w)) {
-    int lt = largeurTexte("pluie");
-    trame(b.x + b.w - lt - 26, b.y + 2, 16, aL, 3);
-    canvas.drawRect(b.x + b.w - lt - 26, b.y + 2, 16, aL, NOIR);
-    texte(b.x + b.w - lt, b.y + 2 + aL, "pluie");
+  // Legende de la pluie : en haut a droite, sinon en haut a gauche, sinon rien
+  if (pluie) {
+    policeT(14, false);
+    int lt = largeurTexte("pluie"), lw = lt + 26;
+    Boite essais[2] = { { b.x + b.w - lw, b.y + 2, lw, aL }, { x0 + 4, b.y + 2, lw, aL } };
+    for (int q = 0; q < 2; q++) {
+      if (chevauche(essais[q])) continue;
+      Boite z = essais[q];
+      trame(z.x, z.y, 16, aL, 3);
+      canvas.drawRect(z.x, z.y, 16, aL, NOIR);
+      texte(z.x + 26, z.y + aL, "pluie");
+      break;
+    }
   }
 }
 

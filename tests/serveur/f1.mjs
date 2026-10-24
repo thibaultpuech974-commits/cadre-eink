@@ -58,3 +58,8 @@ console.log('portrait 48 h :', e.meteo.courbe.t.length, 'points ; GP :', e.f1.gp
 await post({ affichage: { rotation: 0 }, f1: { semaine: true } });
 for (const iso of ['2026-10-27T12:00:00+01:00', '2026-10-26T00:30:00+01:00']) { e = await etat(iso); console.log('semaine seulement', iso.slice(0, 10), '-> bloc f1', e.disposition.some(d => d.id === 'f1') ? 'affiché' : 'masqué'); }
 e = await etat('2026-10-12T12:00:00+02:00'); console.log('semaine seulement 2026-10-12 -> bloc f1', e.disposition.some(d => d.id === 'f1') ? 'affiché' : 'masqué');
+// Petit graphique comme sur le cadre de Thibault (maximum en haut a droite, pluie la nuit)
+await post({ f1: { semaine: false }, meteo: { courbeHeures: 24 }, disposition: [{ id: 'date', x: 0, y: 0, w: 12, h: 1 }, { id: 'meteo', x: 0, y: 1, w: 12, h: 2 },
+  { id: 'courbe', x: 0, y: 3, w: 7, h: 2 }, { id: 'jours', x: 0, y: 5, w: 7, h: 3 }, { id: 'f1', x: 7, y: 3, w: 5, h: 5 }] });
+e = await etat('2026-10-24T18:00:00+02:00');
+fs.writeFileSync('../rendu/d_courbe_petite.json', JSON.stringify(e));
