@@ -58,3 +58,15 @@ await post({ dev: true, devSecondes: 15 }); e = await etat(); console.log('mode 
 await post({ dev: false, disposition: [{ id: 'date', x: 0, y: 0, w: 12, h: 1 }, { id: 'bus', x: 0, y: 1, w: 6, h: 3 }] });
 fixer('2026-10-23T18:30:00+02:00'); e = await etat(); console.log('créneau, dispo normale avec bus, dispoBus vide -> blocs:', e.disposition.map(d => d.id).join(','), 'reveil', e.reveil);
 fixer('2026-10-23T21:00:00+02:00'); e = await etat(); console.log('hors créneau -> blocs:', e.disposition.map(d => d.id).join(','), 'reveil', e.reveil);
+// --- Mode nuit ---
+await post({ nuit: { actif: true, debut: '23:00', fin: '06:30', intervalleMin: 60 }, bus: { creneaux: [{ jours: [0,0,0,0,0,1,0], debut: '06:00', fin: '08:00' }] } });
+for (const [nom, iso] of [['ven 22h55 (avant la nuit)', '2026-10-23T22:55:00+02:00'], ['ven 23h10', '2026-10-23T23:10:00+02:00'],
+  ['sam 02h00', '2026-10-24T02:00:00+02:00'], ['sam 05h40 (créneau 6h)', '2026-10-24T05:40:00+02:00'], ['sam 06h10 (créneau)', '2026-10-24T06:10:00+02:00'],
+  ['dim 06h00 (fin 6h30)', '2026-10-25T06:00:00+01:00'], ['dim 06h31', '2026-10-25T06:31:00+01:00']]) {
+  fixer(iso); const e = await etat(); console.log(('nuit ' + nom).padEnd(34), 'reveil', e.reveil, 's');
+}
+// Écritures du statut limitées
+let n = 0; const put0 = KV.put; KV.put = async (k, v, o) => { if (k === 'statut') n++; return put0(k, v, o); };
+await post({ nuit: { actif: false } });
+for (let i = 0; i < 20; i++) { fixer(new Date(Date.UTC(2026, 9, 21, 10, 0) + i * 60000).toISOString()); await req('/api/etat?cle=secret&bat=3.9' + (i % 2 ? '1' : '0')); }
+console.log('écritures statut sur 20 réveils (1/min) :', n);

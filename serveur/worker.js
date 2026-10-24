@@ -22,6 +22,8 @@ const CONFIG_DEFAUT = {
   version: 1,
   reveilMin: 10,
   dev: false, devSecondes: 30,     // mode developpement : la carte ne dort pas
+  // Mode nuit : reveils espaces (economie de batterie), la plage peut passer minuit
+  nuit: { actif: false, debut: '23:00', fin: '07:00', intervalleMin: 60 },
   meteo: {
     ville: 'Nîmes', lat: 43.84, lon: 4.36,
     vent: true, details: true, soleil: true,
@@ -240,6 +242,7 @@ async function routeEtat(url, env) {
     contenu = await construireTableau(cfg, maintenant, env);
     Object.assign(etat, contenu);
     // Reveil dynamique : court pendant un creneau des bus, et cale sur le debut du prochain creneau
+    if (!cfg.dev && !contenu.busActif) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
     if (!cfg.dev && contenu.busPrevu) {
       if (contenu.busActif) etat.reveil = Math.max(3, cfg.bus.reveilMin || 3) * 60;
       else if (!cfg.bus.toujours) {
@@ -248,6 +251,7 @@ async function routeEtat(url, env) {
       }
     }
   } else if (cfg.mode === 'photo') {
+    if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
     contenu = { p: cfg.photo.version };
     etat.rotation = cfg.photo.rotation || 0;       // orientation choisie a l'envoi de la photo
   } else if (cfg.mode === 'pochette') {
@@ -255,6 +259,7 @@ async function routeEtat(url, env) {
       rotation: cfg.affichage.rotation || 0 };
     contenu = Object.assign({ v: cfg.pochette.version }, p);
     Object.assign(etat, p);
+    if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
   } else {
     contenu = { blanc: cfg.version };
   }
@@ -269,10 +274,10 @@ async function routeEtat(url, env) {
     // que toutes les 10 min, ou quand quelque chose d'important change (mode, version, batterie).
     const bat = parseFloat(url.searchParams.get('bat'));
     const ancien = JSON.parse((await env.CADRE.get('statut')) || 'null');
-    const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode,
+    const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil,
       fw: url.searchParams.get('fw') || (ancien && ancien.fw) || null };
     const aEcrire = !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
-      ancien.fw !== nouveau.fw || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
+      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
     if (aEcrire) {
       try { await env.CADRE.put('statut', JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
     }
@@ -543,6 +548,27 @@ function prochainDebutCreneau(o, maintenant) {
     }
   }
   return meilleur;
+}
+// --- Mode nuit ---
+// Minutes ecoulees depuis le debut de la nuit en cours, ou -1 si on n'est pas la nuit
+function dansNuit(n, maintenant) {
+  if (!n || !n.actif) return -1;
+  const w = mural(maintenant), min = w.hh * 60 + w.mi;
+  const d = enMinutes(n.debut), f = enMinutes(n.fin);
+  if (d === f) return -1;
+  const depuis = (min - d + 1440) % 1440, duree = (f - d + 1440) % 1440;
+  return depuis < duree ? depuis : -1;
+}
+// Intervalle de reveil (s) : la nuit, reveil espace, et cale sur la fin de la nuit
+function reveilNuit(cfg, maintenant, normal) {
+  const n = cfg.nuit, depuis = dansNuit(n, maintenant);
+  if (depuis >= 0) {
+    const w = mural(maintenant);
+    const resteS = ((enMinutes(n.fin) - (w.hh * 60 + w.mi) + 1440) % 1440) * 60 - w.ss;
+    const inter = Math.max(15, Math.min(240, n.intervalleMin || 60)) * 60;
+    return Math.max(60, Math.min(inter, resteS + 5));
+  }
+  return normal;
 }
 function texteCreneaux(o) {
   const J = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
@@ -1186,6 +1212,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Plus c'est court, plus le cadre réagit vite, mais plus la batterie se vide.</p>
   <label style="margin-top:12px"><input type="checkbox" id="dev"> Mode développement : la carte ne se met plus en veille et vérifie toutes les
     <select id="devSecondes" style="width:auto"><option>15</option><option>30</option><option>60</option></select> s</label>
+  <label style="margin-top:12px"><input type="checkbox" id="nuitActif"> Mode nuit de
+    <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto">,
+    réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
+  <p class="aide">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
   <p class="aide">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
   <button class="principal" onclick="enregistrerReveil()">Enregistrer</button>
   <div class="msg" id="msgReveil"></div>
@@ -1764,7 +1794,7 @@ function afficherStatut(s, maintenant) {
   else {
     t += 'Dernière connexion du cadre ' + duree(maintenant - s.vu) + '.';
     if (s.bat && s.bat > 2.5) t += ' Batterie ' + pourcentage(s.bat) + ' % (' + s.bat.toFixed(2).replace('.', ',') + ' V).';
-    var prochain = s.vu + (config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
+    var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
     if (prochain > 0) t += ' Prochain réveil dans ' + Math.max(1, Math.round(prochain / 60000)) + ' min environ.';
   }
   $('statut').textContent = t;
@@ -1812,6 +1842,9 @@ function remplirFormulaires() {
   remplirMeteo(); remplirAgenda(); remplirDispo(); remplirBus();
   $('reveil').value = String(config.reveilMin);
   $('dev').checked = !!config.dev; $('devSecondes').value = String(config.devSecondes || 30);
+  var n = config.nuit || {};
+  $('nuitActif').checked = !!n.actif; $('nuitDebut').value = n.debut || '23:00'; $('nuitFin').value = n.fin || '07:00';
+  $('nuitIntervalle').value = String(n.intervalleMin || 60);
   $('bordure').value = String(config.affichage.bordureApercu); appliquerBordure();
   var p = config.pochette;
   if (p.version) $('pochetteActuelle').textContent = 'Dernière pochette : ' + (p.titre || '?') + ' — ' + (p.artiste || '?') + ' (' + new Date(p.t).toLocaleString('fr-FR') + ')';
@@ -1883,7 +1916,9 @@ function enregistrerAgenda() {
 }
 function enregistrerReveil() {
   var dev = $('dev').checked;
-  enregistrer({ reveilMin: +$('reveil').value, dev: dev, devSecondes: +$('devSecondes').value }, 'msgReveil')
+  enregistrer({ reveilMin: +$('reveil').value, dev: dev, devSecondes: +$('devSecondes').value,
+    nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
+      intervalleMin: +$('nuitIntervalle').value } }, 'msgReveil')
     .then(function () {
       if (dev) $('msgReveil').textContent = "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).";
     });
