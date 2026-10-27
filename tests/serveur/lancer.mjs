@@ -1,0 +1,49 @@
+// Lance tous les tests du serveur et verifie leurs resultats.
+// Utilise par Cloudflare avant chaque deploiement (commande de build : npm test) :
+// si un test echoue, l'ancienne version du serveur reste en ligne.
+import { execFileSync } from 'child_process';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+const ici = dirname(fileURLToPath(import.meta.url));
+const ATTENDU = {
+  'test.mjs': [/UI 200/, /sans cle 401/, /sig stable true/, /^photo 200/m, /get photo 200 81600/, /pochette 200/, /apercu get 200 true/],
+  'scenes.mjs': [/migration : Bus \[date,bus\].*Grand Prix \[date,meteo,f1\].*f1=semaine/, /scène invalide -> \[\] reveil 0 blocs 0/,
+    /ven 16\/10 17h50 +Par défaut/, /ven 16\/10 18h30 +Bus +date,bus +réveil 180 s/, /ven 16\/10 19h58 +Bus .*réveil 125 s/,
+    /jeu 22\/10 22h00 +Vacances +date,courbe/, /ven 23\/10 08h00 \(GP\) +Grand Prix +date,f1,meteo +réveil 1800 s/,
+    /ven 23\/10 18h30 \(bus\+GP\) +Bus/, /lun 02\/11 09h00 +Par défaut/, /signature stable entre 12h00 et 12h05 : true/],
+  'f1.mjs': [/GP des États-Unis \| manche 20 \| Dans 2 jours \| Circuit of the Americas \| tracé 57 pts/, /\| Ce week-end \|/,
+    /~Ven 23 19h30 Essais libres 1/, /GP de Mexico \| manche 21 \| Dans 4 jours/, /courbe : départ 20h, 25 points/,
+    /portrait 48 h : 49 points/, /appels à Jolpica pour 20 réveils \(1 par heure\) : [12]$/m,
+    /copie du KV -> GP de Mexico/, /sans copie -> Calendrier F1 indisponible \(HTTP 429\)/],
+  'firmware.mjs': [/version lue : 20261004-140322/, /envoi mauvais fichier : 400/, /carte ancienne .* : 20261004-140322/,
+    /carte identique +-> fw proposé : undefined/, /carte plus récente +-> fw proposé : undefined/, /téléchargement : 200 300000/,
+    /après retrait -> fw proposé : undefined \| binaire : 404/],
+  'ecrans.mjs': [/enregistré : date,meteo,jours,courbe,f1,bus/, /écran 0 : date@24,24 912x65 meteo@24,105 912x227 jours@24,348 912x308 \| données : meteo$/m,
+    /écran 1 : courbe@24,24 912x308 f1@24,348 448x308 bus@488,348 448x308 \| données : meteo,f1,bus/, /signatures différentes : true/,
+    /statut écran 2 : 3.95 20261027-120000/, /photo double : 200 écran 0 octet 0 = 1 \| écran 1 octet 0 = 2 \| photo simple refusée : 400/,
+    /pochette : image \/ texte/, /pas de champ ecran/],
+  'secours.mjs': [/copies enregistrées : 3/, /panne 3 h : 18° \(prévu à 13 h\) Couvert \| courbe dès 13h \| Demain Colle de maths/,
+    /panne 2 jours : Météo indisponible \| agenda ok/, /après changement de ville puis panne : copie de Lyon utilisée/,
+    /retour à Nîmes, panne : Météo indisponible/, /écritures de copies pour 12 réveils en 2 h : 6 /],
+  'sauvegarde.mjs': [/sauvegarde : 200 attachment/, /restauration : 200 .*ville Lattes .*'Léa'.*'Gare'.*photo gardée : true/,
+    /fichier invalide : 400 400/, /ancienne sauvegarde : \[ 'Bus r=5' \] \| défaut \[ 'date' \]/],
+  'batterie.mjs': [/288 réveils : 48 écritures, 48 points, de 4100 à 3904 mV/, /après 40 jours : 1 point/, /sans mesure : rien enregistré/],
+};
+const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
+let echecs = 0;
+for (const [fichier, motifs] of Object.entries(ATTENDU)) {
+  let sortie = '';
+  try {
+    sortie = execFileSync(process.execPath, [fichier], { cwd: ici, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
+  } catch (e) {
+    console.log('ÉCHEC ' + fichier + ' : le test a planté\n' + (e.stdout || '') + (e.stderr || ''));
+    echecs++; continue;
+  }
+  const manquants = motifs.filter(m => !m.test(sortie)).concat(INTERDIT.filter(m => m.test(sortie)).map(m => 'interdit : ' + m));
+  if (manquants.length) {
+    echecs++;
+    console.log('ÉCHEC ' + fichier + ' :\n  ' + manquants.join('\n  ') + '\n--- sortie ---\n' + sortie);
+  } else console.log('ok   ' + fichier + ' (' + motifs.length + ' vérifications)');
+}
+console.log(echecs ? echecs + ' fichier(s) en échec : déploiement bloqué.' : 'Tous les tests du serveur passent.');
+process.exit(echecs ? 1 : 0);

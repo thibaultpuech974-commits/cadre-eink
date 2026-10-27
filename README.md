@@ -30,6 +30,8 @@ Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou l
 
 **Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur : plus besoin de copier-coller `worker.js`. Le secret `CLE` reste dans Cloudflare.
 
+**Tests avant chaque déploiement** : dans **Paramètres → Builds → Configuration du build**, mets `npm test` comme **commande de build** (la commande de déploiement reste `npx wrangler deploy`). Cloudflare lance alors les tests du serveur avant de déployer : si l'un d'eux échoue, le déploiement est annulé et l'ancienne version reste en ligne. Pour les lancer toi-même : `npm test` à la racine du dépôt (Node.js 18 ou plus, rien à installer).
+
 L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager → Sur l'écran d'accueil** la transforme en « app ».
 
 ---
