@@ -1,5 +1,6 @@
 // Deux écrans assemblés : grille doublée, chaque dalle reçoit sa moitié
-import { kv, req, post, etat } from './simu.mjs';
+import { kv, req, post, etat, horloge } from './simu.mjs';
+horloge('2026-10-27T12:00:00+01:00');
 const ids = e => e.disposition.map(d => d.id + '@' + d.x + ',' + d.y + ' ' + d.w + 'x' + d.h).join(' ');
 await post({ ecrans: { nb: 2, assemblage: 'cote', joint: 15 }, affichage: { rotation: 0 }, scenes: [],
   disposition: [

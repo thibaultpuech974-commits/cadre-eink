@@ -31,9 +31,17 @@ const saison = { MRData: { RaceTable: { Races: [
     FirstPractice: s('2026-10-30', '18:30:00Z'), SecondPractice: s('2026-10-30', '22:00:00Z'), ThirdPractice: s('2026-10-31', '17:30:00Z'), Qualifying: s('2026-10-31', '21:00:00Z') },
 ] } } };
 let maintenant;
+const ICS = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:a1', 'DTSTART;TZID=Europe/Paris:20261028T100000',
+  'DTEND;TZID=Europe/Paris:20261028T120000', 'SUMMARY:Colle de maths', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+export const horloge = iso => { maintenant = new Date(iso).getTime(); Date.now = () => maintenant; };
 globalThis.fetch = async (u) => {
   u = String(u);
+  globalThis.appels = globalThis.appels || {};
+  const nom = u.includes('open-meteo') ? 'meteo' : u.includes('ics.test') ? 'ics' : u.includes('jolpi') ? 'f1' : 'autre';
+  globalThis.appels[nom] = (globalThis.appels[nom] || 0) + 1;
+  if (globalThis.panne && globalThis.panne.includes(nom)) throw new Error('réseau coupé');
   if (u.includes('open-meteo')) return new Response(JSON.stringify(meteo(maintenant)));
+  if (u.includes('ics.test')) return new Response(ICS);
   if (u.includes('jolpi.ca') && globalThis.jolpicaKO) return new Response('Too Many Requests', { status: 429 });
   globalThis.appelsJolpica = (globalThis.appelsJolpica || 0) + 1;
   if (u.includes('jolpi.ca/ergast/f1/2026')) return new Response(JSON.stringify(saison));

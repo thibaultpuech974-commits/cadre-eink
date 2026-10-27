@@ -790,13 +790,25 @@ async function construireTableau(cfg, maintenant, env) {
     }
     return f1;
   };
-  if (scenes.some(sc => sc.f1)) await chargerGP();
+  // Toutes les sources sont interrogees en meme temps (reponse plus rapide = carte allumee moins
+  // longtemps). Meteo, agenda et F1 sont lancees avant de connaitre la scene, si une des dispositions
+  // possibles les utilise ; les bus (plus lourds) seulement si la scene affichee les montre.
+  const cle = rotation ? 'dispositionPortrait' : 'disposition';
+  const possibles = [cfg[cle]].concat(scenes.map(sc => sc[cle]));
+  const peutServir = ids => possibles.some(l => (l || []).some(d => ids.includes(d.id)));
+  const sansErreur = (p, message) => p.catch(e => { console.log(message, ':', e.message); return { erreur: message }; });
+  const pMeteo = peutServir(['meteo', 'heures', 'jours', 'courbe'])
+    ? sansErreur(chargerMeteo(cfg.meteo, env), 'Météo indisponible') : null;
+  const avecAgenda = cfg.agenda.urls.length || cfg.agenda.anniversaires.length;
+  const pAgenda = peutServir(['agenda']) && avecAgenda ? sansErreur(agenda(cfg.agenda, maintenant, env), 'Agenda indisponible') : null;
+  const pGP = scenes.some(sc => sc.f1) || peutServir(['f1']) ? chargerGP() : null;
+  if (scenes.some(sc => sc.f1)) await pGP;
   // Scene affichee : la premiere active de la liste, sinon la disposition par defaut
   const active = scenes.find(sc => sceneActive(sc, maintenant, f1));
-  const cle = rotation ? 'dispositionPortrait' : 'disposition';
   let dispo = validerDisposition(active ? active[cle] : cfg[cle], g);
-  if (dispo.some(d => d.id === 'f1')) await chargerGP();
   const presents = new Set(dispo.map(d => d.id));
+  const pBus = presents.has('bus') ? sansErreur(prochainsBus(cfg.bus, maintenant, env, true), 'Bus indisponibles') : null;
+  const [brutMeteo, resAgenda] = await Promise.all([pMeteo, pAgenda, pGP]);
   const res = {
     date: JOURS_LONGS[w.js] + ' ' + w.d + ' ' + MOIS[w.m - 1],
     rotation,
@@ -807,29 +819,21 @@ async function construireTableau(cfg, maintenant, env) {
       changement: prochainChangementScene(scenes, maintenant, f1) },
   };
   if (presents.has('f1')) { res.f1 = Object.assign({}, f1); delete res.f1.periodes; }
-  if (presents.has('meteo') || presents.has('heures') || presents.has('jours') || presents.has('courbe')) {
-    try {
-      res.meteo = await meteo(Object.assign({}, cfg.meteo,
-        { heures: presents.has('heures'), jours: presents.has('jours'), courbe: presents.has('courbe') }));
-    } catch (e) {
-      res.meteo = { erreur: 'Météo indisponible' };
-    }
-  }
-  if (presents.has('agenda')) {
-    if (!cfg.agenda.urls.length && !cfg.agenda.anniversaires.length) res.agenda = { erreur: 'Aucun calendrier configuré' };
+  if (['meteo', 'heures', 'jours', 'courbe'].some(id => presents.has(id))) {
+    if (!brutMeteo || brutMeteo.erreur) res.meteo = { erreur: 'Météo indisponible' };
     else {
-      try { res.agenda = await agenda(cfg.agenda, maintenant); }
-      catch (e) { res.agenda = { erreur: 'Agenda indisponible' }; }
+      try {
+        res.meteo = meteo(Object.assign({}, cfg.meteo,
+          { heures: presents.has('heures'), jours: presents.has('jours'), courbe: presents.has('courbe') }), brutMeteo);
+      } catch (e) { console.log('Météo :', e.message); res.meteo = { erreur: 'Météo indisponible' }; }
     }
   }
+  if (presents.has('agenda')) res.agenda = avecAgenda ? resAgenda : { erreur: 'Aucun calendrier configuré' };
   if (presents.has('bus')) {
-    try {
-      res.bus = await prochainsBus(cfg.bus, maintenant, env, true);
-      // Les minutes restantes ne sont pas affichees : on les retire pour que la signature
-      // ne change pas a chaque minute (sinon l'ecran clignoterait a chaque reveil)
-      for (const p of res.bus.passages || []) delete p.m;
-    }
-    catch (e) { res.bus = { erreur: 'Bus indisponibles' }; }
+    res.bus = await pBus;
+    // Les minutes restantes ne sont pas affichees : on les retire pour que la signature
+    // ne change pas a chaque minute (sinon l'ecran clignoterait a chaque reveil)
+    for (const p of res.bus.passages || []) delete p.m;
   }
   return res;
 }
@@ -855,16 +859,56 @@ function directionVent(deg) {
   return ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 }
 
-async function meteo(o) {
+// Copie de secours d'une source externe : enregistree au plus une fois par heure (limite d'ecritures
+// du KV), relue si la source ne repond pas, tant qu'elle a moins de ageMax ms.
+// 'controle' : si la copie a ete faite pour une autre adresse (ville changee), elle n'est pas utilisee.
+async function avecSecours(env, cle, ageMax, charger, controle = '') {
+  try {
+    const texte = await charger();
+    try {
+      const { metadata } = await env.CADRE.getWithMetadata(cle);
+      if (!metadata || Date.now() - metadata.t > 3600e3 || metadata.c !== controle) {
+        await env.CADRE.put(cle, texte, { metadata: { t: Date.now(), c: controle } });
+      }
+    } catch (e) { /* limite d'ecriture : sans gravite */ }
+    return { texte, ancien: false };
+  } catch (e) {
+    const { value, metadata } = await env.CADRE.getWithMetadata(cle);
+    if (value && metadata && metadata.c === controle && Date.now() - metadata.t < ageMax) {
+      console.log('Copie de secours utilisee pour', cle, ':', e.message);
+      return { texte: value, ancien: true };
+    }
+    throw e;
+  }
+}
+
+// Donnees brutes d'Open-Meteo (avec copie de secours si le service ne repond pas)
+async function chargerMeteo(o, env) {
   const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + o.lat + '&longitude=' + o.lon +
     '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,' +
     'wind_speed_10m,wind_direction_10m,wind_gusts_10m' +
     '&hourly=temperature_2m,weather_code,precipitation_probability,is_day' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max' +
     '&timezone=Europe%2FParis&forecast_days=8&wind_speed_unit=kmh';
-  const r = await fetch(url, { cf: { cacheTtl: 600, cacheEverything: true } });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const d = await r.json();
+  const { texte, ancien } = await avecSecours(env, 'secours-meteo', 24 * 3600e3, async () => {
+    const r = await fetch(url, { cf: { cacheTtl: 600, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }, url);
+  const d = JSON.parse(texte);
+  if (ancien) {
+    // Copie ancienne : on prend la prevision heure par heure de l'heure actuelle comme "meteo actuelle"
+    const w = mural(Date.now()), h = dateDuJour(w) + 'T' + deux(w.hh) + ':00';
+    const i = d.hourly.time.indexOf(h);
+    if (i < 0) throw new Error('copie trop ancienne');
+    Object.assign(d.current, { time: h, temperature_2m: d.hourly.temperature_2m[i], apparent_temperature: d.hourly.temperature_2m[i],
+      weather_code: d.hourly.weather_code[i], is_day: d.hourly.is_day[i] });
+    const j = d.daily.time.indexOf(dateDuJour(w));
+    if (j > 0) for (const k in d.daily) d.daily[k] = d.daily[k].slice(j);   // "aujourd'hui" en premier
+  }
+  return d;
+}
+function meteo(o, d) {
   const c = d.current;
   const res = {
     ville: pourEcran(o.ville),
@@ -945,15 +989,22 @@ async function meteo(o) {
 // ---------------------------------------------------------------------
 //  Agenda iCloud (fichiers .ics), y compris les evenements recurrents
 // ---------------------------------------------------------------------
-async function agenda(o, maintenant) {
+async function agenda(o, maintenant, env) {
   const fin = maintenant + Math.max(1, o.joursMax || 14) * 86400e3;
-  let tous = [];
-  for (const brut of o.urls) {
+  // Tous les calendriers en meme temps ; un calendrier qui ne repond pas est remplace par sa
+  // derniere copie (jusqu'a 7 jours), ou ignore si les autres repondent
+  const lus = await Promise.allSettled(o.urls.map(async brut => {
     const url = brut.replace(/^webcal:\/\//i, 'https://');
-    const r = await fetch(url, { cf: { cacheTtl: 900, cacheEverything: true } });
-    if (!r.ok) throw new Error('Calendrier HTTP ' + r.status);
-    tous = tous.concat(evenementsICS(await r.text(), maintenant, fin));
-  }
+    const { texte } = await avecSecours(env, 'secours-ics-' + await empreinte(url), 7 * 86400e3, async () => {
+      const r = await fetch(url, { cf: { cacheTtl: 900, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error('Calendrier HTTP ' + r.status);
+      return r.text();
+    });
+    return evenementsICS(texte, maintenant, fin);
+  }));
+  const reussis = lus.filter(l => l.status === 'fulfilled');
+  if (o.urls.length && !reussis.length) throw lus[0].reason;
+  let tous = [].concat(...reussis.map(l => l.value));
   tous = tous.concat(anniversaires(o.anniversaires || [], maintenant, fin));
   tous.sort((a, b) => a.debut - b.debut || (b.journee ? 1 : 0) - (a.journee ? 1 : 0));
 
