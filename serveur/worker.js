@@ -153,6 +153,8 @@ export default {
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
+      if (chemin === '/api/sauvegarde' && m === 'GET') return await routeSauvegarde(env);
+      if (chemin === '/api/sauvegarde' && m === 'POST') return await routeRestaurer(req, env);
       if (chemin === '/api/photo' && m === 'POST') return await routeEnvoyerPhoto(req, url, env);
       if (chemin === '/api/photo' && m === 'GET') return await routeBinaire(env, url.searchParams.get('ecran') === '1' ? 'photo1' : 'photo', 'application/octet-stream');
       if (chemin === '/api/pochette' && m === 'POST') return await routeEnvoyerPochette(req, url, env);
@@ -361,8 +363,17 @@ async function routeLireConfig(env) {
 async function routeEcrireConfig(req, env) {
   const modif = await req.json();
   const cfg = await lireConfig(env);
-  delete modif.version; delete modif.photo; delete modif.pochette;
-  if (modif.mode && !MODES.includes(modif.mode)) return texte('Mode inconnu', 400);
+  const ignorees = preparerModif(modif, cfg);
+  if (typeof ignorees === 'string') return texte(ignorees, 400);
+  fusionner(cfg, modif);
+  cfg.version++;
+  await ecrireConfig(env, cfg);
+  return json({ config: cfg, ignorees });
+}
+// Verifie et nettoie une modification des reglages (renvoie les anniversaires illisibles, ou un message d'erreur)
+function preparerModif(modif, cfg) {
+  delete modif.version; delete modif.photo; delete modif.pochette; delete modif.firmware;
+  if (modif.mode && !MODES.includes(modif.mode)) return 'Mode inconnu';
   if (modif.ecrans) {
     const e = modif.ecrans;
     modif.ecrans = { nb: e.nb === 2 ? 2 : 1, assemblage: e.assemblage === 'dessus' ? 'dessus' : 'cote',
@@ -384,10 +395,39 @@ async function routeEcrireConfig(req, env) {
     ignorees = r.ignorees;
     delete modif.agenda.anniversairesTexte;
   }
-  fusionner(cfg, modif);
-  cfg.version++;
+  return ignorees;
+}
+
+// --- Sauvegarde des reglages (fichier telecharge depuis la page web) et restauration ---
+async function routeSauvegarde(env) {
+  const cfg = await lireConfig(env);
+  for (const k of ['version', 'photo', 'pochette', 'firmware']) delete cfg[k];
+  const bus = await env.CADRE.get('bus');
+  const date = dateDuJour(mural(Date.now()));
+  return new Response(JSON.stringify({ format: 'cadre-eink', version: 1, date, config: cfg, bus: bus ? JSON.parse(bus) : null }, null, 1), {
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store',
+      'content-disposition': 'attachment; filename="cadre-reglages-' + date + '.json"' },
+  });
+}
+async function routeRestaurer(req, env) {
+  let s;
+  try { s = await req.json(); } catch (e) { return texte('Fichier illisible', 400); }
+  if (!s || s.format !== 'cadre-eink' || !s.config || typeof s.config !== 'object') return texte("Ce fichier n'est pas une sauvegarde du cadre", 400);
+  const actuel = await lireConfig(env);
+  const modif = JSON.parse(JSON.stringify(s.config));
+  const anniv = modif.agenda && Array.isArray(modif.agenda.anniversaires) ? modif.agenda.anniversaires : null;
+  const err = preparerModif(modif, actuel);
+  if (typeof err === 'string') return texte(err, 400);
+  // On repart des reglages par defaut (et non des reglages actuels), en gardant photo, pochette et programme
+  const cfg = fusionner(JSON.parse(JSON.stringify(CONFIG_DEFAUT)), modif);
+  if (anniv) cfg.agenda.anniversaires = anniv.filter(a => a && a.nom && a.j >= 1 && a.j <= 31 && a.m >= 1 && a.m <= 12)
+    .map(a => ({ nom: String(a.nom).slice(0, 40), j: a.j | 0, m: a.m | 0, a: a.a | 0 }));
+  if (!Array.isArray(modif.scenes)) migrerScenes(cfg, modif);
+  for (const k of ['photo', 'pochette', 'firmware']) if (actuel[k]) cfg[k] = actuel[k];
+  cfg.version = actuel.version + 1;
   await ecrireConfig(env, cfg);
-  return json({ config: cfg, ignorees });
+  if (s.bus && Array.isArray(s.bus.passages)) { await env.CADRE.put('bus', JSON.stringify(s.bus)); indexBusCache = null; }
+  return json({ config: cfg });
 }
 
 // Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative)
@@ -1572,6 +1612,16 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
 </details>
 
+<details class="menu" id="menu-sauvegarde">
+  <summary>Sauvegarde des réglages</summary>
+  <p class="aide">Télécharge un fichier avec tous tes réglages : scènes et dispositions, météo, agendas, anniversaires, arrêts de bus, réveil. Garde-le en lieu sûr (Fichiers, iCloud Drive) : il permet de tout remettre comme avant après une fausse manipulation. Les photos et la pochette ne sont pas incluses.</p>
+  <button class="principal" onclick="telechargerReglages()">Télécharger mes réglages</button>
+  <p class="aide" style="margin-top:14px">Restaurer une sauvegarde (remplace tous les réglages actuels) :</p>
+  <input type="file" id="fichierReglages" accept=".json,application/json">
+  <button style="width:100%;margin-top:8px" onclick="restaurerReglages()">Restaurer</button>
+  <div class="msg" id="msgSauvegarde"></div>
+</details>
+
 <p class="aide" style="text-align:center"><a href="#" onclick="deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
 </div>
 </main>
@@ -2608,6 +2658,28 @@ for (var i = 0; i < menus.length; i++) {
   });
 }
 function toutesLesSections(ouvrir) { for (var k = 0; k < menus.length; k++) menus[k].open = ouvrir; }
+
+// --- Sauvegarde des reglages ---
+function telechargerReglages() {
+  api('/api/sauvegarde').then(function (r) { return r.blob(); }).then(function (b) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'cadre-reglages-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+    message('msgSauvegarde', 'Fichier téléchargé.');
+  }).catch(function (e) { message('msgSauvegarde', 'Erreur : ' + e.message); });
+}
+function restaurerReglages() {
+  var f = $('fichierReglages').files[0];
+  if (!f) { message('msgSauvegarde', "Choisis d'abord le fichier de sauvegarde."); return; }
+  f.text().then(function (t) {
+    return api('/api/sauvegarde', { method: 'POST', headers: { 'content-type': 'application/json' }, body: t });
+  }).then(function () {
+    message('msgSauvegarde', 'Réglages restaurés : le cadre les appliquera à son prochain réveil.');
+    return charger();
+  }).catch(function (e) { message('msgSauvegarde', 'Erreur : ' + e.message); });
+}
 
 demarrer();
 setInterval(function () { if (config) rafraichir().catch(function () {}); }, 60000);
