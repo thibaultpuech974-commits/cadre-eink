@@ -34,6 +34,8 @@ let maintenant;
 globalThis.fetch = async (u) => {
   u = String(u);
   if (u.includes('open-meteo')) return new Response(JSON.stringify(meteo(maintenant)));
+  if (u.includes('jolpi.ca') && globalThis.jolpicaKO) return new Response('Too Many Requests', { status: 429 });
+  globalThis.appelsJolpica = (globalThis.appelsJolpica || 0) + 1;
   if (u.includes('jolpi.ca/ergast/f1/2026')) return new Response(JSON.stringify(saison));
   if (u.includes('jolpi.ca')) return new Response(JSON.stringify({ MRData: { RaceTable: { Races: [] } } }));
   throw new Error('fetch inattendu ' + u);
@@ -59,3 +61,14 @@ await post({ meteo: { courbeHeures: 24 }, disposition: [{ id: 'date', x: 0, y: 0
   { id: 'courbe', x: 0, y: 3, w: 7, h: 2 }, { id: 'jours', x: 0, y: 5, w: 7, h: 3 }, { id: 'f1', x: 7, y: 3, w: 5, h: 5 }] });
 e = await etat('2026-10-24T18:00:00+02:00');
 fs.writeFileSync('../rendu/d_courbe_petite.json', JSON.stringify(e));
+// Jolpica refuse (HTTP 429) : le calendrier gardé dans le KV prend le relais ; requêtes limitées
+globalThis.appelsJolpica = 0; kv.delete('f1-2026');
+for (let i = 0; i < 20; i++) await etat(new Date(Date.UTC(2026, 9, 27, 8, i * 60)).toISOString());
+console.log('appels à Jolpica pour 20 réveils (1 par heure) :', globalThis.appelsJolpica);
+globalThis.jolpicaKO = true;
+e = await etat('2026-10-28T09:00:00+01:00');
+console.log('Jolpica en panne, copie du KV ->', e.f1.erreur || e.f1.gp + ' ' + e.f1.quand);
+kv.clear();
+await post({ disposition: [{ id: 'f1', x: 0, y: 0, w: 6, h: 4 }] });
+e = await etat('2026-10-28T09:00:00+01:00');
+console.log('Jolpica en panne, sans copie ->', e.f1.erreur);

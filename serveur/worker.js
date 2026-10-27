@@ -742,7 +742,10 @@ async function construireTableau(cfg, maintenant, env) {
   const scenes = cfg.scenes || [];
   let f1 = null;
   const chargerGP = async () => {
-    if (!f1) { try { f1 = await grandPrix(maintenant); } catch (e) { f1 = { erreur: 'Calendrier F1 indisponible' }; } }
+    if (!f1) {
+      try { f1 = await grandPrix(maintenant, env); }
+      catch (e) { console.log('F1 :', e.message); f1 = { erreur: 'Calendrier F1 indisponible (' + e.message + ')' }; }
+    }
     return f1;
   };
   if (scenes.some(sc => sc.f1)) await chargerGP();
@@ -969,10 +972,30 @@ function titreF1(t) {
 // ---------------------------------------------------------------------
 //  Prochain Grand Prix de F1 : calendrier Jolpica (ex-Ergast), trace du circuit integre
 // ---------------------------------------------------------------------
-async function calendrierF1(annee) {
-  const r = await fetch('https://api.jolpi.ca/ergast/f1/' + annee + '.json?limit=40', { cf: { cacheTtl: 21600, cacheEverything: true } });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return (((await r.json()).MRData || {}).RaceTable || {}).Races || [];
+// Le calendrier est garde dans le KV et redemande au plus toutes les 12 h : Jolpica limite le nombre
+// de requetes par adresse, et les Workers Cloudflare partagent leurs adresses avec beaucoup d'autres
+// sites (d'ou des refus "HTTP 429"). Si Jolpica ne repond pas, on garde la derniere copie.
+const CLES_GP = ['round', 'raceName', 'date', 'time', 'Circuit', 'FirstPractice', 'SecondPractice', 'ThirdPractice',
+  'SprintQualifying', 'SprintShootout', 'Sprint', 'Qualifying'];
+async function calendrierF1(annee, env) {
+  const cle = 'f1-' + annee;
+  let memo = null;
+  try { memo = JSON.parse((await env.CADRE.get(cle)) || 'null'); } catch (e) { /* pas de copie */ }
+  if (memo && Date.now() - memo.t < 12 * 3600e3) return memo.courses;
+  try {
+    const r = await fetch('https://api.jolpi.ca/ergast/f1/' + annee + '.json?limit=40',
+      { cf: { cacheTtl: 21600, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const courses = ((((await r.json()).MRData || {}).RaceTable || {}).Races || [])
+      .map(c => Object.fromEntries(CLES_GP.filter(k => c[k] !== undefined).map(k => [k, c[k]])));
+    if (courses.length || !memo || !memo.courses.length) {
+      try { await env.CADRE.put(cle, JSON.stringify({ t: Date.now(), courses })); } catch (e) { /* limite d'ecriture */ }
+    }
+    return courses.length || !memo ? courses : memo.courses;
+  } catch (e) {
+    if (memo) return memo.courses;          // copie plus ancienne : toujours valable pour les horaires
+    throw new Error(e.name === 'TimeoutError' ? 'pas de réponse' : e.message);
+  }
 }
 const SESSIONS_JOLPICA = [['FirstPractice', 'Essais libres 1'], ['SecondPractice', 'Essais libres 2'],
   ['ThirdPractice', 'Essais libres 3'], ['SprintQualifying', 'Qualif. sprint'], ['SprintShootout', 'Qualif. sprint'],
@@ -989,11 +1012,11 @@ function circuitProche(lat, lon) {
   return dMin < 10 ? meilleur : null;          // a moins de 10 km
 }
 const numJour = w => Date.UTC(w.y, w.m - 1, w.d) / 86400e3;
-async function grandPrix(maintenant) {
+async function grandPrix(maintenant, env) {
   const an = mural(maintenant).y;
   // Le GP reste affiche jusqu'a 3 h apres le depart de la course
-  let gp = (await calendrierF1(an)).find(c => instantF1(c) + 3 * 3600e3 > maintenant);
-  if (!gp) { try { gp = (await calendrierF1(an + 1))[0]; } catch (e) { /* pas encore publie */ } }
+  let gp = (await calendrierF1(an, env)).find(c => instantF1(c) + 3 * 3600e3 > maintenant);
+  if (!gp) { try { gp = (await calendrierF1(an + 1, env))[0]; } catch (e) { /* pas encore publie */ } }
   if (!gp) return { erreur: 'Saison de F1 terminée' };
   const course = instantF1(gp);
   const sessions = SESSIONS_JOLPICA.filter(([k]) => gp[k]).map(([k, n]) => [instantF1(gp[k]), n, 3600e3]);

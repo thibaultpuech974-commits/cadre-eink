@@ -34,6 +34,8 @@ let maintenant;
 globalThis.fetch = async (u) => {
   u = String(u);
   if (u.includes('open-meteo')) return new Response(JSON.stringify(meteo(maintenant)));
+  if (u.includes('jolpi.ca') && globalThis.jolpicaKO) return new Response('Too Many Requests', { status: 429 });
+  globalThis.appelsJolpica = (globalThis.appelsJolpica || 0) + 1;
   if (u.includes('jolpi.ca/ergast/f1/2026')) return new Response(JSON.stringify(saison));
   if (u.includes('jolpi.ca')) return new Response(JSON.stringify({ MRData: { RaceTable: { Races: [] } } }));
   throw new Error('fetch inattendu ' + u);
