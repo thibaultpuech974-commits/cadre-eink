@@ -153,6 +153,7 @@ export default {
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
+      if (chemin === '/api/batterie' && m === 'GET') return texte((await env.CADRE.get('batterie' + (url.searchParams.get('ecran') === '1' ? '1' : ''))) || '{"pts":[]}');
       if (chemin === '/api/sauvegarde' && m === 'GET') return await routeSauvegarde(env);
       if (chemin === '/api/sauvegarde' && m === 'POST') return await routeRestaurer(req, env);
       if (chemin === '/api/photo' && m === 'POST') return await routeEnvoyerPhoto(req, url, env);
@@ -343,8 +344,21 @@ async function routeEtat(url, env) {
     const cleStatut = ecran ? 'statut' + ecran : 'statut';
     const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
-      fw: fwCarte || (ancien && ancien.fw) || null };
-    const aEcrire = !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
+      fw: fwCarte || (ancien && ancien.fw) || null, hb: (ancien && ancien.hb) || 0 };
+    // Historique de la batterie : un point par heure, 30 jours (24 ecritures par jour au plus)
+    let historique = false;
+    if (nouveau.bat > 2.5 && maintenant - nouveau.hb >= 55 * 60000) {
+      try {
+        const cleH = 'batterie' + (ecran ? ecran : '');
+        const h = JSON.parse((await env.CADRE.get(cleH)) || '{"pts":[]}');
+        const debut = Math.floor((maintenant - 30 * 86400e3) / 60000);
+        h.pts = h.pts.filter(p => p[0] >= debut);
+        h.pts.push([Math.floor(maintenant / 60000), Math.round(nouveau.bat * 1000)]);   // minutes, millivolts
+        await env.CADRE.put(cleH, JSON.stringify(h));
+        nouveau.hb = maintenant; historique = true;
+      } catch (e) { /* limite d'ecriture */ }
+    }
+    const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
     if (aEcrire) {
       try { await env.CADRE.put(cleStatut, JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
@@ -1612,6 +1626,17 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
 </details>
 
+<details class="menu" id="menu-batterie">
+  <summary>Batterie</summary>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
+    <button data-jours="2" onclick="dessinerBatterie(2)">2 jours</button>
+    <button data-jours="7" onclick="dessinerBatterie(7)">7 jours</button>
+    <button data-jours="30" onclick="dessinerBatterie(30)">30 jours</button>
+  </div>
+  <canvas id="courbeBatterie" style="width:100%;height:220px;display:block"></canvas>
+  <p class="aide" id="resumeBatterie">Chargement…</p>
+</details>
+
 <details class="menu" id="menu-sauvegarde">
   <summary>Sauvegarde des réglages</summary>
   <p class="aide">Télécharge un fichier avec tous tes réglages : scènes et dispositions, météo, agendas, anniversaires, arrêts de bus, réveil. Garde-le en lieu sûr (Fichiers, iCloud Drive) : il permet de tout remettre comme avant après une fausse manipulation. Les photos et la pochette ne sont pas incluses.</p>
@@ -2658,6 +2683,79 @@ for (var i = 0; i < menus.length; i++) {
   });
 }
 function toutesLesSections(ouvrir) { for (var k = 0; k < menus.length; k++) menus[k].open = ouvrir; }
+
+// --- Historique de la batterie : courbe et estimation de l'autonomie ---
+var histoBat = null, joursBat = 7;
+function chargerBatterie() {
+  var deux = config.ecrans && config.ecrans.nb === 2;
+  var lire = function (n) { return api('/api/batterie' + (n ? '?ecran=1' : '')).then(function (r) { return r.json(); }).catch(function () { return { pts: [] }; }); };
+  return Promise.all(deux ? [lire(0), lire(1)] : [lire(0)]).then(function (h) { histoBat = h; dessinerBatterie(joursBat); });
+}
+// Depuis la derniere recharge : pente (en % par jour) par moindres carres
+function estimation(pts) {
+  var debut = 0;
+  for (var i = 1; i < pts.length; i++) if (pts[i][1] - pts[i - 1][1] > 80) debut = i;     // +0,08 V : recharge
+  var p = pts.slice(debut).map(function (q) { return [q[0] / 1440, pourcentage(q[1] / 1000)]; });
+  if (p.length < 6 || p[p.length - 1][0] - p[0][0] < 0.5) return null;
+  var n = p.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  p.forEach(function (q) { sx += q[0]; sy += q[1]; sxx += q[0] * q[0]; sxy += q[0] * q[1]; });
+  var pente = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  return { pente: pente, depuis: p[0][0], actuel: p[n - 1][1] };
+}
+function dessinerBatterie(jours) {
+  joursBat = jours;
+  var b = document.querySelectorAll('[data-jours]');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', +b[i].getAttribute('data-jours') === jours);
+  if (!histoBat) return;
+  var cv = $('courbeBatterie'), r = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W) return;                                  // menu ferme : dessine a l'ouverture
+  cv.width = W * r; cv.height = H * r;
+  var ctx = cv.getContext('2d'); ctx.scale(r, r);
+  var css = getComputedStyle(document.documentElement);
+  var cTexte = css.getPropertyValue('--texte').trim(), cDoux = css.getPropertyValue('--doux').trim(), cTrait = css.getPropertyValue('--trait').trim();
+  var g = 46, d = 8, hh = 10, bas = 22, fin = Date.now() / 60000, debut = fin - jours * 1440;
+  var X = function (m) { return g + (m - debut) / (fin - debut) * (W - g - d); };
+  var Y = function (p) { return hh + (100 - p) / 100 * (H - hh - bas); };
+  ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.lineWidth = 1;
+  [0, 25, 50, 75, 100].forEach(function (p) {
+    ctx.strokeStyle = cTrait; ctx.beginPath(); ctx.moveTo(g, Y(p) + 0.5); ctx.lineTo(W - d, Y(p) + 0.5); ctx.stroke();
+    ctx.fillStyle = cDoux; ctx.textAlign = 'right'; ctx.fillText(p + ' %', g - 6, Y(p) + 4);
+  });
+  // Jours en bas (minuit, heure du navigateur)
+  var j0 = new Date(debut * 60000); j0.setHours(24, 0, 0, 0);
+  var pas = Math.max(1, Math.ceil(52 * jours / (W - g - d)));          // assez de place pour chaque date
+  ctx.textAlign = 'center';
+  for (var dj = new Date(j0), k = 0; dj.getTime() < fin * 60000; dj.setDate(dj.getDate() + 1), k++) {   // de minuit en minuit (heure d'ete comprise)
+    if (k % pas) continue;
+    var t = dj.getTime(), x = X(t / 60000);
+    ctx.strokeStyle = cTrait; ctx.beginPath(); ctx.moveTo(x + 0.5, hh); ctx.lineTo(x + 0.5, H - bas); ctx.stroke();
+    var dt = new Date(t);
+    ctx.fillStyle = cDoux; ctx.fillText(['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'][dt.getDay()] + ' ' + dt.getDate(), x, H - 6);
+  }
+  var texte = [];
+  histoBat.forEach(function (h, n) {
+    var pts = h.pts.filter(function (q) { return q[0] >= debut; });
+    ctx.strokeStyle = cTexte; ctx.lineWidth = 2; ctx.setLineDash(n ? [6, 4] : []);
+    ctx.beginPath();
+    pts.forEach(function (q, i) {
+      var x = X(q[0]), y = Y(pourcentage(q[1] / 1000));
+      if (i && q[0] - pts[i - 1][0] > 180) ctx.moveTo(x, y); else if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);   // trou > 3 h : pas de trait
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+    var nom = histoBat.length > 1 ? 'Écran ' + (n + 1) + ' : ' : '';
+    var e = estimation(h.pts);
+    if (!h.pts.length) texte.push(nom + 'pas encore de mesure (un point par heure).');
+    else if (!e) texte.push(nom + "pas encore assez de mesures depuis la dernière recharge pour estimer l'autonomie.");
+    else if (e.pente >= -0.2) texte.push(nom + 'la batterie ne baisse presque pas (' + e.actuel + ' %).');
+    else {
+      var restant = e.actuel / -e.pente;
+      texte.push(nom + 'environ ' + (-e.pente).toFixed(1).replace('.', ',') + ' % par jour : il reste à peu près ' +
+        (restant < 2 ? Math.round(restant * 24) + ' heures' : Math.round(restant) + ' jours') + ' (' + e.actuel + ' %).');
+    }
+  });
+  $('resumeBatterie').textContent = texte.join(' ') + (histoBat.length > 1 ? ' Trait plein : écran 1, pointillés : écran 2.' : '');
+}
+$('menu-batterie').addEventListener('toggle', function () { if (this.open) (histoBat ? Promise.resolve() : chargerBatterie()).then(function () { dessinerBatterie(joursBat); }); });
 
 // --- Sauvegarde des reglages ---
 function telechargerReglages() {

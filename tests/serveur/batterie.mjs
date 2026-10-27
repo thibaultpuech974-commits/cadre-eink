@@ -1,0 +1,23 @@
+// Historique de la batterie : un point par heure, 30 jours
+import { kv, req, post, horloge } from './simu.mjs';
+await post({ scenes: [], disposition: [{ id: 'date', x: 0, y: 0, w: 12, h: 1 }] });
+let ecritures = 0; const set0 = kv.set.bind(kv);
+kv.set = (k, v) => { if (k === 'batterie') ecritures++; return set0(k, v); };
+// 2 jours de réveils toutes les 10 min, batterie de 4,10 V à 3,90 V
+const t0 = Date.UTC(2026, 9, 20, 0, 0);
+for (let i = 0; i < 288; i++) {
+  horloge(new Date(t0 + i * 600e3).toISOString());
+  await req('/api/etat?bat=' + (4.10 - 0.2 * i / 288).toFixed(3));
+}
+let h = JSON.parse(kv.get('batterie').v);
+console.log('2 jours, 288 réveils :', ecritures, 'écritures,', h.pts.length, 'points, de', h.pts[0][1], 'à', h.pts.at(-1)[1], 'mV');
+// 40 jours plus tard : les points de plus de 30 jours sont supprimés
+horloge(new Date(t0 + 40 * 86400e3).toISOString());
+await req('/api/etat?bat=4.15');
+h = JSON.parse((await (await req('/api/batterie')).text()));
+console.log('après 40 jours :', h.pts.length, 'point(s)');
+// Sans batterie mesurée (USB) : pas de point
+kv.delete('batterie');
+horloge(new Date(t0 + 41 * 86400e3).toISOString());
+await req('/api/etat?bat=0.00');
+console.log('sans mesure :', kv.has('batterie') ? 'point ajouté (erreur)' : 'rien enregistré');
