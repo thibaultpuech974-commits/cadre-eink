@@ -53,6 +53,10 @@ const CONFIG_DEFAUT = {
     { id: 'agenda', x: 0, y: 7, w: 8, h: 5 },
   ],
   affichage: { traits: true, bordureApercu: 10, rotation: 0 },
+  // Un ou deux ecrans identiques assembles en un seul grand ecran : 'cote' (cote a cote) ou 'dessus'
+  // (l'un au-dessus de l'autre). L'ecran 0 est celui de gauche (ou du haut). joint = espace entre
+  // les zones affichables des deux dalles, en mm (sert a l'apercu et a la photo).
+  ecrans: { nb: 1, assemblage: 'cote', joint: 15 },
   photo: { version: 0, t: 0 },
   pochette: { version: 0, titre: '', artiste: '', album: '', t: 0 },
   // Prochains bus : arrets choisis sur la page web, lignes (null = toutes)
@@ -70,19 +74,32 @@ const ROTATIONS = [0, 1, 3];
 const TAILLES = { S: 0.8, M: 1, L: 1.25, XL: 1.5 };
 const POLICES = ['moderne', 'helvetica', 'classique', 'machine'];    // 0 = paysage, 1 = portrait, 3 = portrait inverse
 // Grille selon l'orientation : 12 x 8 cases en paysage, 8 x 12 en portrait
-function grille(rotation) {
+// Avec deux ecrans, la grille est doublee (24 x 8 cote a cote, 12 x 16 l'un sur l'autre en paysage) ;
+// pc x pr = cases d'une dalle. Un bloc ne peut pas etre a cheval sur la jointure.
+function grille(rotation, ecrans) {
   const portrait = rotation === 1 || rotation === 3;
-  const g = portrait ? { cols: 8, rangs: 12, L: HAUTEUR, H: LARGEUR } : { cols: 12, rangs: 8, L: LARGEUR, H: HAUTEUR };
-  g.caseL = (g.L - 2 * MARGE + GOUTTIERE) / g.cols;
-  g.caseH = (g.H - 2 * MARGE + GOUTTIERE) / g.rangs;
+  const g = portrait ? { pc: 8, pr: 12, L: HAUTEUR, H: LARGEUR } : { pc: 12, pr: 8, L: LARGEUR, H: HAUTEUR };
+  const deux = ecrans && ecrans.nb === 2;
+  g.nx = deux && ecrans.assemblage !== 'dessus' ? 2 : 1;
+  g.ny = deux && ecrans.assemblage === 'dessus' ? 2 : 1;
+  g.cols = g.pc * g.nx; g.rangs = g.pr * g.ny;
+  g.caseL = (g.L - 2 * MARGE + GOUTTIERE) / g.pc;
+  g.caseH = (g.H - 2 * MARGE + GOUTTIERE) / g.pr;
   return g;
 }
+// Ecran (0 ou 1) qui contient le bloc, ou -1 s'il est a cheval sur la jointure
+function ecranDuBloc(d, g) {
+  const ex = Math.floor(d.x / g.pc), ey = Math.floor(d.y / g.pr);
+  if (ex !== Math.floor((d.x + d.w - 1) / g.pc) || ey !== Math.floor((d.y + d.h - 1) / g.pr)) return -1;
+  return ex + ey;
+}
 function enPixels(d, g) {
+  const n = ecranDuBloc(d, g), x = d.x % g.pc, y = d.y % g.pr;   // position dans sa dalle
   return {
-    id: d.id,
+    id: d.id, n,
     e: TAILLES[d.t] || 1,
     f: Math.max(0, POLICES.indexOf(d.p)),
-    x: Math.round(MARGE + d.x * g.caseL), y: Math.round(MARGE + d.y * g.caseH),
+    x: Math.round(MARGE + x * g.caseL), y: Math.round(MARGE + y * g.caseH),
     w: Math.round(d.w * g.caseL - GOUTTIERE), h: Math.round(d.h * g.caseH - GOUTTIERE),
   };
 }
@@ -95,6 +112,7 @@ function validerDisposition(liste, g) {
     if (!min || res.some(r => r.id === d.id)) continue;
     const x = d.x | 0, y = d.y | 0, w = d.w | 0, h = d.h | 0;
     if (x < 0 || y < 0 || w < min.w || h < min.h || x + w > g.cols || y + h > g.rangs) continue;
+    if (ecranDuBloc({ x, y, w, h }, g) < 0) continue;
     const cases = [];
     for (let i = x; i < x + w; i++) for (let j = y; j < y + h; j++) cases.push(i + ',' + j);
     if (cases.some(c => occupe.has(c))) continue;
@@ -136,11 +154,11 @@ export default {
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
       if (chemin === '/api/photo' && m === 'POST') return await routeEnvoyerPhoto(req, url, env);
-      if (chemin === '/api/photo' && m === 'GET') return await routeBinaire(env, 'photo', 'application/octet-stream');
+      if (chemin === '/api/photo' && m === 'GET') return await routeBinaire(env, url.searchParams.get('ecran') === '1' ? 'photo1' : 'photo', 'application/octet-stream');
       if (chemin === '/api/pochette' && m === 'POST') return await routeEnvoyerPochette(req, url, env);
       if (chemin === '/api/pochette.jpg' && m === 'GET') return await routeBinaire(env, 'pochette', 'image/jpeg');
       if (chemin === '/api/apercu' && m === 'POST') return await routeEnvoyerApercu(req, url, env);
-      if (chemin === '/api/apercu' && m === 'GET') return await routeLireApercu(env);
+      if (chemin === '/api/apercu' && m === 'GET') return await routeLireApercu(url, env);
       if (chemin === '/api/gtfs' && m === 'GET') return await routeGTFS();
       if (chemin === '/api/bus-index' && m === 'POST') return await routeIndexBus(req, env);
       if (chemin === '/api/firmware' && m === 'POST') return await routeEnvoyerFirmware(req, url, env);
@@ -262,6 +280,9 @@ async function routeEtat(url, env) {
   const cfg = await lireConfig(env);
   const pourInterface = url.searchParams.has('ui');
   const maintenant = Date.now();
+  // Avec deux ecrans, chaque dalle demande sa moitie : ?ecran=0 (gauche / haut) ou ?ecran=1
+  const deuxEcrans = cfg.ecrans && cfg.ecrans.nb === 2;
+  const ecran = deuxEcrans && url.searchParams.get('ecran') === '1' ? 1 : 0;
   const etat = {
     mode: cfg.mode,
     reveil: cfg.dev ? Math.max(10, cfg.devSecondes | 0) : Math.max(3, cfg.reveilMin) * 60,
@@ -271,6 +292,13 @@ async function routeEtat(url, env) {
 
   if (cfg.mode === 'tableau') {
     contenu = await construireTableau(cfg, maintenant, env);
+    // Seulement les blocs de cette dalle, et seulement les donnees dont ils ont besoin
+    // (sinon un changement sur l'autre dalle ferait rafraichir celle-ci pour rien)
+    contenu.disposition = contenu.disposition.filter(d => d.n === ecran);
+    contenu.disposition.forEach(d => delete d.n);
+    const ici = new Set(contenu.disposition.map(d => d.id));
+    if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
+    for (const id of ['agenda', 'bus', 'f1']) if (!ici.has(id)) delete contenu[id];
     Object.assign(etat, contenu);
     // Scene affichee : son rythme (ou le rythme normal / de nuit), et reveil cale sur le prochain changement de scene
     const sc = contenu.scene;
@@ -282,11 +310,13 @@ async function routeEtat(url, env) {
     }
   } else if (cfg.mode === 'photo') {
     if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
-    contenu = { p: cfg.photo.version };
+    contenu = { p: cfg.photo.version, ecran };
     etat.rotation = cfg.photo.rotation || 0;       // orientation choisie a l'envoi de la photo
   } else if (cfg.mode === 'pochette') {
     const p = { titre: pourEcran(cfg.pochette.titre), artiste: pourEcran(cfg.pochette.artiste), album: pourEcran(cfg.pochette.album),
       rotation: cfg.affichage.rotation || 0 };
+    // Deux ecrans : la pochette sur l'un, le titre en grand sur l'autre
+    if (deuxEcrans) p.partie = ecran === 0 ? 'image' : 'texte';
     contenu = Object.assign({ v: cfg.pochette.version }, p);
     Object.assign(etat, p);
     if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
@@ -296,6 +326,7 @@ async function routeEtat(url, env) {
   // La signature change seulement quand le contenu a afficher change :
   // le cadre ne rafraichit l'ecran que dans ce cas.
   etat.sig = await empreinte(cfg.mode + JSON.stringify(contenu));
+  if (deuxEcrans) etat.ecran = ecran;
   // Mise a jour par Wi-Fi : proposee seulement si le programme envoye est plus recent que celui de la carte
   // (versions "AAAAMMJJ-hhmmss" : date de compilation)
   const fwCarte = VERSION_FW.test(url.searchParams.get('fw') || '') ? url.searchParams.get('fw') : null;
@@ -307,13 +338,14 @@ async function routeEtat(url, env) {
     // L'offre gratuite limite les ecritures (~1 000 par jour) : l'etat du cadre n'est enregistre
     // que toutes les 10 min, ou quand quelque chose d'important change (mode, version, batterie).
     const bat = parseFloat(url.searchParams.get('bat'));
-    const ancien = JSON.parse((await env.CADRE.get('statut')) || 'null');
+    const cleStatut = ecran ? 'statut' + ecran : 'statut';
+    const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null };
     const aEcrire = !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
     if (aEcrire) {
-      try { await env.CADRE.put('statut', JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
+      try { await env.CADRE.put(cleStatut, JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
     }
   }
   return json(etat);
@@ -322,7 +354,8 @@ async function routeEtat(url, env) {
 async function routeLireConfig(env) {
   const cfg = await lireConfig(env);
   const statut = JSON.parse((await env.CADRE.get('statut')) || 'null');
-  return json({ config: cfg, statut, maintenant: Date.now() });
+  const statut1 = cfg.ecrans && cfg.ecrans.nb === 2 ? JSON.parse((await env.CADRE.get('statut1')) || 'null') : null;
+  return json({ config: cfg, statut, statut1, maintenant: Date.now() });
 }
 
 async function routeEcrireConfig(req, env) {
@@ -330,9 +363,15 @@ async function routeEcrireConfig(req, env) {
   const cfg = await lireConfig(env);
   delete modif.version; delete modif.photo; delete modif.pochette;
   if (modif.mode && !MODES.includes(modif.mode)) return texte('Mode inconnu', 400);
-  if (modif.disposition !== undefined) modif.disposition = validerDisposition(modif.disposition, grille(0));
-  if (modif.dispositionPortrait !== undefined) modif.dispositionPortrait = validerDisposition(modif.dispositionPortrait, grille(1));
-  if (modif.scenes !== undefined) modif.scenes = validerScenes(modif.scenes);
+  if (modif.ecrans) {
+    const e = modif.ecrans;
+    modif.ecrans = { nb: e.nb === 2 ? 2 : 1, assemblage: e.assemblage === 'dessus' ? 'dessus' : 'cote',
+      joint: Math.max(0, Math.min(100, +e.joint || 0)) };
+  }
+  const ecrans = modif.ecrans || cfg.ecrans;
+  if (modif.disposition !== undefined) modif.disposition = validerDisposition(modif.disposition, grille(0, ecrans));
+  if (modif.dispositionPortrait !== undefined) modif.dispositionPortrait = validerDisposition(modif.dispositionPortrait, grille(1, ecrans));
+  if (modif.scenes !== undefined) modif.scenes = validerScenes(modif.scenes, ecrans);
   delete modif.dispositionBus; delete modif.dispositionBusPortrait; delete modif.f1;
   if (modif.affichage && modif.affichage.rotation !== undefined && !ROTATIONS.includes(modif.affichage.rotation)) delete modif.affichage.rotation;
   if (modif.agenda && Array.isArray(modif.agenda.urls)) {
@@ -367,9 +406,12 @@ function lireAnniversaires(texte) {
 
 async function routeEnvoyerPhoto(req, url, env) {
   const donnees = await req.arrayBuffer();
-  if (donnees.byteLength !== OCTETS) return texte('La photo doit faire exactement ' + OCTETS + ' octets', 400);
-  await env.CADRE.put('photo', donnees);
   const cfg = await lireConfig(env);
+  const nb = cfg.ecrans && cfg.ecrans.nb === 2 ? 2 : 1;
+  // Une image par dalle, mises bout a bout (ecran 0 puis ecran 1)
+  if (donnees.byteLength !== OCTETS * nb) return texte('La photo doit faire exactement ' + OCTETS * nb + ' octets', 400);
+  await env.CADRE.put('photo', donnees.slice(0, OCTETS));
+  if (nb === 2) await env.CADRE.put('photo1', donnees.slice(OCTETS));
   const r = parseInt(url.searchParams.get('r') || '0', 10);
   cfg.photo = { version: cfg.photo.version + 1, t: Date.now(), rotation: ROTATIONS.includes(r) ? r : 0 };
   cfg.mode = 'photo';
@@ -449,12 +491,12 @@ async function routeEnvoyerApercu(req, url, env) {
   const donnees = await req.arrayBuffer();
   if (donnees.byteLength !== OCTETS) return texte('Taille incorrecte', 400);
   const r = parseInt(url.searchParams.get('r') || '0', 10);
-  await env.CADRE.put('apercu', donnees, { metadata: { t: Date.now(), r: ROTATIONS.includes(r) ? r : 0 } });
+  await env.CADRE.put(url.searchParams.get('ecran') === '1' ? 'apercu1' : 'apercu', donnees, { metadata: { t: Date.now(), r: ROTATIONS.includes(r) ? r : 0 } });
   return texte('ok');
 }
 
-async function routeLireApercu(env) {
-  const { value, metadata } = await env.CADRE.getWithMetadata('apercu', 'arrayBuffer');
+async function routeLireApercu(url, env) {
+  const { value, metadata } = await env.CADRE.getWithMetadata(url.searchParams.get('ecran') === '1' ? 'apercu1' : 'apercu', 'arrayBuffer');
   if (!value) return texte('Pas encore d\'apercu', 404);
   return new Response(value, {
     headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'x-date': String(metadata ? metadata.t : 0), 'x-rotation': String(metadata && metadata.r ? metadata.r : 0) },
@@ -635,7 +677,7 @@ function validerCreneaux(liste) {
     debut: heureOK(c && c.debut) || '07:00', fin: heureOK(c && c.fin) || '08:00',
   })).filter(c => c.jours.some(Boolean) && enMinutes(c.fin) > enMinutes(c.debut)).slice(0, 8);
 }
-function validerScenes(liste) {
+function validerScenes(liste, ecrans) {
   const vus = new Set();
   return (Array.isArray(liste) ? liste : []).slice(0, 8).map((sc, i) => {
     let id = String(sc && sc.id || '').replace(/[^a-z0-9-]/gi, '').slice(0, 20) || 's' + i;
@@ -647,8 +689,8 @@ function validerScenes(liste) {
       f1: ['semaine', 'weekend'].includes(sc.f1) ? sc.f1 : '',
       du: dateOK(sc.du), au: dateOK(sc.au),
       reveilMin: [0, 3, 5, 10, 15, 30, 60].includes(+sc.reveilMin) ? +sc.reveilMin : 0,
-      disposition: validerDisposition(sc.disposition, grille(0)),
-      dispositionPortrait: validerDisposition(sc.dispositionPortrait, grille(1)),
+      disposition: validerDisposition(sc.disposition, grille(0, ecrans)),
+      dispositionPortrait: validerDisposition(sc.dispositionPortrait, grille(1, ecrans)),
     };
   });
 }
@@ -737,7 +779,7 @@ async function prochainsBus(o, maintenant, env, ignorerCreneau) {
 async function construireTableau(cfg, maintenant, env) {
   const w = mural(maintenant);
   const rotation = ROTATIONS.includes(cfg.affichage.rotation) ? cfg.affichage.rotation : 0;
-  const g = grille(rotation);
+  const g = grille(rotation, cfg.ecrans);
   // Grand Prix de F1 : utile pour le bloc F1 et pour les scenes "semaine / week-end de GP"
   const scenes = cfg.scenes || [];
   let f1 = null;
@@ -1240,6 +1282,7 @@ details.menu[open]{padding-bottom:16px}
 .ecran{width:100%;aspect-ratio:960/680;background:#fff;border:var(--bord,10px) solid #2a2927;border-radius:6px;display:block;image-rendering:auto;box-sizing:content-box;max-width:calc(100% - 2 * var(--bord,10px))}
 .ecran.editeur{border-width:8px;max-width:calc(100% - 16px)}
 .editeur{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden;margin-top:6px}
+.editeur .jointure{position:absolute;background:#2a2927}
 .editeur .case{position:absolute;border:1px dashed #dcd9d2;border-radius:3px;box-sizing:border-box}
 .editeur .widget{position:absolute;background:#f3f2ef;border:2px solid #1d1c1a;border-radius:6px;color:#1d1c1a;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;font-size:13px;line-height:1.2;text-align:center;cursor:grab;padding:4px 18px 4px 4px;box-sizing:border-box;overflow:hidden}
 .editeur .widget.actif{background:#e6e3dc;cursor:grabbing;box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:2}
@@ -1330,6 +1373,16 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   </div>
   <p class="aide" id="aideDefaut">Scène affichée quand aucune autre n'est active. Son rythme se règle dans « Réveil du cadre ».</p>
   <p class="aide">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
+    <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
+    <button data-ecr="dessus" onclick="choisirEcrans(2, 'dessus')">Deux l'un sur l'autre</button>
+  </div>
+  <div id="ligneJoint" class="cache">
+    <label>Espace entre les zones d'affichage des deux écrans
+      <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
+    <p class="aide">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
+  </div>
   <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
     <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
     <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
@@ -1507,7 +1560,7 @@ function demarrer() {
 function rafraichir() {
   return api('/api/config').then(function (r) { return r.json(); }).then(function (d) {
     config = d.config;
-    afficherStatut(d.statut, d.maintenant);
+    afficherStatut(d.statut, d.maintenant, d.statut1);
     chargerApercu();
   });
 }
@@ -1523,11 +1576,27 @@ $('bordure').onchange = function () {
 // --- Editeur de disposition (meme grille que le serveur) ---
 var MARGE = 24, GOUT = 16;
 // Grille selon l'orientation : 12 x 8 cases en paysage, 8 x 12 en portrait
+// Ecrans : un seul, ou deux assembles (cote a cote / l'un sur l'autre) en une grande image
+var ECR = { nb: 1, assemblage: 'cote', joint: 15 };
+var MM_PAR_PX = 0.2817;              // taille d'un point de la dalle 13,3" (270,4 mm / 960)
 function grilleUI(r) {
   var portrait = r === 1 || r === 3;
-  var g = portrait ? { cols: 8, rangs: 12, L: HAUT, H: LARG } : { cols: 12, rangs: 8, L: LARG, H: HAUT };
-  g.cl = (g.L - 2 * MARGE + GOUT) / g.cols; g.ch = (g.H - 2 * MARGE + GOUT) / g.rangs;
+  var g = portrait ? { pc: 8, pr: 12, L: HAUT, H: LARG } : { pc: 12, pr: 8, L: LARG, H: HAUT };
+  var deux = ECR.nb === 2;
+  g.nx = deux && ECR.assemblage !== 'dessus' ? 2 : 1; g.ny = deux && ECR.assemblage === 'dessus' ? 2 : 1;
+  g.cols = g.pc * g.nx; g.rangs = g.pr * g.ny;
+  g.cl = (g.L - 2 * MARGE + GOUT) / g.pc; g.ch = (g.H - 2 * MARGE + GOUT) / g.pr;
+  g.J = deux ? Math.round((+ECR.joint || 0) / MM_PAR_PX) : 0;     // jointure reelle (photo)
+  g.JE = deux ? Math.max(g.J, 24) : 0;                             // jointure dessinee (editeur, apercu)
+  g.VL = g.L * g.nx + g.J * (g.nx - 1); g.VH = g.H * g.ny + g.J * (g.ny - 1);
+  g.VLE = g.L * g.nx + g.JE * (g.nx - 1); g.VHE = g.H * g.ny + g.JE * (g.ny - 1);
   return g;
+}
+// Ecran (0 ou 1) d'un bloc en cases, -1 s'il est a cheval sur la jointure
+function ecranDe(d, g) {
+  var ex = Math.floor(d.x / g.pc), ey = Math.floor(d.y / g.pr);
+  if (ex !== Math.floor((d.x + d.w - 1) / g.pc) || ey !== Math.floor((d.y + d.h - 1) / g.pr)) return -1;
+  return ex + ey;
 }
 var rot = 0, G = grilleUI(0);
 var INFOS = {
@@ -1548,6 +1617,21 @@ var DISPO_DEFAUT = {
        { id: 'heures', x: 0, y: 3, w: 8, h: 2 }, { id: 'jours', x: 0, y: 5, w: 8, h: 2 },
        { id: 'agenda', x: 0, y: 7, w: 8, h: 5 } ]
 };
+// Avec deux ecrans : la disposition habituelle sur le premier, d'autres blocs sur le second
+var DISPO_SECOND = {
+  0: [ { id: 'courbe', x: 0, y: 0, w: 12, h: 4 }, { id: 'agenda', x: 0, y: 4, w: 7, h: 4 }, { id: 'f1', x: 7, y: 4, w: 5, h: 4 } ],
+  1: [ { id: 'courbe', x: 0, y: 0, w: 8, h: 4 }, { id: 'f1', x: 0, y: 4, w: 8, h: 4 }, { id: 'jours', x: 0, y: 8, w: 8, h: 4 } ]
+};
+function dispoParDefaut(o) {
+  var l = copie(DISPO_DEFAUT[o]);
+  if (ECR.nb !== 2) return l;
+  var g = grilleUI(o ? 1 : 0), dx = g.nx === 2 ? g.pc : 0, dy = g.ny === 2 ? g.pr : 0;
+  var second = copie(DISPO_SECOND[o]).map(function (d) { d.x += dx; d.y += dy; return d; });
+  // le second ecran reprend des blocs du premier : on les retire du premier
+  l = l.filter(function (d) { return !second.some(function (x) { return x.id === d.id; }); });
+  l.forEach(function (d) { if (d.id === 'jours') { d.x = 0; d.w = g.pc; } });   // la place de l'agenda est libre
+  return l.concat(second);
+}
 // Dispositions de la scene "Par defaut" : '0' paysage, '1' portrait ; les autres scenes ont les leurs
 var dispos = { '0': [], '1': [] };
 var scenes = [];
@@ -1687,8 +1771,10 @@ function cleOri(r) { return (r === 1 || r === 3) ? 1 : 0; }
 function copie(o) { return JSON.parse(JSON.stringify(o)); }
 function pct(v, total) { return (v / total * 100) + '%'; }
 function placer(el, d) {
-  el.style.left = pct(MARGE + d.x * G.cl, G.L); el.style.top = pct(MARGE + d.y * G.ch, G.H);
-  el.style.width = pct(d.w * G.cl - GOUT, G.L); el.style.height = pct(d.h * G.ch - GOUT, G.H);
+  var ex = Math.floor(d.x / G.pc), ey = Math.floor(d.y / G.pr);
+  var ox = ex * (G.L + G.JE) + MARGE + (d.x - ex * G.pc) * G.cl, oy = ey * (G.H + G.JE) + MARGE + (d.y - ey * G.pr) * G.ch;
+  el.style.left = pct(ox, G.VLE); el.style.top = pct(oy, G.VHE);
+  el.style.width = pct(d.w * G.cl - GOUT, G.VLE); el.style.height = pct(d.h * G.ch - GOUT, G.VHE);
 }
 function etiquette(el, d) {
   el.classList.toggle('bas', d.h < 2);
@@ -1697,18 +1783,22 @@ function etiquette(el, d) {
 function chevauche(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
 function libre(d, sauf) {
   if (d.x < 0 || d.y < 0 || d.x + d.w > G.cols || d.y + d.h > G.rangs) return false;
+  if (ecranDe(d, G) < 0) return false;            // pas a cheval sur la jointure
   for (var i = 0; i < dispo.length; i++) if (dispo[i].id !== sauf && chevauche(d, dispo[i])) return false;
   return true;
 }
 function borner(v, a, b) { return Math.max(a, Math.min(b, v)); }
 // Donne au canvas/element la forme de l'ecran (paysage ou portrait)
-function formeEcran(el, r) {
-  var portrait = cleOri(r) === 1;
-  el.style.aspectRatio = portrait ? '680 / 960' : '960 / 680';
-  el.style.width = portrait ? 'min(calc(100% - 2 * var(--bord, 10px)), 420px)' : '';
-  el.style.margin = portrait ? '6px auto 0' : '';
+function formeEcran(el, r, w, h) {
+  if (!w) { var g = grilleUI(r); w = g.VLE; h = g.VHE; }
+  var haut = h > w;
+  el.style.aspectRatio = w + ' / ' + h;
+  el.style.width = haut ? 'min(calc(100% - 2 * var(--bord, 10px)), ' + Math.round(600 * w / h) + 'px)' : '';
+  el.style.margin = haut ? '6px auto 0' : '';
 }
 function remplirDispo() {
+  ECR = copie(config.ecrans || { nb: 1, assemblage: 'cote', joint: 15 });
+  afficherEcrans();
   dispos['0'] = copie(config.disposition || []);
   dispos['1'] = copie(config.dispositionPortrait || []);
   scenes = copie(config.scenes || []);
@@ -1726,12 +1816,48 @@ function appliquerRotation(r) {
   dessinerEditeur();
 }
 function choisirRotation(r) { ranger(); appliquerRotation(r); }
+function afficherEcrans() {
+  var cle = ECR.nb === 2 ? ECR.assemblage : '1';
+  var b = document.querySelectorAll('[data-ecr]');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', b[i].getAttribute('data-ecr') === cle);
+  $('ligneJoint').classList.toggle('cache', ECR.nb !== 2);
+  $('joint').value = String(ECR.joint);
+}
+// Change l'assemblage : les blocs du second ecran suivent (ou disparaissent s'il n'y a plus qu'un ecran)
+function choisirEcrans(nb, assemblage) {
+  ranger();
+  var avant = { 0: grilleUI(0), 1: grilleUI(1) };
+  ECR.nb = nb; ECR.assemblage = assemblage;
+  var apres = { 0: grilleUI(0), 1: grilleUI(1) }, perdus = 0;
+  var convertir = function (liste, o) {
+    var a = avant[o], n = apres[o];
+    return (liste || []).filter(function (d) {
+      if (ecranDe(d, a) <= 0) return true;
+      if (n.nx * n.ny === 1) { perdus++; return false; }
+      d.x = d.x % a.pc + (n.nx > 1 ? n.pc : 0); d.y = d.y % a.pr + (n.ny > 1 ? n.pr : 0);
+      return true;
+    });
+  };
+  dispos['0'] = convertir(dispos['0'], 0); dispos['1'] = convertir(dispos['1'], 1);
+  scenes.forEach(function (sc) { sc.disposition = convertir(sc.disposition, 0); sc.dispositionPortrait = convertir(sc.dispositionPortrait, 1); });
+  afficherEcrans();
+  appliquerRotation(rot);
+  if (image) tramer();
+  message('msgDispo', (perdus ? perdus + ' bloc(s) du second écran retiré(s). ' : '') + 'Pense à enregistrer.');
+}
+$('joint').onchange = function () { ECR.joint = Math.max(0, Math.min(100, +this.value || 0)); appliquerRotation(rot); if (image) tramer(); };
 function dessinerEditeur() {
   var ed = $('editeur');
   ed.innerHTML = '';
   for (var y = 0; y < G.rangs; y++) for (var x = 0; x < G.cols; x++) {
     var c = document.createElement('div'); c.className = 'case';
     placer(c, { x: x, y: y, w: 1, h: 1 }); ed.appendChild(c);
+  }
+  if (G.nx * G.ny > 1) {                          // jointure entre les deux ecrans
+    var j = document.createElement('div'); j.className = 'jointure';
+    if (G.nx > 1) { j.style.left = pct(G.L, G.VLE); j.style.width = pct(G.JE, G.VLE); j.style.top = '0'; j.style.height = '100%'; }
+    else { j.style.top = pct(G.H, G.VHE); j.style.height = pct(G.JE, G.VHE); j.style.left = '0'; j.style.width = '100%'; }
+    ed.appendChild(j);
   }
   dispo.forEach(function (d) {
     var el = document.createElement('div');
@@ -1761,7 +1887,7 @@ function brancher(el, d) {
     ev.preventDefault();
     var r = $('editeur').getBoundingClientRect();
     depart = { px: ev.clientX, py: ev.clientY, d: copie(d), redim: ev.target.classList.contains('poignee'),
-      cl: r.width * G.cl / G.L, ch: r.height * G.ch / G.H, bouge: false };
+      cl: r.width * G.cl / G.VLE, ch: r.height * G.ch / G.VHE, bouge: false };
     el.setPointerCapture(ev.pointerId);
     el.classList.add('actif');
   });
@@ -1806,7 +1932,7 @@ function basculer(id, actif) {
   dessinerEditeur();
 }
 function reinitialiserDispo() {
-  dispo = copie(DISPO_DEFAUT[cleOri(rot)]);
+  dispo = dispoParDefaut(cleOri(rot));
   ranger();
   $('traits').checked = true;
   dessinerEditeur();
@@ -1815,7 +1941,7 @@ function reinitialiserDispo() {
 function enregistrerDispo() {
   lireFormScene(); ranger();
   var avant = scenes.map(function (sc) { return (sc.creneaux || []).length; });
-  enregistrer({ disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
+  enregistrer({ ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
     affichage: { traits: $('traits').checked, rotation: rot } }, 'msgDispo')
     .then(function () {
       var perdu = (config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; });
@@ -2095,7 +2221,7 @@ function charger() {
   return api('/api/config').then(function (r) { return r.json(); }).then(function (d) {
     config = d.config;
     remplirFormulaires();
-    afficherStatut(d.statut, d.maintenant);
+    afficherStatut(d.statut, d.maintenant, d.statut1);
     chargerApercu();
   });
 }
@@ -2115,7 +2241,7 @@ function duree(ms) {
   return 'il y a ' + Math.round(h / 24) + ' jours';
 }
 var NOMS = { tableau: 'tableau de bord', photo: 'photo', pochette: 'pochette', blanc: 'écran blanc' };
-function afficherStatut(s, maintenant) {
+function afficherStatut(s, maintenant, s1) {
   dernierStatut = s;
   if (config.mode === 'tableau' && s && s.sc) setTimeout(dessinerPuces, 0);
   var t = 'Mode demandé : ' + NOMS[config.mode] + '. ';
@@ -2126,6 +2252,10 @@ function afficherStatut(s, maintenant) {
     if (s.bat && s.bat > 2.5) t += ' Batterie ' + pourcentage(s.bat) + ' % (' + s.bat.toFixed(2).replace('.', ',') + ' V).';
     var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
     if (prochain > 0) t += ' Prochain réveil dans ' + Math.max(1, Math.round(prochain / 60000)) + ' min environ.';
+  }
+  if (config.ecrans && config.ecrans.nb === 2) {
+    t += s1 ? ' Écran 2 : dernière connexion ' + duree(maintenant - s1.vu) + (s1.bat && s1.bat > 2.5 ? ', batterie ' + pourcentage(s1.bat) + ' %' : '') + '.'
+      : " L'écran 2 ne s'est pas encore connecté.";
   }
   $('statut').textContent = t;
   afficherFirmware(s);
@@ -2139,6 +2269,15 @@ function afficherStatut(s, maintenant) {
 }
 
 // Affiche des bits (1 = noir) de taille w x h dans un canvas
+// Dessine des bits (1 = noir) de taille w x h a la position (ox, oy) d'un canvas deja dimensionne
+function dessinerBitsA(ctx, octets, w, h, ox, oy) {
+  var img = ctx.createImageData(w, h);
+  for (var i = 0; i < w * h; i++) {
+    var v = (octets[i >> 3] >> (7 - (i & 7))) & 1 ? 20 : 255;
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, ox, oy);
+}
 function dessinerBits(canvas, octets, w, h) {
   w = w || LARG; h = h || HAUT;
   canvas.width = w; canvas.height = h;
@@ -2151,17 +2290,36 @@ function dessinerBits(canvas, octets, w, h) {
   }
   ctx.putImageData(img, 0, 0);
 }
-function chargerApercu() {
-  api('/api/apercu').then(function (r) {
+function lireApercu(n) {
+  return api('/api/apercu' + (n ? '?ecran=1' : '')).then(function (r) {
     var t = +r.headers.get('x-date'), rr = +(r.headers.get('x-rotation') || 0);
-    return r.arrayBuffer().then(function (b) {
-      var l = physVersLog(new Uint8Array(b), rr);
-      formeEcran($('apercu'), rr);
-      dessinerBits($('apercu'), l.bits, l.w, l.h);
-      if (t) $('statut').textContent += ' Aperçu du ' + new Date(t).toLocaleString('fr-FR') + '.';
+    return r.arrayBuffer().then(function (b) { return { t: t, rr: rr, l: physVersLog(new Uint8Array(b), rr) }; });
+  }).catch(function () { return null; });
+}
+function chargerApercu() {
+  var deux = config.ecrans && config.ecrans.nb === 2;
+  Promise.all(deux ? [lireApercu(0), lireApercu(1)] : [lireApercu(0)]).then(function (res) {
+    var ok = res.filter(Boolean);
+    if (!ok.length) throw new Error('aucun');
+    var ancien = ECR; ECR = config.ecrans || ECR;          // assemblage enregistre
+    var g = grilleUI(ok[0].rr);
+    ECR = ancien;
+    var cv = $('apercu'); cv.width = g.VLE; cv.height = g.VHE; formeEcran(cv, ok[0].rr, g.VLE, g.VHE);
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#2a2927'; ctx.fillRect(0, 0, g.VLE, g.VHE);
+    res.forEach(function (a, n) {
+      var ox = g.nx > 1 ? n * (g.L + g.JE) : 0, oy = g.ny > 1 ? n * (g.H + g.JE) : 0;
+      if (a) dessinerBitsA(ctx, a.l.bits, a.l.w, a.l.h, ox, oy);
+      else {
+        ctx.fillStyle = '#eee'; ctx.fillRect(ox, oy, g.L, g.H);
+        ctx.fillStyle = '#888'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('Écran ' + (n + 1) + " : pas encore d'aperçu", ox + g.L / 2, oy + g.H / 2);
+      }
     });
+    var t = Math.max.apply(null, ok.map(function (a) { return a.t || 0; }));
+    if (t) $('statut').textContent += ' Aperçu du ' + new Date(t).toLocaleString('fr-FR') + '.';
   }).catch(function () {
-    var cv = $('apercu'); cv.width = LARG; cv.height = HAUT; formeEcran(cv, 0);
+    var cv = $("apercu"); cv.width = LARG; cv.height = HAUT; formeEcran(cv, 0, LARG, HAUT);
     var ctx = cv.getContext('2d');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, LARG, HAUT);
     ctx.fillStyle = '#888'; ctx.font = '32px sans-serif'; ctx.textAlign = 'center';
@@ -2277,9 +2435,11 @@ for (var i = 0; i < radios.length; i++) radios[i].onchange = tramer;
 
 function tramer() {
   if (!image) return;
-  // La photo est preparee "a l'endroit" selon l'orientation du cadre
+  // La photo est preparee "a l'endroit" selon l'orientation du cadre, sur toute la surface
+  // (avec deux ecrans : les deux dalles et la jointure, cachee, pour que l'image reste continue)
   var rp = (config && config.affichage.rotation) || 0;
-  var LARG = rp ? 680 : 960, HAUT = rp ? 960 : 680;
+  var gP = grilleUI(rp);
+  var LARG = gP.VL, HAUT = gP.VH;
   var c = document.createElement('canvas'); c.width = LARG; c.height = HAUT;
   var ctx = c.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, LARG, HAUT);
@@ -2294,7 +2454,7 @@ function tramer() {
     var v = 0.299 * px[j * 4] + 0.587 * px[j * 4 + 1] + 0.114 * px[j * 4 + 2];
     g[j] = (v - 128) * k + 128 + lum;
   }
-  bitsPhoto = new Uint8Array(OCTETS);
+  bitsPhoto = new Uint8Array(Math.ceil(LARG * HAUT / 8));
   for (var y = 0; y < HAUT; y++) for (var x = 0; x < LARG; x++) {
     var n = y * LARG + x, ancien = g[n], nouveau = ancien < 128 ? 0 : 255, err = ancien - nouveau;
     if (nouveau === 0) bitsPhoto[n >> 3] |= 0x80 >> (n & 7);
@@ -2305,14 +2465,34 @@ function tramer() {
       if (x + 1 < LARG) g[n + LARG + 1] += err / 16;
     }
   }
-  formeEcran($('photoTramee'), rp);
+  formeEcran($('photoTramee'), rp, LARG, HAUT);
   dessinerBits($('photoTramee'), bitsPhoto, LARG, HAUT);
-  rotationPhoto = rp;
+  if (gP.J) {                                     // partie cachee par la jointure
+    var cx = $('photoTramee').getContext('2d');
+    cx.fillStyle = 'rgba(42,41,39,0.85)';
+    if (gP.nx > 1) cx.fillRect(gP.L, 0, gP.J, HAUT); else cx.fillRect(0, gP.H, LARG, gP.J);
+  }
+  rotationPhoto = rp; grillePhoto = gP;
+}
+var grillePhoto = null;
+// Decoupe l'image en une image par dalle (en "physique", comme la carte l'attend), mises bout a bout
+function photoParEcran() {
+  var g = grillePhoto, n = g.nx * g.ny, res = new Uint8Array(OCTETS * n);
+  for (var e = 0; e < n; e++) {
+    var ox = g.nx > 1 ? e * (g.L + g.J) : 0, oy = g.ny > 1 ? e * (g.H + g.J) : 0;
+    var b = new Uint8Array(OCTETS);
+    for (var y = 0; y < g.H; y++) for (var x = 0; x < g.L; x++) {
+      if (!lireBit(bitsPhoto, (oy + y) * g.VL + ox + x)) continue;
+      var k = y * g.L + x; b[k >> 3] |= 0x80 >> (k & 7);
+    }
+    res.set(logVersPhys(b, rotationPhoto), e * OCTETS);
+  }
+  return res;
 }
 var rotationPhoto = 0;
 function envoyerPhoto() {
   if (!bitsPhoto) { message('msgPhoto', "Choisis d'abord une photo."); return; }
-  api('/api/photo?r=' + rotationPhoto, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: logVersPhys(bitsPhoto, rotationPhoto) })
+  api('/api/photo?r=' + rotationPhoto, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: photoParEcran() })
     .then(function () { message('msgPhoto', 'Photo envoyée : elle s\\'affichera au prochain réveil du cadre.'); return rafraichir(); })
     .catch(function (e) { message('msgPhoto', 'Erreur : ' + e.message); });
 }

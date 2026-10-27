@@ -125,6 +125,10 @@ L'écran est découpé en une grille de 12 × 8 cases, et les blocs ne peuvent p
 
 Le curseur **Contour de l'aperçu** ne règle que l'épaisseur du cadre noir dessiné autour de l'aperçu sur la page web. Il ne change rien sur l'écran.
 
+**Deux écrans** : avec deux dalles identiques assemblées, choisis **Deux côte à côte** ou **Deux l'un sur l'autre** dans **Scènes et disposition**. La grille est doublée (24 × 8 cases côte à côte en paysage, 12 × 16 l'un sur l'autre), et la jointure entre les deux écrans est dessinée en noir : un bloc ne peut pas être à cheval dessus. Indique l'**espace entre les zones d'affichage** (en mm) : il sert à aligner l'aperçu et à découper les photos pour que l'image reste continue. L'écran 1 est celui de gauche (ou du haut). En mode Pochette, la pochette s'affiche sur l'écran 1 et le titre en grand sur l'écran 2.
+
+> **Carte : à faire plus tard.** Le serveur est prêt, mais le programme de la carte ne gère encore qu'un écran. Il faudra qu'il ajoute `&ecran=1` à ses demandes pour la seconde dalle (`/api/etat`, `/api/photo`, `/api/apercu`) et qu'il sache dessiner la pochette en deux parties (`partie` = `image` ou `texte` dans l'état). Sans ce paramètre, le serveur répond comme pour l'écran 1 : la carte actuelle continue de marcher.
+
 ---
 
 ## 6. Prochains bus (Tango)
