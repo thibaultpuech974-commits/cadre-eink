@@ -24,6 +24,19 @@ details.menu[open]{padding-bottom:16px}
 .ecran{width:100%;aspect-ratio:960/680;background:#fff;border:var(--bord,10px) solid #2a2927;border-radius:6px;display:block;image-rendering:auto;box-sizing:content-box;max-width:calc(100% - 2 * var(--bord,10px))}
 .ecran.editeur{border-width:8px;max-width:calc(100% - 16px)}
 .editeur{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden;margin-top:6px}
+.historique{display:flex;gap:8px;margin:0 0 6px}
+.historique button{flex:1;padding:7px 10px}
+button:disabled{opacity:.4;cursor:default}
+#zoneEditeur{position:relative}
+/* Bulle de reglage du texte d'un bloc, posee contre le bloc touche */
+.bulle{position:absolute;z-index:6;width:min(320px,calc(100% - 8px));box-sizing:border-box;background:var(--carte);color:var(--texte);
+  border:1px solid var(--trait);border-radius:12px;padding:8px 12px 10px;box-shadow:0 6px 22px rgba(0,0,0,.28)}
+.bulle .teteBulle{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.bulle .teteBulle b{flex:1;min-width:0;font-size:15px}
+.bulle .teteBulle button{flex:none;padding:3px 9px}
+.bulle .ligne{flex-direction:column;align-items:stretch;gap:0}
+.bulle label{margin:4px 0;display:flex;align-items:center;gap:8px}
+.bulle label select{flex:1;min-width:0;width:auto!important}
 .editeur .jointure{position:absolute;background:#2a2927}
 .editeur .case{position:absolute;border:1px dashed #dcd9d2;border-radius:3px;box-sizing:border-box}
 .editeur .widget{position:absolute;background:#f3f2ef;border:2px solid #1d1c1a;border-radius:6px;color:#1d1c1a;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;font-size:13px;line-height:1.2;text-align:center;cursor:grab;padding:4px 18px 4px 4px;box-sizing:border-box;overflow:hidden}
@@ -158,17 +171,23 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide" id="aideDefaut">Scène affichée quand aucune autre n'est active. Son rythme se règle dans « Réveil du cadre ».</p>
   <p class="aide repliable">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
   <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
+  <div class="historique">
+    <button id="btnAnnulerEtape" onclick="annulerEtape()" title="Annuler la dernière modification des blocs (Ctrl+Z)" disabled>↶ Annuler</button>
+    <button id="btnRetablir" onclick="retablirEtape()" title="Rétablir (Ctrl+Maj+Z)" disabled>↷ Rétablir</button>
+  </div>
+  <div id="zoneEditeur">
   <div id="editeur" class="ecran editeur"></div>
-  <button style="width:100%;margin-top:8px" class="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
-  <p class="aide">Touche un bloc (sans le déplacer) pour régler la taille et la police de son texte.</p>
-  <div id="styleBloc" class="cache" style="margin-top:8px;padding:10px 12px;border:1px solid var(--trait);border-radius:10px">
-    <p style="margin:0 0 4px;font-weight:600" id="styleTitre"></p>
+  <div id="styleBloc" class="bulle cache" role="dialog">
+    <div class="teteBulle"><b id="styleTitre"></b><button onclick="selectionner(null)" title="Fermer" aria-label="Fermer">✕</button></div>
     <div class="ligne" style="flex-wrap:wrap">
       <label>Taille <select id="styleTaille" style="width:auto"><option value="S">Petite</option><option value="M">Normale</option><option value="L">Grande</option><option value="XL">Très grande</option></select></label>
       <label>Police <select id="stylePolice" style="width:auto"><option value="moderne">Moderne</option><option value="helvetica">Helvetica</option><option value="classique">Classique</option><option value="machine">Machine à écrire</option></select></label>
     </div>
     <p class="aide repliable">Chaque cran agrandit ou réduit tous les textes du bloc d'un palier (environ 25 %). Un texte trop long rétrécit d'abord un peu avant d'être coupé par « … ». Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne. Moderne s'arrête à 42 px, Machine à écrire à 53 px. La température garde toujours ses chiffres hauts et fins.</p>
   </div>
+  </div>
+  <button style="width:100%;margin-top:8px" class="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
+  <p class="aide">Touche un bloc (sans le déplacer) pour régler la taille et la police de son texte.</p>
   <div class="puces" id="choixWidgets"></div>
   <button style="width:100%;margin-top:6px" onclick="reinitialiserDispo()">Disposition par défaut</button>
   <div class="msg" id="msgDispo"></div>
@@ -518,7 +537,7 @@ function afficherScenes() {
     $('sceneCreneaux').innerHTML = '';
     (sc.creneaux || []).forEach(function (c) { ajouterCreneau(c, 'sceneCreneaux'); });
     $('sceneF1').value = sc.f1 || ''; $('sceneDu').value = sc.du || ''; $('sceneAu').value = sc.au || '';
-    $('sceneReveil').value = String(sc.reveilMin || 0);
+    choisirValeur($('sceneReveil'), sc.reveilMin || 0);
     $('sceneResume').textContent = resumeScene(sc);
   }
 }
@@ -533,6 +552,7 @@ function choisirScene(i) {
   appliquerRotation(rot);
 }
 function nouvelleScene() {
+  memoriserEtape();
   lireFormScene(); ranger();
   scenes.push({ id: 's' + Date.now().toString(36), nom: 'Scène ' + (scenes.length + 1),
     creneaux: [{ jours: [1, 1, 1, 1, 1, 0, 0], debut: '07:00', fin: '08:00' }], f1: '', du: '', au: '', reveilMin: 0,
@@ -542,6 +562,7 @@ function nouvelleScene() {
   message('msgDispo', 'Scène créée à partir de « Par défaut » : choisis sa période et ses blocs, puis enregistre.');
 }
 function supprimerScene() {
+  memoriserEtape();
   if (sceneCourante < 0) return;
   var nom = scenes[sceneCourante].nom;
   scenes.splice(sceneCourante, 1);
@@ -551,6 +572,7 @@ function supprimerScene() {
 }
 function monterScene() {
   if (sceneCourante <= 0) { message('msgDispo', 'Cette scène est déjà la plus prioritaire.'); return; }
+  memoriserEtape();
   lireFormScene(); ranger();
   var sc = scenes.splice(sceneCourante, 1)[0];
   scenes.splice(sceneCourante - 1, 0, sc);
@@ -559,6 +581,7 @@ function monterScene() {
   message('msgDispo', "Si plusieurs scènes sont actives en même temps, celle de gauche l'emporte.");
 }
 function copierDefaut() {
+  memoriserEtape();
   dispo = copie(dispos[cleOri(rot)]);
   ranger(); dessinerEditeur();
   message('msgDispo', 'Disposition « Par défaut » copiée dans cette scène (orientation actuelle).');
@@ -573,17 +596,59 @@ function descStyle(d) {
   if (d.p && d.p !== 'moderne') t.push(NOMS_POLICES[d.p]);
   return t.join(' · ');
 }
+// --- Annuler / Retablir les modifications des blocs (deplacement, taille, ajout, retrait, texte, scenes) ---
+var historique = [], aRefaire = [];
+function etatEditeur() { lireFormScene(); ranger(); return JSON.stringify({ dispos: dispos, scenes: scenes, ECR: ECR, scene: sceneCourante }); }
+function majBoutonsHisto() { $('btnAnnulerEtape').disabled = !historique.length; $('btnRetablir').disabled = !aRefaire.length; }
+function memoriserEtape(etat) {
+  historique.push(etat || etatEditeur());
+  if (historique.length > 50) historique.shift();
+  aRefaire = [];
+  majBoutonsHisto();
+}
+function restaurerEtat(e) {
+  var o = JSON.parse(e);
+  dispos = o.dispos; scenes = o.scenes; ECR = o.ECR; sceneCourante = Math.min(o.scene, scenes.length - 1);
+  choisi = null; $('styleBloc').classList.add('cache');
+  afficherEcrans(); afficherScenes(); appliquerRotation(rot);
+}
+function annulerEtape() { if (!historique.length) return; aRefaire.push(etatEditeur()); restaurerEtat(historique.pop()); majBoutonsHisto(); }
+function retablirEtape() { if (!aRefaire.length) return; historique.push(etatEditeur()); restaurerEtat(aRefaire.pop()); majBoutonsHisto(); }
+function viderHistorique() { historique = []; aRefaire = []; majBoutonsHisto(); }
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.target.closest('input, textarea, select')) return;
+  var k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); annulerEtape(); }
+  else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); retablirEtape(); }
+});
 function selectionner(id) {
   choisi = id;
   var d = dispo.filter(function (x) { return x.id === id; })[0];
   if (!d) { choisi = null; $('styleBloc').classList.add('cache'); dessinerEditeur(); return; }
-  $('styleTitre').textContent = 'Texte du bloc « ' + INFOS[id].nom + ' »';
+  $('styleTitre').textContent = INFOS[id].nom;
   $('styleTaille').value = d.t || 'M';
   $('stylePolice').value = d.p || 'moderne';
   $('styleBloc').classList.remove('cache');
   dessinerEditeur();
 }
+// Pose la bulle juste sous le bloc choisi (ou au-dessus s'il n'y a pas la place), sans sortir de l'editeur en largeur
+function placerBulle() {
+  var b = $('styleBloc');
+  if (!choisi || b.classList.contains('cache')) return;
+  var el = document.querySelector('#editeur .widget[data-id="' + choisi + '"]');
+  if (!el) return;
+  var z = $('zoneEditeur').getBoundingClientRect(), r = el.getBoundingClientRect();
+  var w = b.offsetWidth, h = b.offsetHeight;
+  var x = Math.max(4, Math.min(r.left - z.left, z.width - w - 4));
+  var y = r.bottom - z.top + 6;
+  if (y + h > z.height + 120 && r.top - z.top - h - 6 >= 0) y = r.top - z.top - h - 6;   // pas la place dessous : au-dessus
+  b.style.left = x + 'px'; b.style.top = y + 'px';
+}
+// Toucher l'editeur en dehors d'un bloc ferme la bulle
+$('editeur').addEventListener('pointerdown', function (e) { if (!e.target.closest('.widget') && choisi) selectionner(null); });
+window.addEventListener('resize', placerBulle);
 function changerStyle() {
+  memoriserEtape();
   var d = dispo.filter(function (x) { return x.id === choisi; })[0];
   if (!d) return;
   d.t = $('styleTaille').value; d.p = $('stylePolice').value;
@@ -657,6 +722,7 @@ function afficherEcrans() {
 }
 // Change l'assemblage : les blocs du second ecran suivent (ou disparaissent s'il n'y a plus qu'un ecran)
 function choisirEcrans(nb, assemblage) {
+  memoriserEtape();
   ranger();
   var avant = { 0: grilleUI(0), 1: grilleUI(1) };
   ECR.nb = nb; ECR.assemblage = assemblage;
@@ -696,6 +762,7 @@ function dessinerEditeur() {
   dispo.forEach(function (d) {
     var el = document.createElement('div');
     el.className = 'widget' + (d.id === choisi ? ' choisi' : '');
+    el.setAttribute('data-id', d.id);
     el.innerHTML = '<b></b><small></small><div class="poignee"></div>';
     el.querySelector('b').textContent = INFOS[d.id].nom;
     el.querySelector('small').textContent = descStyle(d) || INFOS[d.id].ex;
@@ -714,13 +781,14 @@ function dessinerEditeur() {
     l.appendChild(cb); l.appendChild(document.createTextNode(INFOS[id].nom));
     zone.appendChild(l);
   });
+  placerBulle();
 }
 function brancher(el, d) {
   var depart = null;
   el.addEventListener('pointerdown', function (ev) {
     ev.preventDefault();
     var r = $('editeur').getBoundingClientRect();
-    depart = { px: ev.clientX, py: ev.clientY, d: copie(d), redim: ev.target.classList.contains('poignee'),
+    depart = { avant: etatEditeur(), px: ev.clientX, py: ev.clientY, d: copie(d), redim: ev.target.classList.contains('poignee'),
       cl: r.width * G.cl / G.VLE, ch: r.height * G.ch / G.VHE, bouge: false };
     el.setPointerCapture(ev.pointerId);
     el.classList.add('actif');
@@ -743,13 +811,17 @@ function brancher(el, d) {
   function fin() { depart = null; el.classList.remove('actif'); el.classList.remove('refus'); }
   el.addEventListener('pointerup', function () {
     var simpleClic = depart && !depart.bouge && !depart.redim;
-    if (depart && depart.bouge) { demanderPrevisu(); verifierModifs(); }
+    if (depart && depart.bouge) {
+      if (depart.avant !== etatEditeur()) memoriserEtape(depart.avant);
+      demanderPrevisu(); verifierModifs();
+    }
     fin();
     if (simpleClic) selectionner(d.id);
   });
   el.addEventListener('pointercancel', fin);
 }
 function basculer(id, actif) {
+  memoriserEtape();
   if (actif) {
     var min = INFOS[id].min, place = null;
     for (var y = 0; y <= G.rangs - min[1] && !place; y++)
@@ -767,6 +839,7 @@ function basculer(id, actif) {
   dessinerEditeur();
 }
 function reinitialiserDispo() {
+  memoriserEtape();
   dispo = dispoParDefaut(cleOri(rot));
   ranger();
   $('traits').checked = true;
@@ -993,7 +1066,7 @@ function remplirBus() {
     l.appendChild(cb); l.appendChild(document.createTextNode('Ligne ' + o.l + (o.d ? ' → ' + o.d : '')));
     z.appendChild(l);
   });
-  $('busNb').value = String(b.nb); $('busHorizon').value = String(b.horizon);
+  choisirValeur($('busNb'), b.nb); choisirValeur($('busHorizon'), b.horizon);
   $('busSource').value = b.sourceRT || '';
 }
 function ajouterCreneau(c, conteneur) {
@@ -1012,8 +1085,8 @@ function ajouterCreneau(c, conteneur) {
   var heures = document.createElement('div');
   heures.className = 'ligne';
   heures.innerHTML = '<label>de <input type="time" class="cDebut" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><label>à <input type="time" class="cFin" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><button style="flex:0;padding:8px 12px" title="Supprimer ce créneau" aria-label="Supprimer ce créneau">✕</button>';
-  heures.querySelector('.cDebut').value = c.debut;
-  heures.querySelector('.cFin').value = c.fin;
+  heures.querySelector('.cDebut').value = heure2(c.debut);
+  heures.querySelector('.cFin').value = heure2(c.fin);
   heures.querySelector('button').onclick = function () { bloc.remove(); };
   bloc.appendChild(jours); bloc.appendChild(heures);
   $(conteneur).appendChild(bloc);
@@ -1046,6 +1119,7 @@ function charger() {
     config = d.config;
     remplirSansSignaler();
     prendreReference();
+    viderHistorique();
     afficherStatut(d.statut, d.maintenant, d.statut1);
     if ($('menu-batterie').open) chargerBatterie();     // menu reste ouvert depuis la derniere visite
     if ($('menu-agenda').open) verifierCalendriers();
@@ -1181,13 +1255,24 @@ function chargerApercu() {
   });
 }
 
+// Donne une valeur a une liste deroulante ; si elle n'est pas dans la liste, on l'ajoute (sinon Safari
+// choisit tout seul le premier element un peu plus tard, et la page croirait a une modification)
+function choisirValeur(el, v) {
+  v = String(v);
+  if (![].some.call(el.options, function (o) { return o.value === v; })) {
+    var o = document.createElement('option'); o.value = v; o.textContent = v; el.appendChild(o);
+  }
+  el.value = v;
+}
+// Heure "7:5" ou "7:05" -> "07:05" (les champs heure n'acceptent que ce format)
+function heure2(h) { var m = /^(\d{1,2}):(\d{1,2})/.exec(h || ''); return m ? ('0' + m[1]).slice(-2) + ':' + ('0' + m[2]).slice(-2) : ''; }
 function remplirFormulaires() {
   remplirMeteo(); remplirAgenda(); remplirDispo(); remplirBus();
-  $('reveil').value = String(config.reveilMin);
-  $('dev').checked = !!config.dev; $('devSecondes').value = String(config.devSecondes || 30);
+  choisirValeur($('reveil'), config.reveilMin);
+  $('dev').checked = !!config.dev; choisirValeur($('devSecondes'), config.devSecondes || 30);
   var n = config.nuit || {};
-  $('nuitActif').checked = !!n.actif; $('nuitDebut').value = n.debut || '23:00'; $('nuitFin').value = n.fin || '07:00';
-  $('nuitIntervalle').value = String(n.intervalleMin || 60);
+  $('nuitActif').checked = !!n.actif; $('nuitDebut').value = heure2(n.debut) || '23:00'; $('nuitFin').value = heure2(n.fin) || '07:00';
+  choisirValeur($('nuitIntervalle'), n.intervalleMin || 60);
   $('bordure').value = String(config.affichage.bordureApercu); appliquerBordure();
   var p = config.pochette;
   if (p.version) $('pochetteActuelle').textContent = 'Dernière pochette : ' + (p.titre || '?') + ' — ' + (p.artiste || '?') + ' (' + new Date(p.t).toLocaleString('fr-FR') + ')';
@@ -1197,13 +1282,13 @@ function remplirMeteo() {
   var m = config.meteo;
   $('villeChoisie').textContent = 'Ville actuelle : ' + m.ville + ' (' + m.lat + ', ' + m.lon + ')';
   $('mVent').checked = m.vent; $('mDetails').checked = m.details; $('mSoleil').checked = m.soleil;
-  $('mPas').value = String(m.pasHeures); $('mNbJours').value = String(m.nbJours); $('mNbHeures').value = String(m.nbHeures || 6);
-  $('mCourbe').value = String(m.courbeHeures || 24);
+  choisirValeur($('mPas'), m.pasHeures); choisirValeur($('mNbJours'), m.nbJours); choisirValeur($('mNbHeures'), m.nbHeures || 6);
+  choisirValeur($('mCourbe'), m.courbeHeures || 24);
 
 }
 function remplirAgenda() {
   $('aUrls').value = config.agenda.urls.join('\n');
-  $('aNb').value = String(config.agenda.nb);
+  choisirValeur($('aNb'), config.agenda.nb);
   $('aAnniv').value = (config.agenda.anniversaires || []).map(function (a) {
     return a.nom + ' ' + String(a.j).padStart(2, '0') + '/' + String(a.m).padStart(2, '0') + (a.a ? '/' + a.a : '');
   }).join('\n');
@@ -1232,9 +1317,20 @@ function modificationsCourantes() {
     nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
       intervalleMin: +$('nuitIntervalle').value } };
 }
-function texteBarre() { return window.innerWidth < 480 ? 'Non enregistré' : 'Modifications non enregistrées'; }
+function texteBarre() {
+  var p = reference ? partiesModifiees() : [];
+  return (window.innerWidth < 480 ? 'Modifié' : 'Non enregistré') + (p.length ? ' : ' + p.join(', ') : '');
+}
 function prendreReference() { reference = JSON.stringify(modificationsCourantes()); verifierModifs(); }
 function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
+// Menus dont les reglages different de ceux enregistres
+var PARTIES = [['Scènes', ['disposition', 'dispositionPortrait', 'scenes']], ['Montage', ['ecrans', 'affichage']],
+  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit']]];
+function partiesModifiees() {
+  var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes()));
+  return PARTIES.filter(function (p) { return p[1].some(function (k) { return JSON.stringify(r[k]) !== JSON.stringify(c[k]); }); })
+    .map(function (p) { return p[0]; });
+}
 var minuteurModifs = null;
 function verifierModifs() {
   if (enChargement || reference === null) return;
@@ -1276,6 +1372,7 @@ function annulerModifs() {
   villeTemp = null;
   remplirSansSignaler();
   prendreReference();
+  viderHistorique();
   demanderPrevisu();
 }
 window.addEventListener('beforeunload', function (e) { if (modifie()) { e.preventDefault(); e.returnValue = ''; } });

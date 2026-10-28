@@ -104,7 +104,11 @@ Limite d'iOS : un raccourci ne peut pas se déclencher tout seul à chaque chang
 
 ## 5. Scènes et disposition du tableau de bord
 
-**Enregistrer** : la page n'a qu'un seul bouton Enregistrer. Dès qu'un réglage change (disposition, montage, météo, agenda, bus, réveil), une barre « Modifications non enregistrées » apparaît en bas avec **Enregistrer** et **Annuler** ; la page prévient si tu la quittes sans enregistrer. Les actions immédiates (changer de mode, envoyer une photo ou un programme, choisir les arrêts de bus) ne passent pas par cette barre.
+**Annuler / Rétablir** : au-dessus des blocs, ↶ et ↷ (ou Ctrl+Z / Ctrl+Maj+Z) reviennent en arrière ou en avant d'une modification à la fois : déplacement, taille, ajout ou retrait d'un bloc, texte, création ou suppression d'une scène, nombre d'écrans.
+
+**Texte d'un bloc** : touche un bloc (sans le déplacer) : une bulle s'ouvre contre lui avec sa taille et sa police ; ✕ ou un appui ailleurs dans l'éditeur la ferme.
+
+**Enregistrer** : la page n'a qu'un seul bouton Enregistrer. Dès qu'un réglage change (disposition, montage, météo, agenda, bus, réveil), une barre « Non enregistré : Météo, Réveil… » (les menus concernés) apparaît en bas avec **Enregistrer** et **Annuler** ; la page prévient si tu la quittes sans enregistrer. Les actions immédiates (changer de mode, envoyer une photo ou un programme, choisir les arrêts de bus) ne passent pas par cette barre.
 
 **État du cadre** : sous l'aperçu, des pastilles résument la dernière connexion (orange si le cadre aurait dû se connecter depuis longtemps), la batterie, le prochain réveil, la scène affichée et l'heure de l'image.
 
@@ -135,7 +139,7 @@ L'écran est découpé en une grille de 12 × 8 cases, et les blocs ne peuvent p
 
 **Orientation** (menu **Montage du cadre**) : les boutons **Paysage**, **Portrait** et **Portrait inversé** choisissent le sens du cadre. Les deux portraits correspondent aux deux façons d'accrocher le cadre en hauteur : prends celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition (grille de 8 × 12 cases en portrait). Une photo est préparée dans l'orientation active au moment de l'envoi : renvoie-la si tu changes d'orientation.
 
-**Texte d'un bloc** : touche un bloc sans le déplacer, puis choisis sa **taille** (Petite, Normale, Grande, Très grande) et sa **police** (Moderne, Helvetica, Classique, Machine à écrire). Chaque cran change tous les textes du bloc d'un palier (environ 25 %), et un texte trop long rétrécit avant d'être coupé. Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne (42 px au plus). Machine à écrire monte jusqu'à 53 px (Courier pour les petites tailles, Inconsolata au-delà).
+**Tailles et polices** : dans la bulle, choisis la **taille** (Petite, Normale, Grande, Très grande) et sa **police** (Moderne, Helvetica, Classique, Machine à écrire). Chaque cran change tous les textes du bloc d'un palier (environ 25 %), et un texte trop long rétrécit avant d'être coupé. Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne (42 px au plus). Machine à écrire monte jusqu'à 53 px (Courier pour les petites tailles, Inconsolata au-delà).
 
 Le curseur **Contour de l'aperçu** ne règle que l'épaisseur du cadre noir dessiné autour de l'aperçu sur la page web. Il ne change rien sur l'écran.
 
