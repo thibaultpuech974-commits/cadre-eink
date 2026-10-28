@@ -63,11 +63,12 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   background:linear-gradient(135deg,transparent 0 55%,var(--doux) 55% 62%,transparent 62% 72%,var(--doux) 72% 79%,transparent 79%)}
 #panneauPrevisu.reduit .poignee{display:none}
 #panneauPrevisu .infoPrevisu{margin:6px 18px 0 0}
-#panneauPrevisu .infoPrevisu a{color:var(--doux);font-weight:600;text-decoration:none;white-space:nowrap}
-/* Replie : une seule ligne terminee par "... plus", comme une legende Instagram */
-#panneauPrevisu.texteCourt .infoPrevisu{display:flex;gap:4px}
-#panneauPrevisu.texteCourt #infoPrevisu{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#panneauPrevisu.texteCourt .infoPrevisu a{flex:none}
+/* Textes d'aide repliables : une seule ligne terminee par "... plus" (comme une legende Instagram),
+   "plus" deplie le texte, "moins" le replie. Toujours replies a l'ouverture de la page. */
+.repliable .bascule{color:var(--doux);font-weight:600;text-decoration:none;white-space:nowrap}
+.repliable:not(.ouvert){display:flex;gap:4px}
+.repliable:not(.ouvert) .texte{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.repliable:not(.ouvert) .bascule{flex:none}
 #panneauPrevisu .tete b{flex:none}
 #panneauPrevisu .tete select{flex:1;min-width:0;width:auto;padding:5px 8px}
 #panneauPrevisu .tete button{flex:none;padding:4px 11px;line-height:1.2}
@@ -111,7 +112,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
 
 <details class="menu" id="menu-dispo">
   <summary>Scènes et disposition</summary>
-  <p class="aide">Une scène est une disposition des blocs, affichée pendant une période que tu choisis (par exemple « Bus » le vendredi de 18:00 à 20:00, ou « Grand Prix » la semaine d'une course). En dehors de toute scène, c'est la scène <b>Par défaut</b> qui s'affiche.</p>
+  <p class="aide repliable">Une scène est une disposition des blocs, affichée pendant une période que tu choisis (par exemple « Bus » le vendredi de 18:00 à 20:00, ou « Grand Prix » la semaine d'une course). En dehors de toute scène, c'est la scène <b>Par défaut</b> qui s'affiche.</p>
   <div class="puces" id="listeScenes" style="margin:8px 0"></div>
   <div id="reglagesScene" class="cache" style="padding:10px 12px;border:1px solid var(--trait);border-radius:10px;margin-bottom:10px">
     <label>Nom <input type="text" id="sceneNom" maxlength="40"></label>
@@ -131,7 +132,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     </div>
   </div>
   <p class="aide" id="aideDefaut">Scène affichée quand aucune autre n'est active. Son rythme se règle dans « Réveil du cadre ».</p>
-  <p class="aide">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
+  <p class="aide repliable">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
   <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
     <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
     <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
@@ -140,14 +141,14 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <div id="ligneJoint" class="cache">
     <label>Espace entre les zones d'affichage des deux écrans
       <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
-    <p class="aide">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
+    <p class="aide repliable">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
   </div>
   <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
     <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
     <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
     <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
   </div>
-  <p class="aide">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
+  <p class="aide repliable">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
   <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
   <div id="editeur" class="ecran editeur"></div>
   <button style="width:100%;margin-top:8px" class="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
@@ -158,7 +159,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
       <label>Taille <select id="styleTaille" style="width:auto"><option value="S">Petite</option><option value="M">Normale</option><option value="L">Grande</option><option value="XL">Très grande</option></select></label>
       <label>Police <select id="stylePolice" style="width:auto"><option value="moderne">Moderne</option><option value="helvetica">Helvetica</option><option value="classique">Classique</option><option value="machine">Machine à écrire</option></select></label>
     </div>
-    <p class="aide">Chaque cran agrandit ou réduit tous les textes du bloc d'un palier (environ 25 %). Un texte trop long rétrécit d'abord un peu avant d'être coupé par « … ». Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne. Moderne s'arrête à 42 px, Machine à écrire à 53 px. La température garde toujours ses chiffres hauts et fins.</p>
+    <p class="aide repliable">Chaque cran agrandit ou réduit tous les textes du bloc d'un palier (environ 25 %). Un texte trop long rétrécit d'abord un peu avant d'être coupé par « … ». Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne. Moderne s'arrête à 42 px, Machine à écrire à 53 px. La température garde toujours ses chiffres hauts et fins.</p>
   </div>
   <div class="puces" id="choixWidgets"></div>
   <label><input type="checkbox" id="traits"> Traits de séparation entre les blocs</label>
@@ -186,7 +187,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Le nombre de colonnes réellement affichées dépend de la largeur du bloc.</p>
   <label>Graphique de température sur les
     <select id="mCourbe" style="width:auto"><option>12</option><option>24</option><option>36</option><option>48</option></select> prochaines heures</label>
-  <p class="aide">Le graphique montre la température heure par heure, le risque de pluie (barres hachurées) et la nuit (fond grisé). Ajoute le bloc « Graphique de température » dans la Disposition.</p>
+  <p class="aide repliable">Le graphique montre la température heure par heure, le risque de pluie (barres hachurées) et la nuit (fond grisé). Ajoute le bloc « Graphique de température » dans la Disposition.</p>
   <button class="principal" onclick="enregistrerMeteo()">Enregistrer la météo</button>
   <div class="msg" id="msgMeteo"></div>
 </details>
@@ -224,7 +225,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     passages, sur les
     <select id="busHorizon" style="width:auto"><option>30</option><option>60</option><option>90</option><option>120</option><option>180</option></select>
     prochaines minutes</label>
-  <p class="aide">Le bloc « Prochains bus » s'affiche dans les scènes où tu le places (section « Scènes et disposition ») : crée par exemple une scène « Bus » pour les heures où tu prends le bus, avec une mise à jour toutes les 3 min.</p>
+  <p class="aide repliable">Le bloc « Prochains bus » s'affiche dans les scènes où tu le places (section « Scènes et disposition ») : crée par exemple une scène « Bus » pour les heures où tu prends le bus, avec une mise à jour toutes les 3 min.</p>
   <details style="margin-top:6px"><summary class="aide">Réglage avancé</summary>
     <label>Source du temps réel (laisser vide pour la source par défaut)</label>
     <input type="text" id="busSource" placeholder="https://…">
@@ -263,11 +264,11 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Plus c'est court, plus le cadre réagit vite, mais plus la batterie se vide.</p>
   <label style="margin-top:12px"><input type="checkbox" id="dev"> Mode développement : la carte ne se met plus en veille et vérifie toutes les
     <select id="devSecondes" style="width:auto"><option>15</option><option>30</option><option>60</option></select> s</label>
-  <p class="aide">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
+  <p class="aide repliable">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
   <label style="margin-top:12px"><input type="checkbox" id="nuitActif"> Mode nuit</label>
   <label>De <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto"></label>
   <label>Réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
-  <p class="aide">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
+  <p class="aide repliable">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
   <button class="principal" onclick="enregistrerReveil()">Enregistrer</button>
   <div class="msg" id="msgReveil"></div>
 </details>
@@ -278,7 +279,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <input type="file" id="fichierFw" accept=".bin">
   <button class="principal" onclick="envoyerFirmware()">Envoyer le programme</button>
   <div class="msg" id="msgFw"></div>
-  <p class="aide">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
+  <p class="aide repliable">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
 </details>
 
 <details class="menu" id="menu-batterie">
@@ -294,7 +295,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
 
 <details class="menu" id="menu-sauvegarde">
   <summary>Sauvegarde des réglages</summary>
-  <p class="aide">Télécharge un fichier avec tous tes réglages : scènes et dispositions, météo, agendas, anniversaires, arrêts de bus, réveil. Garde-le en lieu sûr (Fichiers, iCloud Drive) : il permet de tout remettre comme avant après une fausse manipulation. Les photos et la pochette ne sont pas incluses.</p>
+  <p class="aide repliable">Télécharge un fichier avec tous tes réglages : scènes et dispositions, météo, agendas, anniversaires, arrêts de bus, réveil. Garde-le en lieu sûr (Fichiers, iCloud Drive) : il permet de tout remettre comme avant après une fausse manipulation. Les photos et la pochette ne sont pas incluses.</p>
   <button class="principal" onclick="telechargerReglages()">Télécharger mes réglages</button>
   <p class="aide" style="margin-top:14px">Restaurer une sauvegarde (remplace tous les réglages actuels) :</p>
   <input type="file" id="fichierReglages" accept=".json,application/json">
@@ -311,7 +312,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   </div>
   <div class="corps">
     <canvas id="previsu" class="ecran"></canvas>
-    <p class="aide infoPrevisu"><span id="infoPrevisu"></span> <a href="#" id="basculeInfo" onclick="basculerInfoPrevisu();return false">moins</a></p>
+    <p class="aide repliable infoPrevisu" id="infoPrevisu"></p>
   </div>
   <div class="poignee" id="poigneePrevisu" title="Agrandir ou réduire"></div>
 </div>
@@ -1514,21 +1515,25 @@ function previsualiser() {
   placerPanneau();
   majPrevisu();
 }
-// Texte sous l'image : replie sur une ligne terminee par "... plus" ; "plus" le deplie, "moins" le replie.
-// Replie par defaut ; le choix est retenu sur cet appareil.
-function basculerInfoPrevisu(court) {
-  var p = $('panneauPrevisu');
-  if (court === undefined) court = !p.classList.contains('texteCourt');
-  p.classList.toggle('texteCourt', court);
-  $('basculeInfo').textContent = court ? 'plus' : 'moins';
-  try { localStorage.setItem('cadre-previsu-texte', court ? 'court' : 'long'); } catch (e) {}
-  if (previsuActive) placerPanneau();
+// Textes repliables : le contenu va dans <span class="texte">, suivi du lien "plus" / "moins"
+function preparerRepliable(p) {
+  if (p.querySelector(':scope > .texte')) return p.querySelector(':scope > .texte');
+  var t = document.createElement('span'); t.className = 'texte';
+  while (p.firstChild) t.appendChild(p.firstChild);
+  var a = document.createElement('a'); a.href = '#'; a.className = 'bascule'; a.textContent = 'plus';
+  a.onclick = function () {
+    var ouvert = p.classList.toggle('ouvert');
+    a.textContent = ouvert ? 'moins' : 'plus';
+    if (p.closest('#panneauPrevisu') && previsuActive) placerPanneau();
+    return false;
+  };
+  p.appendChild(t); p.appendChild(document.createTextNode(' ')); p.appendChild(a);
+  return t;
 }
-(function () {
-  var choix = null;
-  try { choix = localStorage.getItem('cadre-previsu-texte'); } catch (e) {}
-  basculerInfoPrevisu(choix !== 'long');
-})();
+var repliables = document.querySelectorAll('.repliable');
+for (var i = 0; i < repliables.length; i++) preparerRepliable(repliables[i]);
+// Texte sous l'image de la prevision (le paragraphe repliable garde son lien "plus")
+function texteInfoPrevisu(t) { preparerRepliable($('infoPrevisu')).textContent = t; }
 function fermerPrevisu() {
   previsuActive = false; numPrevisu++;
   clearTimeout(minuteurPrevisu);
@@ -1630,7 +1635,7 @@ function majPrevisu() {
   // Tous les reglages des formulaires, enregistres ou non
   var modif = { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
     affichage: { traits: $('traits').checked, rotation: rot }, meteo: lireMeteo(), agenda: lireAgenda(), bus: lireBus() };
-  $('infoPrevisu').textContent = 'Préparation…';
+  texteInfoPrevisu('Préparation…');
   Promise.all([chargerMoteur(), api('/api/previsualiser', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ modif: modif, scene: scenePrevisu }) }).then(function (r) { return r.json(); })])
     .then(function (r) {
@@ -1644,11 +1649,11 @@ function majPrevisu() {
         var l = physVersLog(m.dessiner(etat, vBat), rot);
         dessinerBitsA(ctx, l.bits, l.w, l.h, g.nx > 1 ? k * (g.L + g.JE) : 0, g.ny > 1 ? k * (g.H + g.JE) : 0);
       });
-      $('infoPrevisu').textContent = "Dessinée comme sur le cadre, avec les données actuelles et tes réglages (même non enregistrés). " +
-        "Rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.";
+      texteInfoPrevisu("Dessinée comme sur le cadre, avec les données actuelles et tes réglages (même non enregistrés). " +
+        "Rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.");
       placerPanneau();
     })
-    .catch(function (e) { if (n === numPrevisu) $('infoPrevisu').textContent = 'Prévisualisation impossible : ' + e.message; });
+    .catch(function (e) { if (n === numPrevisu) texteInfoPrevisu('Prévisualisation impossible : ' + e.message); });
 }
 $('traits').addEventListener('change', demanderPrevisu);
 $('reglagesScene').addEventListener('change', demanderPrevisu);
