@@ -74,7 +74,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
 .barreModifs{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;
   background:var(--accent);color:var(--fond);border-radius:14px;padding:8px 8px 8px 16px;box-shadow:0 6px 24px rgba(0,0,0,.3);
   z-index:30;max-width:calc(100vw - 24px);box-sizing:border-box;font-size:15px}
-.barreModifs span{flex:1;min-width:0}
+.barreModifs span{flex:1;min-width:0;cursor:pointer}
+#detailModifs{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;z-index:30;width:min(calc(100vw - 24px),520px);box-sizing:border-box;
+  background:var(--carte);color:var(--texte);border:1px solid var(--trait);border-radius:12px;padding:10px 12px;font-size:13px;
+  box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:40vh;overflow:auto;word-break:break-word}
 .barreModifs button{flex:none;padding:8px 12px;border-color:transparent}
 .barreModifs .annuler{background:transparent;color:var(--fond);border-color:var(--fond)}
 .barreModifs .enreg{background:var(--fond);color:var(--accent);font-weight:600}
@@ -346,8 +349,9 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <div class="msg" id="msgSauvegarde"></div>
 </details>
 
+<div id="detailModifs" class="cache"></div>
 <div id="barreModifs" class="barreModifs cache" role="status">
-  <span id="texteModifs">Modifications non enregistrées</span>
+  <span id="texteModifs" onclick="basculerDetailModifs()" title="Toucher pour voir le détail">Modifications non enregistrées</span>
   <button class="annuler" onclick="annulerModifs()">Annuler</button>
   <button class="enreg" onclick="toutEnregistrer()">Enregistrer</button>
 </div>
@@ -1317,6 +1321,26 @@ function modificationsCourantes() {
     nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
       intervalleMin: +$('nuitIntervalle').value } };
 }
+// Detail des differences (reglage : enregistre -> actuel), pour comprendre ce que la page croit modifie
+function detailModifs() {
+  var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes())), d = [];
+  var cmp = function (a, b, ch) {
+    if (JSON.stringify(a) === JSON.stringify(b)) return;
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      Object.keys(Object.assign({}, a, b)).forEach(function (k) { cmp(a[k], b[k], ch ? ch + '.' + k : k); });
+    } else d.push(ch + ' : ' + JSON.stringify(a) + ' → ' + JSON.stringify(b));
+  };
+  cmp(r, c, '');
+  return d;
+}
+function basculerDetailModifs() {
+  var z = $('detailModifs');
+  if (!z.classList.contains('cache') || !reference) { z.classList.add('cache'); return; }
+  var d = detailModifs();
+  z.textContent = d.length ? 'Différences avec les réglages enregistrés :\n' + d.slice(0, 12).join('\n') : 'Aucune différence.';
+  z.style.whiteSpace = 'pre-line';
+  z.classList.remove('cache');
+}
 function texteBarre() {
   var p = reference ? partiesModifiees() : [];
   return (window.innerWidth < 480 ? 'Modifié' : 'Non enregistré') + (p.length ? ' : ' + p.join(', ') : '');
@@ -1340,6 +1364,7 @@ function verifierModifs() {
     if (b.classList.contains('fait')) return;
     $('texteModifs').textContent = texteBarre();
     b.classList.toggle('cache', !modifie());
+    if (b.classList.contains('cache')) $('detailModifs').classList.add('cache');
     if (previsuActive) placerPanneau(); else ajusterMarge();
   }, 120);
 }
