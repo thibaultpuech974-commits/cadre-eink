@@ -538,7 +538,7 @@ void ligneVPointillee(int x, int y0, int y1) { for (int y = y0; y < y1; y += 6) 
 
 // Graphique de temperature : courbe heure par heure, risque de pluie (barres hachurees), nuit (fond grise)
 void widgetCourbe(JsonVariant g, Boite b) {
-  JsonArray T = g["t"], P = g["p"], N = g["n"], J = g["j"];
+  JsonArray T = g["t"], P = g["p"], N = g["n"];
   int n = T.size();
   if (n < 2) return;
   float tMin = 1e9, tMax = -1e9; int iMin = 0, iMax = 0;
@@ -585,27 +585,17 @@ void widgetCourbe(JsonVariant g, Boite b) {
     texteDroite(x0 - 6, y + aL / 2, t);
   }
   canvas.fillRect(x0, y1, x1 - x0 + 1, 2, NOIR);
-  // Heures en bas (une etiquette toutes les k heures) ; a minuit, le nom du jour
+  // Heures en bas : une etiquette toutes les k heures, minuit ("0h") compris, pour un pas constant ;
+  // a minuit, un pointille vertical marque le changement de jour
   int h0 = g["h0"] | 0;
   const int pas[] = {1, 2, 3, 4, 6, 12};
   int k = 12;
   for (int i = 0; i < 6; i++) if (dx * pas[i] >= largeurTexte("88h") + 14) { k = pas[i]; break; }
-  int jour = 0;
-  Boite occ[8]; int nOcc = 0;       // places deja prises par du texte (noms des jours, etiquettes)
+  Boite occ[8]; int nOcc = 0;       // places deja prises par du texte (etiquettes min / max)
   for (int i = 0; i < n; i++) {
     int h = (h0 + i) % 24;
     int x = X(i);
-    if (h == 0 && i > 0) {
-      ligneVPointillee(x, y0 - 4, y1);
-      const char* nom = J[jour++] | "";
-      policeT(14, true);
-      int lt = largeurTexte(nom);
-      int xn = min(x + 4, b.x + b.w - lt);
-      texte(xn, y0 - 6, nom);      // nom du jour en haut, a droite de minuit
-      if (nOcc < 8) occ[nOcc++] = { xn, y0 - 6 - aL, lt, aL + 2 };
-      policeT(14, false);
-      continue;
-    }
+    if (h == 0 && i > 0) ligneVPointillee(x, y0, y1);
     if (h % k) continue;
     snprintf(t, sizeof t, "%dh", h);
     int lt = largeurTexte(t);
