@@ -62,6 +62,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
 #panneauPrevisu .poignee{position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;
   background:linear-gradient(135deg,transparent 0 55%,var(--doux) 55% 62%,transparent 62% 72%,var(--doux) 72% 79%,transparent 79%)}
 #panneauPrevisu.reduit .poignee{display:none}
+#panneauPrevisu .infoPrevisu{display:flex;align-items:flex-start;gap:8px;margin-top:6px;padding-right:18px}
+#panneauPrevisu .infoPrevisu button{flex:none;padding:0 8px;font-size:14px;line-height:1.5}
+#panneauPrevisu .infoPrevisu .aide{margin:0}
+#panneauPrevisu.sansInfo #infoPrevisu{display:none}
 #panneauPrevisu .tete b{flex:none}
 #panneauPrevisu .tete select{flex:1;min-width:0;width:auto;padding:5px 8px}
 #panneauPrevisu .tete button{flex:none;padding:4px 11px;line-height:1.2}
@@ -305,7 +309,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   </div>
   <div class="corps">
     <canvas id="previsu" class="ecran"></canvas>
-    <p class="aide" id="infoPrevisu"></p>
+    <div class="infoPrevisu">
+      <button id="basculeInfo" title="Masquer le texte" aria-label="Masquer le texte" onclick="basculerInfoPrevisu()">–</button>
+      <p class="aide" id="infoPrevisu"></p>
+    </div>
   </div>
   <div class="poignee" id="poigneePrevisu" title="Agrandir ou réduire"></div>
 </div>
@@ -1508,6 +1515,18 @@ function previsualiser() {
   placerPanneau();
   majPrevisu();
 }
+// Texte sous l'image : "-" le masque, "+" le reaffiche (choix retenu sur cet appareil)
+function basculerInfoPrevisu(masquer) {
+  var p = $('panneauPrevisu');
+  if (masquer === undefined) masquer = !p.classList.contains('sansInfo');
+  p.classList.toggle('sansInfo', masquer);
+  $('basculeInfo').textContent = masquer ? '+' : '–';
+  $('basculeInfo').title = masquer ? 'Afficher le texte' : 'Masquer le texte';
+  $('basculeInfo').setAttribute('aria-label', $('basculeInfo').title);
+  try { localStorage.setItem('cadre-previsu-texte', masquer ? 'non' : 'oui'); } catch (e) {}
+  if (previsuActive) placerPanneau();
+}
+try { if (localStorage.getItem('cadre-previsu-texte') === 'non') basculerInfoPrevisu(true); } catch (e) {}
 function fermerPrevisu() {
   previsuActive = false; numPrevisu++;
   clearTimeout(minuteurPrevisu);
