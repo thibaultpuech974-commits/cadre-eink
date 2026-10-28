@@ -198,18 +198,22 @@ void icone(int x, int y, int s, int code, bool nuit) {
 // =====================================================================
 Style st = {1.0f, 0};
 
-// Familles : 0 Moderne, 1 Helvetica, 2 Classique (a empattements), 3 Machine a ecrire
-const uint8_t* const POLICES_R[4][9] = {
+// Familles : 0 Moderne, 1 Helvetica, 2 Classique (a empattements), 3 Machine a ecrire.
+// Chaque liste monte par paliers reguliers (environ x 1,25), sans deux polices de meme hauteur :
+// un cran de taille (Petite / Grande / Tres grande) change donc toujours de police.
+// Helvetica et Classique n'existent pas au-dela de 25 px : on continue avec Moderne (42 px au plus).
+// Machine a ecrire : Courier pour les petites tailles, puis Inconsolata (autre police a chasse fixe).
+const uint8_t* const POLICES_R[4][12] = {
   {u8g2_font_fur11_tf, u8g2_font_fur14_tf, u8g2_font_fur17_tf, u8g2_font_fur20_tf, u8g2_font_fur25_tf, u8g2_font_fur30_tf, u8g2_font_fur35_tf, u8g2_font_fur42_tf, nullptr},
-  {u8g2_font_helvR08_tf, u8g2_font_helvR10_tf, u8g2_font_helvR12_tf, u8g2_font_helvR14_tf, u8g2_font_helvR18_tf, u8g2_font_helvR24_tf, nullptr},
-  {u8g2_font_ncenR08_tf, u8g2_font_ncenR10_tf, u8g2_font_ncenR12_tf, u8g2_font_ncenR14_tf, u8g2_font_ncenR18_tf, u8g2_font_ncenR24_tf, nullptr},
-  {u8g2_font_courR08_tf, u8g2_font_courR10_tf, u8g2_font_courR12_tf, u8g2_font_courR14_tf, u8g2_font_courR18_tf, u8g2_font_courR24_tf, nullptr},
+  {u8g2_font_helvR08_tf, u8g2_font_helvR10_tf, u8g2_font_helvR14_tf, u8g2_font_helvR18_tf, u8g2_font_helvR24_tf, u8g2_font_fur30_tf, u8g2_font_fur35_tf, u8g2_font_fur42_tf, nullptr},
+  {u8g2_font_ncenR08_tf, u8g2_font_ncenR10_tf, u8g2_font_ncenR14_tf, u8g2_font_ncenR18_tf, u8g2_font_ncenR24_tf, u8g2_font_fur30_tf, u8g2_font_fur35_tf, u8g2_font_fur42_tf, nullptr},
+  {u8g2_font_courR10_tf, u8g2_font_courR14_tf, u8g2_font_courR18_tf, u8g2_font_inr16_mf, u8g2_font_inr19_mf, u8g2_font_inr24_mf, u8g2_font_inr30_mf, u8g2_font_inr38_mf, u8g2_font_inr42_mf, u8g2_font_inr46_mf, u8g2_font_inr53_mf, nullptr},
 };
-const uint8_t* const POLICES_B[4][9] = {
+const uint8_t* const POLICES_B[4][12] = {
   {u8g2_font_fub11_tf, u8g2_font_fub14_tf, u8g2_font_fub17_tf, u8g2_font_fub20_tf, u8g2_font_fub25_tf, u8g2_font_fub30_tf, u8g2_font_fub35_tf, u8g2_font_fub42_tf, nullptr},
-  {u8g2_font_helvB08_tf, u8g2_font_helvB10_tf, u8g2_font_helvB12_tf, u8g2_font_helvB14_tf, u8g2_font_helvB18_tf, u8g2_font_helvB24_tf, nullptr},
-  {u8g2_font_ncenB08_tf, u8g2_font_ncenB10_tf, u8g2_font_ncenB12_tf, u8g2_font_ncenB14_tf, u8g2_font_ncenB18_tf, u8g2_font_ncenB24_tf, nullptr},
-  {u8g2_font_courB08_tf, u8g2_font_courB10_tf, u8g2_font_courB12_tf, u8g2_font_courB14_tf, u8g2_font_courB18_tf, u8g2_font_courB24_tf, nullptr},
+  {u8g2_font_helvB08_tf, u8g2_font_helvB10_tf, u8g2_font_helvB14_tf, u8g2_font_helvB18_tf, u8g2_font_helvB24_tf, u8g2_font_fub30_tf, u8g2_font_fub35_tf, u8g2_font_fub42_tf, nullptr},
+  {u8g2_font_ncenB08_tf, u8g2_font_ncenB10_tf, u8g2_font_ncenB14_tf, u8g2_font_ncenB18_tf, u8g2_font_ncenB24_tf, u8g2_font_fub30_tf, u8g2_font_fub35_tf, u8g2_font_fub42_tf, nullptr},
+  {u8g2_font_courB10_tf, u8g2_font_courB14_tf, u8g2_font_courB18_tf, u8g2_font_inb16_mf, u8g2_font_inb19_mf, u8g2_font_inb24_mf, u8g2_font_inb30_mf, u8g2_font_inb38_mf, u8g2_font_inb42_mf, u8g2_font_inb46_mf, u8g2_font_inb53_mf, nullptr},
 };
 const uint8_t* const CHIFFRES[] = {
   u8g2_font_logisoso16_tn, u8g2_font_logisoso20_tn, u8g2_font_logisoso24_tn, u8g2_font_logisoso28_tn, u8g2_font_logisoso32_tn,
@@ -227,10 +231,47 @@ void choisirDans(const uint8_t* const* liste, float cible) {
   }
   police(choix);
 }
-// Police de texte d'une taille "nominale" (hauteur des majuscules en pixels), selon le style du bloc
+// Taille choisie sur la page web, en crans : Petite -1, Normale 0, Grande +1, Tres grande +2
+int cranTaille() { return st.e < 0.9f ? -1 : st.e < 1.1f ? 0 : st.e < 1.4f ? 1 : 2; }
+// Nombre de polices "de la famille" au debut de chaque liste (les suivantes sont celles de Moderne,
+// utilisees seulement quand on demande Grande ou Tres grande)
+const int NATIVES[4] = {8, 5, 5, 11};
+int decalageCran = 0;      // reduction temporaire, quand un texte ne tient pas (bloc F1)
+// Police de texte d'une taille "nominale" (hauteur des majuscules en pixels) : la police "Normale"
+// est la plus grande qui ne depasse pas cette taille, puis on monte ou descend d'autant de paliers
+// que la taille choisie pour le bloc.
 void policeT(int taille, bool gras) {
   int f = (st.f >= 0 && st.f < 4) ? st.f : 0;
-  choisirDans(gras ? POLICES_B[f] : POLICES_R[f], taille * st.e);
+  const uint8_t* const* liste = gras ? POLICES_B[f] : POLICES_R[f];
+  int n = 0, i0 = 0;
+  while (liste[n]) n++;
+  int nat = min(n, NATIVES[f]);
+  for (int i = 0; i < nat; i++) { police(liste[i]); if (asc() <= taille * 1.08f) i0 = i; }
+  int cran = cranTaille() + decalageCran;
+  int i = max(0, min(cran > 0 ? n - 1 : nat - 1, i0 + cran));
+  police(liste[i]);
+}
+// Comme policeT, mais descend d'un ou plusieurs paliers (3 au plus) si le texte ne tient pas en largeur :
+// un texte un peu plus petit plutot que coupe par "..."
+void policeAjustee(int taille, bool gras, const char* texte, int lMax) {
+  for (decalageCran = 0; decalageCran > -3; decalageCran--) {
+    policeT(taille, gras);
+    if (largeurTexte(texte) <= lMax) break;
+  }
+  if (largeurTexte(texte) > lMax) policeT(taille, gras);   // decalageCran vaut -3 ici
+  decalageCran = 0;
+}
+// La plus grande police de la famille du bloc qui tient en hauteur (hMax) et en largeur (texte dans lMax)
+void policeQuiTient(bool gras, float hMax, const char* texte, int lMax) {
+  int f = (st.f >= 0 && st.f < 4) ? st.f : 0;
+  const uint8_t* const* liste = gras ? POLICES_B[f] : POLICES_R[f];
+  const uint8_t* choix = liste[0];
+  int nat = cranTaille() > 0 ? 99 : NATIVES[f];
+  for (int i = 0; liste[i] && i < nat; i++) {
+    police(liste[i]);
+    if (asc() <= hMax && largeurTexte(texte) <= lMax) choix = liste[i];
+  }
+  police(choix);
 }
 void policeChiffres(float taille) { choisirDans(CHIFFRES, taille); }
 
@@ -276,12 +317,10 @@ void widgetDate(JsonVariant e, Boite b, float vBat) {
   int largBat = largeurTexte("Recharger ! 100 %") / 2 + 120;
   bool bat = vBat >= 2.5 && b.w >= 360 + largBat;
   int dispo = b.w - (bat ? largBat : 0);
-  // La plus grande taille qui tient en hauteur et en largeur
-  const int tailles[] = {42, 35, 30, 25, 20, 17, 14, 11};
-  for (int i = 0; i < 8; i++) {
-    policeT(tailles[i], true);
-    if (asc() <= b.h * 0.62f && largeurTexte(date) <= dispo) break;
-  }
+  // La plus grande taille qui tient en largeur et dans une part de la hauteur qui depend
+  // de la taille choisie (Normale : 62 % de la hauteur du bloc, comme avant)
+  const float part[] = {0.45f, 0.62f, 0.78f, 0.95f};
+  policeQuiTient(true, b.h * part[cranTaille() + 1], date, dispo);
   int base = b.y + (b.h + asc()) / 2;
   texteTronque(b.x, base, date, dispo);
   if (bat) dessinerBatterie(vBat, b.x + b.w, b.y + b.h / 2);
@@ -324,7 +363,7 @@ void widgetMeteo(JsonVariant m, Boite b) {
   texte(xd + r + 4, y + asc() + 2, "C");
   y += aT;
   if (avecDesc) {
-    policeT(largTexte >= 330 * st.e ? 25 : 20, true);
+    policeAjustee(largTexte >= 330 * st.e ? 25 : 20, true, m["desc"] | "", largTexte);
     y += ligneD;
     texteTronque(xt, y, m["desc"] | "", largTexte);
   }
@@ -335,6 +374,7 @@ void widgetMeteo(JsonVariant m, Boite b) {
       snprintf(t, sizeof t, "Min %d°  ·  Max %d°  ·  Ressenti %d°", (int)m["min"], (int)m["max"], (int)m["ressenti"]);
     if (!m["ressenti"].is<int>() || largeurTexte(t) > largTexte)
       snprintf(t, sizeof t, "Min %d°  ·  Max %d°", (int)(m["min"] | 0), (int)(m["max"] | 0));
+    policeAjustee(20, false, t, largTexte);
     texteTronque(xt, y, t, largTexte);
   }
 
@@ -365,9 +405,9 @@ void widgetMeteo(JsonVariant m, Boite b) {
     policeT(25, true);
     texteTronque(xr - min(largeurTexte(m["ville"] | ""), largDetails), yd, m["ville"] | "", largDetails);
     yd += 4;
-    policeT(20, false);
     for (int i = 0; i < n; i++) {
       yd += pas;
+      policeAjustee(20, false, l[i], largDetails);
       if (largeurTexte(l[i]) <= largDetails) texteDroite(xr, yd, l[i]);
       else texteTronque(xr - largDetails, yd, l[i], largDetails);
     }
@@ -736,14 +776,19 @@ void widgetF1(JsonVariant f, Boite b) {
   if (y <= txt.y + txt.h) texteTronque(txt.x, y, t, txt.w);
   policeT(20, true);
   y += asc() + 12;
-  if (y <= txt.y + txt.h) texte(txt.x, y, f["quand"] | "");
+  if (y <= txt.y + txt.h) texteTronque(txt.x, y, f["quand"] | "", txt.w);
   y += 8;
   // Seances : on garde les prochaines si la place manque
   int place = (txt.y + txt.h - y) / ligneS;
   int premier = 0;
   if (place < ns) { premier = ns - max(0, place); for (int i = 0; i < ns && premier > 0; i++) if (!(S[i]["f"] | 0)) { premier = min(premier, i); break; } }
-  policeT(17, true);  int lJ = largeurTexte("Mer 88") + 12;
-  policeT(17, false); int lH = largeurTexte("88h88") + 14;
+  // Jour et heure doivent tenir avec un peu de place pour le nom : sinon on reduit la police
+  int lJ, lH;
+  for (decalageCran = 0; ; decalageCran--) {
+    policeT(17, true);  lJ = largeurTexte("Mer 88") + 12;
+    policeT(17, false); lH = largeurTexte("88h88") + 14;
+    if (lJ + lH + largeurTexte("Qualifications") / 2 <= txt.w || decalageCran <= -4) break;
+  }
   for (int i = premier; i < ns && i - premier < place; i++) {
     JsonObject o = S[i];
     y += ligneS;
@@ -752,8 +797,9 @@ void widgetF1(JsonVariant f, Boite b) {
     texte(txt.x, y, o["j"] | "");
     texte(txt.x + lJ, y, o["h"] | "");
     texteTronque(txt.x + lJ + lH, y, o["n"] | "", txt.w - lJ - lH);
-    if (fini) canvas.fillRect(txt.x, y - aS / 2 - 1, min(txt.w, lJ + lH + (int)largeurTexte(o["n"] | "")), 2, NOIR);   // barre
+    if (fini) canvas.fillRect(txt.x, y - asc() / 2 - 1, min(txt.w, lJ + lH + (int)largeurTexte(o["n"] | "")), 2, NOIR);   // barre
   }
+  decalageCran = 0;
 }
 
 void dessinerTableau(JsonVariant e, float vBat) {

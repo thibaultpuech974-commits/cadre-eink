@@ -123,7 +123,7 @@ L'écran est découpé en une grille de 12 × 8 cases, et les blocs ne peuvent p
 
 **Orientation** : les boutons **Paysage**, **Portrait** et **Portrait inversé** choisissent le sens du cadre. Les deux portraits correspondent aux deux façons d'accrocher le cadre en hauteur : prends celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition (grille de 8 × 12 cases en portrait). Une photo est préparée dans l'orientation active au moment de l'envoi : renvoie-la si tu changes d'orientation.
 
-**Texte d'un bloc** : touche un bloc sans le déplacer, puis choisis sa **taille** (Petite, Normale, Grande, Très grande) et sa **police** (Moderne, Helvetica, Classique, Machine à écrire). Helvetica, Classique et Machine à écrire n'existent qu'en tailles moyennes : pour les très grands textes, Moderne reste plus grand.
+**Texte d'un bloc** : touche un bloc sans le déplacer, puis choisis sa **taille** (Petite, Normale, Grande, Très grande) et sa **police** (Moderne, Helvetica, Classique, Machine à écrire). Chaque cran change tous les textes du bloc d'un palier (environ 25 %), et un texte trop long rétrécit avant d'être coupé. Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne (42 px au plus). Machine à écrire monte jusqu'à 53 px (Courier pour les petites tailles, Inconsolata au-delà).
 
 Le curseur **Contour de l'aperçu** ne règle que l'épaisseur du cadre noir dessiné autour de l'aperçu sur la page web. Il ne change rien sur l'écran.
 
