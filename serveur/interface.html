@@ -57,8 +57,11 @@ code{font-size:13px;word-break:break-all;background:var(--fond);padding:2px 6px;
 pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflow:auto;max-height:260px}
 #connexion{max-width:360px;margin:15vh auto}
 .cache{display:none}
-#panneauPrevisu{position:fixed;right:12px;bottom:12px;width:min(calc(100vw - 24px),460px);max-height:75vh;overflow:auto;background:var(--carte);border:1px solid var(--trait);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.28);padding:10px 12px;z-index:20;box-sizing:border-box}
-#panneauPrevisu .tete{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+#panneauPrevisu{position:fixed;left:0;top:0;width:min(calc(100vw - 24px),460px);max-height:85vh;overflow:auto;background:var(--carte);border:1px solid var(--trait);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.28);padding:10px 12px;z-index:20;box-sizing:border-box}
+#panneauPrevisu .tete{display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:move;touch-action:none;-webkit-user-select:none;user-select:none}
+#panneauPrevisu .poignee{position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;
+  background:linear-gradient(135deg,transparent 0 55%,var(--doux) 55% 62%,transparent 62% 72%,var(--doux) 72% 79%,transparent 79%)}
+#panneauPrevisu.reduit .poignee{display:none}
 #panneauPrevisu .tete b{flex:none}
 #panneauPrevisu .tete select{flex:1;min-width:0;width:auto;padding:5px 8px}
 #panneauPrevisu .tete button{flex:none;padding:4px 11px;line-height:1.2}
@@ -304,6 +307,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     <canvas id="previsu" class="ecran"></canvas>
     <p class="aide" id="infoPrevisu"></p>
   </div>
+  <div class="poignee" id="poigneePrevisu" title="Agrandir ou réduire"></div>
 </div>
 
 <p class="aide" style="text-align:center"><a href="#" onclick="deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
@@ -1501,6 +1505,7 @@ function previsualiser() {
   $('reduirePrevisu').textContent = '–';
   boutonsPrevisu(false);
   remplirScenesPrevisu();
+  placerPanneau();
   majPrevisu();
 }
 function fermerPrevisu() {
@@ -1514,10 +1519,68 @@ function reduirePrevisu() {
   var r = $('panneauPrevisu').classList.toggle('reduit');
   $('reduirePrevisu').textContent = r ? '+' : '–';
   $('reduirePrevisu').title = r ? 'Agrandir' : 'Réduire';
+  placerPanneau();
+}
+// Position et largeur du panneau : on le deplace en le tirant par sa barre de titre, on l'agrandit
+// par son coin en bas a droite ; retenues sur cet appareil. Double-clic sur la barre : position de depart.
+var posPrevisu = null;
+try { posPrevisu = JSON.parse(localStorage.getItem('cadre-previsu') || 'null'); } catch (e) {}
+function placerPanneau() {
+  var p = $('panneauPrevisu'), W = window.innerWidth, H = window.innerHeight;
+  var l = Math.max(240, Math.min(posPrevisu && posPrevisu.l ? posPrevisu.l : 460, W - 8));
+  p.style.width = l + 'px';
+  var h = p.offsetHeight;
+  var x = posPrevisu ? posPrevisu.x : W - l - 12, y = posPrevisu ? posPrevisu.y : H - h - 12;
+  x = Math.max(4, Math.min(x, W - l - 4));
+  y = Math.max(4, Math.min(y, H - h - 4));                    // toujours entierement visible si possible
+  p.style.left = x + 'px'; p.style.top = y + 'px';
   ajusterMarge();
 }
-// Laisse de la place en bas de la page pour que le panneau ne cache pas les derniers reglages
-function ajusterMarge() { document.body.style.paddingBottom = previsuActive ? ($('panneauPrevisu').offsetHeight + 24) + 'px' : ''; }
+function memoriserPanneau() {
+  var p = $('panneauPrevisu');
+  posPrevisu = { x: p.offsetLeft, y: p.offsetTop, l: p.offsetWidth };
+  try { localStorage.setItem('cadre-previsu', JSON.stringify(posPrevisu)); } catch (e) {}
+}
+// Glisser (souris ou doigt) : f recoit le deplacement depuis le debut du geste
+function glisser(el, debut, f, fin) {
+  el.addEventListener('pointerdown', function (ev) {
+    if (ev.target.closest('select, button')) return;
+    ev.preventDefault();
+    var x0 = ev.clientX, y0 = ev.clientY, etat = debut();
+    el.setPointerCapture(ev.pointerId);
+    var bouge = function (e) { f(etat, e.clientX - x0, e.clientY - y0); };
+    var lache = function () { el.removeEventListener('pointermove', bouge); el.removeEventListener('pointerup', lache); el.removeEventListener('pointercancel', lache); fin(); };
+    el.addEventListener('pointermove', bouge); el.addEventListener('pointerup', lache); el.addEventListener('pointercancel', lache);
+  });
+}
+glisser(document.querySelector('#panneauPrevisu .tete'),
+  function () { var p = $('panneauPrevisu'); return { x: p.offsetLeft, y: p.offsetTop }; },
+  function (e, dx, dy) {
+    var p = $('panneauPrevisu');
+    p.style.left = Math.max(4, Math.min(e.x + dx, window.innerWidth - p.offsetWidth - 4)) + 'px';
+    p.style.top = Math.max(4, Math.min(e.y + dy, window.innerHeight - p.offsetHeight - 4)) + 'px';
+  },
+  function () { memoriserPanneau(); ajusterMarge(); });
+glisser($('poigneePrevisu'),
+  function () { return { l: $('panneauPrevisu').offsetWidth }; },
+  function (e, dx) {
+    var p = $('panneauPrevisu');
+    p.style.width = Math.max(240, Math.min(e.l + dx, window.innerWidth - p.offsetLeft - 4)) + 'px';
+  },
+  function () { memoriserPanneau(); placerPanneau(); });
+document.querySelector('#panneauPrevisu .tete').addEventListener('dblclick', function () {
+  posPrevisu = null;
+  try { localStorage.removeItem('cadre-previsu'); } catch (e) {}
+  placerPanneau();
+});
+window.addEventListener('resize', function () { if (previsuActive) placerPanneau(); });
+// Laisse de la place en bas de la page quand le panneau est dans la moitie basse de l'ecran,
+// pour qu'il ne cache pas les derniers reglages
+function ajusterMarge() {
+  var p = $('panneauPrevisu');
+  document.body.style.paddingBottom = previsuActive && p.offsetTop > window.innerHeight / 2
+    ? (window.innerHeight - p.offsetTop + 12) + 'px' : '';
+}
 // Liste des scenes dans le panneau (choix de la scene prevue)
 function remplirScenesPrevisu() {
   var sel = $('scenePrevisu'), noms = ['Par défaut'].concat(scenes.map(function (sc) { return sc.nom; }));
@@ -1562,7 +1625,7 @@ function majPrevisu() {
       });
       $('infoPrevisu').textContent = "Dessinée comme sur le cadre, avec les données actuelles et tes réglages (même non enregistrés). " +
         "Rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.";
-      ajusterMarge();
+      placerPanneau();
     })
     .catch(function (e) { if (n === numPrevisu) $('infoPrevisu').textContent = 'Prévisualisation impossible : ' + e.message; });
 }
