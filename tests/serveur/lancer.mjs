@@ -31,10 +31,19 @@ const ATTENDU = {
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
 let echecs = 0;
+// La page web : son script doit etre du JavaScript valide (sinon la page entiere ne marche plus)
+try {
+  const { readFileSync } = await import('fs');
+  const page = readFileSync(ici + '/../../serveur/interface.html', 'utf8');
+  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+  if (!scripts.length) throw new Error('aucun script trouvé');
+  scripts.forEach(js => new Function(js));
+  console.log('ok   interface.html (script valide)');
+} catch (e) { echecs++; console.log('ÉCHEC interface.html : ' + e.message); }
 for (const [fichier, motifs] of Object.entries(ATTENDU)) {
   let sortie = '';
   try {
-    sortie = execFileSync(process.execPath, [fichier], { cwd: ici, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
+    sortie = execFileSync(process.execPath, ['--import', './html-texte.mjs', fichier], { cwd: ici, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
   } catch (e) {
     console.log('ÉCHEC ' + fichier + ' : le test a planté\n' + (e.stdout || '') + (e.stderr || ''));
     echecs++; continue;

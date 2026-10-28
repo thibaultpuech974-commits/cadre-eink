@@ -4,7 +4,7 @@ Le projet a trois parties :
 
 | Partie | Fichier | Rôle |
 |---|---|---|
-| Serveur web | `worker.js` | Interface web, météo, agenda, photo, pochette, aperçu |
+| Serveur web | `serveur/` : `worker.js` (serveur), `interface.html` (page web), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
 | Carte ESP32 | `cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
 | Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
 
@@ -16,7 +16,7 @@ Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou l
 
 1. Crée un compte gratuit sur **dash.cloudflare.com**.
 2. Menu **Workers & Pages** → **Créer** → **Créer un Worker**. Nomme-le `cadre`, puis **Déployer**.
-3. Clique sur **Modifier le code**. Efface tout, colle le contenu de `worker.js`, puis **Déployer**.
+3. Le serveur est fait de plusieurs fichiers : il se déploie depuis GitHub (voir « Déploiement automatique » plus bas), et non plus par copier-coller.
 4. Crée l'espace de stockage : menu **Stockage et bases de données** → **KV** → **Créer** → nom `cadre-donnees`.
 5. Retourne dans ton Worker → **Paramètres** → **Liaisons** → **Ajouter** → **Espace de noms KV** :
    - Nom de la variable : `CADRE` (en majuscules, exactement)
@@ -28,9 +28,9 @@ Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou l
 7. Ton adresse est affichée en haut de la page du Worker, du type
    `https://cadre.ton-nom.workers.dev`. Ouvre-la et connecte-toi avec ton mot de passe.
 
-**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur : plus besoin de copier-coller `worker.js`. Le secret `CLE` reste dans Cloudflare.
+**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur, avec ses trois fichiers (`worker.js`, `interface.html`, `circuits.js`). Le secret `CLE` reste dans Cloudflare.
 
-**Tests avant chaque déploiement** : dans **Paramètres → Builds → Configuration du build**, mets `npm test` comme **commande de build** (la commande de déploiement reste `npx wrangler deploy`). Cloudflare lance alors les tests du serveur avant de déployer : si l'un d'eux échoue, le déploiement est annulé et l'ancienne version reste en ligne. Pour les lancer toi-même : `npm test` à la racine du dépôt (Node.js 18 ou plus, rien à installer).
+**Tests avant chaque déploiement** : dans **Paramètres → Builds → Configuration du build**, mets `npm test` comme **commande de build** (la commande de déploiement reste `npx wrangler deploy`). Cloudflare lance alors les tests du serveur avant de déployer : si l'un d'eux échoue, le déploiement est annulé et l'ancienne version reste en ligne. Pour les lancer toi-même : `npm test` à la racine du dépôt (Node.js 20.6 ou plus, rien à installer). Serveur de test local avec la page web : `cd tests/serveur && node --import ./html-texte.mjs serveur_bus.mjs`, puis http://localhost:8787 (mot de passe `secret`).
 
 L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager → Sur l'écran d'accueil** la transforme en « app ».
 

@@ -9,5 +9,7 @@
     { "binding": "CADRE", "id": "4fcf3dab2bf546afaf545285acf10935" }
   ],
   // garde les variables saisies dans le tableau de bord
-  "keep_vars": true
+  "keep_vars": true,
+  // la page web (serveur/interface.html) est importee comme du texte
+  "rules": [{ "type": "Text", "globs": ["**/*.html"], "fallthrough": true }]
 }

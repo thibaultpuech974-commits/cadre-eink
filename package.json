@@ -1,6 +1,7 @@
 {
   "name": "cadre-eink",
   "private": true,
+  "type": "module",
   "description": "Cadre e-ink : serveur (Cloudflare Worker) et programme de la carte",
   "scripts": {
     "test": "node tests/serveur/lancer.mjs"
