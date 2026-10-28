@@ -11,5 +11,9 @@
   // garde les variables saisies dans le tableau de bord
   "keep_vars": true,
   // la page web (serveur/interface.html) est importee comme du texte
-  "rules": [{ "type": "Text", "globs": ["**/*.html"], "fallthrough": true }]
+  // et le dessin de la carte en WebAssembly (serveur/apercu.wasm) comme des octets, envoyes tels quels a la page
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html"], "fallthrough": true },
+    { "type": "Data", "globs": ["**/apercu.wasm"] }
+  ]
 }

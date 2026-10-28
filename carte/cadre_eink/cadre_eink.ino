@@ -58,6 +58,8 @@ const char* CLE         = "TON_MOT_DE_PASSE";                    // la meme que 
 struct Boite { int x, y, w, h; };
 // Style du texte du bloc en cours de dessin : e = echelle (0,8 a 1,5), f = famille de police
 struct Style { float e; int f; };
+// Place prise par le texte du bloc F1 (definie ici pour la meme raison que Boite)
+struct MesureF1 { int aT, aP, aQ, ligneS, lJ, lH, h; bool tient; };
 
 GFXcanvas1 canvas(LARGEUR, HAUTEUR);      // l'image est d'abord dessinee ici
 U8G2_FOR_ADAFRUIT_GFX u8g2;
@@ -731,73 +733,94 @@ void dessinerCircuit(JsonVariant tr, int x, int y, int w, int h) {
 }
 
 // Prochain Grand Prix de F1 : trace du circuit, compte a rebours, horaires des seances
+// Mesures du texte du bloc F1 pour une largeur donnee (decalage = paliers de police en moins)
+MesureF1 mesurerF1(JsonArray S, const char* gp, int largeur, int decalage) {
+  MesureF1 r;
+  decalageCran = decalage;
+  const int tl[] = {30, 25, 20, 17, 14};
+  for (int i = 0; i < 5; i++) { policeT(tl[i], true); if (largeurTexte(gp) <= largeur) break; }
+  r.aT = asc();
+  policeT(14, false); r.aP = asc();
+  policeT(20, true);  r.aQ = asc();
+  policeT(17, false); int aS = asc();
+  r.ligneS = aS + max(6, aS / 3);
+  // Colonnes jour et heure : la plus large etiquette reelle (la course est en gras)
+  r.lJ = 0; r.lH = 0;
+  for (JsonObject o : S) {
+    policeT(17, !strcmp(o["n"] | "", "Course"));
+    r.lJ = max(r.lJ, (int)largeurTexte(o["j"] | ""));
+    r.lH = max(r.lH, (int)largeurTexte(o["h"] | ""));
+  }
+  r.lJ += max(8, aS / 2); r.lH += max(10, aS * 2 / 3);
+  r.h = r.aT + r.aP + 10 + r.aQ + 12 + 8 + S.size() * r.ligneS;
+  r.tient = r.lJ + r.lH + largeurTexte("Qualifications") * 6 / 10 <= largeur;
+  decalageCran = 0;
+  return r;
+}
+
+// Prochain Grand Prix de F1 : trace du circuit, compte a rebours, horaires des seances.
+// On mesure d'abord la place que prend tout le texte, et le trace prend le reste ; si le texte ne
+// tient pas, la police descend d'un palier (deux au plus), puis les seances terminees sont omises.
 void widgetF1(JsonVariant f, Boite b) {
   if (f.isNull()) return;
   policeT(20, false);
   if (f["erreur"].is<const char*>()) { texteTronque(b.x, b.y + asc() + 6, f["erreur"].as<const char*>(), b.w); return; }
   JsonArray S = f["sessions"];
   int ns = S.size();
-  // Hauteur des textes
-  policeT(14, false); int aP = asc();
-  policeT(17, false); int aS = asc();
-  int ligneS = aS + max(8, aS / 2);
-  // Disposition : trace a gauche si le bloc est large, sinon au-dessus
-  bool cote = b.w >= b.h * 1.35f;
-  Boite txt = b, tr = b;
-  if (cote) { tr.w = min(b.h, b.w * 45 / 100); txt.x = b.x + tr.w + 16; txt.w = b.w - tr.w - 16; }
-  else {
-    int hTexte = aP * 3 + 40 + ns * ligneS;            // titre, circuit, compte a rebours, seances
-    tr.h = max(b.h * 35 / 100, b.h - hTexte);
-    txt.y = b.y + tr.h + 12; txt.h = b.h - tr.h - 12;
-  }
-  if (!f["trace"].isNull() && tr.h >= 40 && tr.w >= 40) dessinerCircuit(f["trace"], tr.x, tr.y, tr.w, tr.h);
-  else if (cote) { txt = b; }                       // pas de trace : tout le bloc pour le texte
-  if (cote) {                                       // texte centre en hauteur a cote du trace
-    const char* g0 = f["gp"] | "";
-    const int tl[] = {30, 25, 20, 17, 14};
-    for (int i = 0; i < 5; i++) { policeT(tl[i], true); if (largeurTexte(g0) <= txt.w) break; }
-    int aT = asc();
-    policeT(20, true); int aQ = asc();
-    int hTexte = aT + aP + 10 + aQ + 20 + ns * ligneS;
-    if (hTexte < txt.h) { int dec = (txt.h - hTexte) / 2; txt.y += dec; txt.h -= dec; }
-  }
-  // Titre : le plus grand qui tient
   const char* gp = f["gp"] | "";
+  bool avecTrace = !f["trace"].isNull();
+  // Choix de la disposition : trace a gauche ou au-dessus, la plus grande qui laisse tout le texte
+  bool cote = false; int dec = 0, taille = -1, dTrace = 0;
+  for (int d = 0; d >= -2 && taille < 0; d--) {
+    int twC = min(b.h, b.w * 45 / 100);                            // trace a gauche
+    MesureF1 mc = mesurerF1(S, gp, b.w - twC - 16, d);
+    if (mc.tient && mc.h <= b.h && twC >= 60) { cote = true; dec = d; taille = twC; dTrace = twC; }
+    MesureF1 mh = mesurerF1(S, gp, b.w, d);                        // trace au-dessus
+    int thH = b.h - mh.h - 12;
+    if (mh.tient && thH >= max(60, b.h / 4) && min(b.w, thH) > taille) { cote = false; dec = d; taille = min(b.w, thH); dTrace = thH; }
+  }
+  if (taille < 0) { cote = false; dec = -2; dTrace = b.h / 4; }      // trop petit : trace reduit, seances omises
+  if (!avecTrace) { cote = false; dTrace = 0; }
+  MesureF1 m = mesurerF1(S, gp, cote ? b.w - dTrace - 16 : b.w, dec);
+  Boite txt = b;
+  if (avecTrace && cote) {
+    dessinerCircuit(f["trace"], b.x, b.y, dTrace, b.h);
+    txt.x = b.x + dTrace + 16; txt.w = b.w - dTrace - 16;
+    if (m.h < txt.h) { txt.y += (txt.h - m.h) / 2; txt.h = m.h + 4; }    // texte centre en hauteur
+  } else if (avecTrace) {
+    dessinerCircuit(f["trace"], b.x, b.y, b.w, dTrace);
+    txt.y = b.y + dTrace + 12; txt.h = b.h - dTrace - 12;
+  }
+  decalageCran = dec;
+  // Titre : le plus grand qui tient
   const int tailles[] = {30, 25, 20, 17, 14};
   for (int i = 0; i < 5; i++) { policeT(tailles[i], true); if (largeurTexte(gp) <= txt.w) break; }
   int y = txt.y + asc();
   texteTronque(txt.x, y, gp, txt.w);
   char t[96];
   policeT(14, false);
-  int m = f["manche"] | 0;
-  if (m) snprintf(t, sizeof t, "Manche %d - %s", m, (const char*)(f["circuit"] | ""));
+  int mch = f["manche"] | 0;
+  if (mch) snprintf(t, sizeof t, "Manche %d - %s", mch, (const char*)(f["circuit"] | ""));
   else snprintf(t, sizeof t, "%s", (const char*)(f["circuit"] | ""));
-  y += aP + 10;
+  y += m.aP + 10;
   if (y <= txt.y + txt.h) texteTronque(txt.x, y, t, txt.w);
   policeT(20, true);
-  y += asc() + 12;
+  y += m.aQ + 12;
   if (y <= txt.y + txt.h) texteTronque(txt.x, y, f["quand"] | "", txt.w);
   y += 8;
-  // Seances : on garde les prochaines si la place manque
-  int place = (txt.y + txt.h - y) / ligneS;
+  // Seances : si la place manque encore, on garde les prochaines
+  int place = (txt.y + txt.h - y) / m.ligneS;
   int premier = 0;
   if (place < ns) { premier = ns - max(0, place); for (int i = 0; i < ns && premier > 0; i++) if (!(S[i]["f"] | 0)) { premier = min(premier, i); break; } }
-  // Jour et heure doivent tenir avec un peu de place pour le nom : sinon on reduit la police
-  int lJ, lH;
-  for (decalageCran = 0; ; decalageCran--) {
-    policeT(17, true);  lJ = largeurTexte("Mer 88") + 12;
-    policeT(17, false); lH = largeurTexte("88h88") + 14;
-    if (lJ + lH + largeurTexte("Qualifications") / 2 <= txt.w || decalageCran <= -4) break;
-  }
   for (int i = premier; i < ns && i - premier < place; i++) {
     JsonObject o = S[i];
-    y += ligneS;
+    y += m.ligneS;
     bool fini = (o["f"] | 0) == 1, course = !strcmp(o["n"] | "", "Course");
     policeT(17, course);
     texte(txt.x, y, o["j"] | "");
-    texte(txt.x + lJ, y, o["h"] | "");
-    texteTronque(txt.x + lJ + lH, y, o["n"] | "", txt.w - lJ - lH);
-    if (fini) canvas.fillRect(txt.x, y - asc() / 2 - 1, min(txt.w, lJ + lH + (int)largeurTexte(o["n"] | "")), 2, NOIR);   // barre
+    texte(txt.x + m.lJ, y, o["h"] | "");
+    texteTronque(txt.x + m.lJ + m.lH, y, o["n"] | "", txt.w - m.lJ - m.lH);
+    if (fini) canvas.fillRect(txt.x, y - asc() / 2 - 1, min(txt.w, m.lJ + m.lH + (int)largeurTexte(o["n"] | "")), 2, NOIR);   // barre
   }
   decalageCran = 0;
 }

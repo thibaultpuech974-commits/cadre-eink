@@ -113,6 +113,10 @@ Limite d'iOS : un raccourci ne peut pas se déclencher tout seul à chaque chang
 
 Exemples : « Bus » (ven 18:00-20:00, mise à jour 3 min, bloc bus en grand), « Grand Prix » (week-end d'un GP, bloc F1), « Vacances » (du 17/10 au 01/11, sans l'agenda des cours). La page indique la scène affichée en ce moment (point • à côté de son nom). Tes anciens réglages ont été convertis : la disposition « Pendant les créneaux bus » est devenue la scène « Bus ».
 
+**Prévisualisation** : sous les blocs, le bouton **Prévisualiser** dessine la scène choisie exactement comme le cadre l'affichera (avec les données actuelles : météo, agenda, F1…), sans rien enregistrer ni envoyer au cadre. L'image suit ensuite chaque modification. Elle utilise le même code de dessin que la carte, compilé en WebAssembly (`serveur/apercu.wasm`).
+
+> **Après chaque modification de `cadre_eink.ino`**, recompile la prévisualisation : `bash outils/apercu/preparer-outils.sh` (une seule fois), puis `bash outils/apercu/construire.sh`. Les tests refusent le déploiement si elle n'est pas à jour.
+
 Pour les blocs de la scène choisie :
 - fais glisser un bloc pour le déplacer (au doigt ou à la souris) ;
 - tire son **coin en bas à droite** pour l'agrandir ou le réduire ;

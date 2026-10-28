@@ -16,6 +16,8 @@
 import CIRCUITS from './circuits.js';
 // Page web de reglage : fichier a part, integre par Cloudflare au deploiement (regle "Text" de wrangler.jsonc)
 import INTERFACE from './interface.html';
+// Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
+import APERCU_WASM from './apercu.wasm';
 
 const LARGEUR = 960, HAUTEUR = 680, OCTETS = (LARGEUR / 8) * HAUTEUR;   // 81 600 octets
 const TZ = 'Europe/Paris';
@@ -155,6 +157,8 @@ export default {
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
+      if (chemin === '/api/previsualiser' && m === 'POST') return await routePrevisualiser(req, env);
+      if (chemin === '/api/apercu.wasm' && m === 'GET') return new Response(APERCU_WASM, { headers: { 'content-type': 'application/wasm', 'cache-control': 'private, max-age=3600' } });
       if (chemin === '/api/batterie' && m === 'GET') return texte((await env.CADRE.get('batterie' + (url.searchParams.get('ecran') === '1' ? '1' : ''))) || '{"pts":[]}');
       if (chemin === '/api/sauvegarde' && m === 'GET') return await routeSauvegarde(env);
       if (chemin === '/api/sauvegarde' && m === 'POST') return await routeRestaurer(req, env);
@@ -412,6 +416,28 @@ function preparerModif(modif, cfg) {
     delete modif.agenda.anniversairesTexte;
   }
   return ignorees;
+}
+
+// --- Previsualisation : l'etat qu'enverrait le serveur avec des reglages pas encore enregistres ---
+// La page le dessine elle-meme avec le code de la carte (apercu.wasm). Rien n'est enregistre.
+async function routePrevisualiser(req, env) {
+  let demande;
+  try { demande = await req.json(); } catch (e) { return texte('Demande illisible', 400); }
+  const cfg = await lireConfig(env);
+  const modif = demande.modif || {};
+  const err = preparerModif(modif, cfg);
+  if (typeof err === 'string') return texte(err, 400);
+  fusionner(cfg, modif);
+  const scene = Number.isInteger(demande.scene) ? demande.scene : null;
+  const contenu = await construireTableau(cfg, Date.now(), env, scene);
+  const nb = cfg.ecrans && cfg.ecrans.nb === 2 ? 2 : 1;
+  const ecrans = [];
+  for (let n = 0; n < nb; n++) {
+    const e = Object.assign({ mode: 'tableau' }, contenu, { disposition: contenu.disposition.filter(d => d.n === n) });
+    delete e.scene;
+    ecrans.push(e);
+  }
+  return json({ scene: contenu.scene.nom, ecrans });
 }
 
 // --- Sauvegarde des reglages (fichier telecharge depuis la page web) et restauration ---
@@ -832,7 +858,8 @@ async function prochainsBus(o, maintenant, env, ignorerCreneau) {
 // ---------------------------------------------------------------------
 //  Tableau de bord : date + meteo + agenda
 // ---------------------------------------------------------------------
-async function construireTableau(cfg, maintenant, env) {
+// forcer : numero de la scene a afficher (-1 = Par defaut) ; absent = scene active a cet instant
+async function construireTableau(cfg, maintenant, env, forcer = null) {
   const w = mural(maintenant);
   const rotation = ROTATIONS.includes(cfg.affichage.rotation) ? cfg.affichage.rotation : 0;
   const g = grille(rotation, cfg.ecrans);
@@ -860,7 +887,8 @@ async function construireTableau(cfg, maintenant, env) {
   const pGP = scenes.some(sc => sc.f1) || peutServir(['f1']) ? chargerGP() : null;
   if (scenes.some(sc => sc.f1)) await pGP;
   // Scene affichee : la premiere active de la liste, sinon la disposition par defaut
-  const active = scenes.find(sc => sceneActive(sc, maintenant, f1));
+  const active = forcer === null || forcer === undefined ? scenes.find(sc => sceneActive(sc, maintenant, f1))
+    : forcer >= 0 ? scenes[forcer] || null : null;
   let dispo = validerDisposition(active ? active[cle] : cfg[cle], g);
   const presents = new Set(dispo.map(d => d.id));
   const pBus = presents.has('bus') ? sansErreur(prochainsBus(cfg.bus, maintenant, env, true), 'Bus indisponibles') : null;

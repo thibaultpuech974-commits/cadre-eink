@@ -133,6 +133,12 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
   <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
   <div id="editeur" class="ecran editeur"></div>
+  <button style="width:100%;margin-top:8px" id="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
+  <div id="zonePrevisu" class="cache" style="margin-top:8px">
+    <p style="margin:0 0 4px;font-weight:600">Prévisualisation</p>
+    <canvas id="previsu" class="ecran"></canvas>
+    <p class="aide" id="infoPrevisu"></p>
+  </div>
   <p class="aide">Touche un bloc (sans le déplacer) pour régler la taille et la police de son texte.</p>
   <div id="styleBloc" class="cache" style="margin-top:8px;padding:10px 12px;border:1px solid var(--trait);border-radius:10px">
     <p style="margin:0 0 4px;font-weight:600" id="styleTitre"></p>
@@ -610,6 +616,7 @@ function choisirEcrans(nb, assemblage) {
 }
 $('joint').onchange = function () { ECR.joint = Math.max(0, Math.min(100, +this.value || 0)); appliquerRotation(rot); if (image) tramer(); };
 function dessinerEditeur() {
+  demanderPrevisu();
   var ed = $('editeur');
   ed.innerHTML = '';
   for (var y = 0; y < G.rangs; y++) for (var x = 0; x < G.cols; x++) {
@@ -672,6 +679,7 @@ function brancher(el, d) {
   function fin() { depart = null; el.classList.remove('actif'); el.classList.remove('refus'); }
   el.addEventListener('pointerup', function () {
     var simpleClic = depart && !depart.bouge && !depart.redim;
+    if (depart && depart.bouge) demanderPrevisu();
     fin();
     if (simpleClic) selectionner(d.id);
   });
@@ -1420,6 +1428,79 @@ function restaurerReglages() {
     return charger();
   }).catch(function (e) { message('msgSauvegarde', 'Erreur : ' + e.message); });
 }
+
+// --- Previsualisation : le code de dessin de la carte, compile en WebAssembly, tourne dans la page ---
+var moteur = null;
+function chargerMoteur() {
+  if (moteur) return Promise.resolve(moteur);
+  return api('/api/apercu.wasm').then(function (r) { return r.arrayBuffer(); }).then(function (octets) {
+    var mem = null;
+    var vue = function () { return new DataView(mem.buffer); };
+    var wasi = {                                   // le strict minimum : le dessin n'utilise ni fichiers ni horloge
+      fd_prestat_get: function () { return 8; }, fd_prestat_dir_name: function () { return 8; },
+      fd_close: function () { return 0; }, fd_fdstat_get: function () { return 0; }, fd_seek: function () { return 0; },
+      fd_write: function (fd, iovs, n, pEcrits) {
+        var t = 0; for (var i = 0; i < n; i++) t += vue().getUint32(iovs + 8 * i + 4, true);
+        vue().setUint32(pEcrits, t, true); return 0;
+      },
+      clock_time_get: function (id, prec, p) { vue().setBigUint64(p, BigInt(0), true); return 0; },
+      proc_exit: function (c) { throw new Error('arrêt ' + c); }
+    };
+    return WebAssembly.instantiate(octets, { wasi_snapshot_preview1: wasi }).then(function (res) {
+      var ex = res.instance.exports;
+      mem = ex.memory; ex._initialize();
+      moteur = {
+        dessiner: function (etat, vBat) {
+          var b = new TextEncoder().encode(JSON.stringify(etat));
+          var p = ex.zone(b.length);
+          new Uint8Array(mem.buffer, p, b.length).set(b);
+          var img = ex.dessiner(b.length, vBat);
+          if (!img) throw new Error('état illisible');
+          return new Uint8Array(mem.buffer, img, OCTETS).slice();
+        }
+      };
+      return moteur;
+    });
+  });
+}
+var previsuActive = false, minuteurPrevisu = null, numPrevisu = 0;
+function previsualiser() {
+  previsuActive = true;
+  $('zonePrevisu').classList.remove('cache');
+  $('boutonPrevisu').classList.add('cache');
+  majPrevisu();
+}
+function demanderPrevisu() {
+  if (!previsuActive) return;
+  clearTimeout(minuteurPrevisu);
+  minuteurPrevisu = setTimeout(majPrevisu, 600);
+}
+function majPrevisu() {
+  lireFormScene(); ranger();
+  var n = ++numPrevisu;
+  var modif = { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
+    affichage: { traits: $('traits').checked, rotation: rot } };
+  $('infoPrevisu').textContent = 'Préparation…';
+  Promise.all([chargerMoteur(), api('/api/previsualiser', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modif: modif, scene: sceneCourante }) }).then(function (r) { return r.json(); })])
+    .then(function (r) {
+      if (n !== numPrevisu) return;                // une demande plus recente est en cours
+      var m = r[0], d = r[1], g = grilleUI(rot);
+      var vBat = dernierStatut && dernierStatut.bat > 2.5 ? dernierStatut.bat : 4.0;
+      var cv = $('previsu'); cv.width = g.VLE; cv.height = g.VHE; formeEcran(cv, rot, g.VLE, g.VHE);
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#2a2927'; ctx.fillRect(0, 0, g.VLE, g.VHE);
+      d.ecrans.forEach(function (etat, k) {
+        var l = physVersLog(m.dessiner(etat, vBat), rot);
+        dessinerBitsA(ctx, l.bits, l.w, l.h, g.nx > 1 ? k * (g.L + g.JE) : 0, g.ny > 1 ? k * (g.H + g.JE) : 0);
+      });
+      $('infoPrevisu').textContent = 'Scène « ' + d.scene + ' », dessinée comme sur le cadre, avec les données actuelles. ' +
+        "Elle suit tes modifications ; rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.";
+    })
+    .catch(function (e) { if (n === numPrevisu) $('infoPrevisu').textContent = 'Prévisualisation impossible : ' + e.message; });
+}
+$('traits').addEventListener('change', demanderPrevisu);
+$('reglagesScene').addEventListener('change', demanderPrevisu);
 
 demarrer();
 setInterval(function () { if (config) rafraichir().catch(function () {}); }, 60000);
