@@ -57,6 +57,30 @@ code{font-size:13px;word-break:break-all;background:var(--fond);padding:2px 6px;
 pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflow:auto;max-height:260px}
 #connexion{max-width:360px;margin:15vh auto}
 .cache{display:none}
+/* Barre "modifications non enregistrees" (un seul bouton Enregistrer pour toute la page) */
+.barreModifs{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;
+  background:var(--accent);color:var(--fond);border-radius:14px;padding:8px 8px 8px 16px;box-shadow:0 6px 24px rgba(0,0,0,.3);
+  z-index:30;max-width:calc(100vw - 24px);box-sizing:border-box;font-size:15px}
+.barreModifs span{flex:1;min-width:0}
+.barreModifs button{flex:none;padding:8px 12px;border-color:transparent}
+.barreModifs .annuler{background:transparent;color:var(--fond);border-color:var(--fond)}
+.barreModifs .enreg{background:var(--fond);color:var(--accent);font-weight:600}
+.barreModifs.fait .annuler,.barreModifs.fait .enreg{display:none}
+/* Etat du cadre en pastilles */
+.pastilles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.pastille{font-size:13px;line-height:1.4;padding:3px 10px;border-radius:999px;background:var(--fond);border:1px solid var(--trait);color:var(--texte);white-space:nowrap}
+.pastille.ok::before,.pastille.alerte::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.pastille.ok::before{background:#2e7d32}
+.pastille.alerte{border-color:#c77700;color:#c77700}
+.pastille.alerte::before{background:#e08a00}
+.pastille.doux{color:var(--doux)}
+/* Etat des calendriers */
+.calendriers{margin:6px 0 2px;font-size:14px}
+.calendriers div{display:flex;gap:6px;align-items:baseline;padding:2px 0}
+.calendriers .signe{flex:none;font-weight:700}
+.calendriers .bon .signe{color:#2e7d32}
+.calendriers .mauvais .signe{color:var(--alerte)}
+.calendriers .detail{color:var(--doux)}
 #panneauPrevisu{position:fixed;left:0;top:0;width:min(calc(100vw - 24px),460px);max-height:85vh;overflow:auto;background:var(--carte);border:1px solid var(--trait);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.28);padding:10px 12px;z-index:20;box-sizing:border-box}
 #panneauPrevisu .tete{display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:move;touch-action:none;-webkit-user-select:none;user-select:none}
 #panneauPrevisu .poignee{position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;
@@ -93,7 +117,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
 <section>
   <h2>Aperçu de l'écran</h2>
   <canvas id="apercu" class="ecran" width="960" height="680"></canvas>
-  <div class="statut" id="statut">Chargement…</div>
+  <div class="pastilles" id="statut"><span class="pastille doux">Chargement…</span></div>
   <label style="margin-top:10px">Contour de l'aperçu <input type="range" id="bordure" min="0" max="40" value="10" style="flex:1"></label>
 </section>
 
@@ -133,22 +157,6 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   </div>
   <p class="aide" id="aideDefaut">Scène affichée quand aucune autre n'est active. Son rythme se règle dans « Réveil du cadre ».</p>
   <p class="aide repliable">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
-  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
-    <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
-    <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
-    <button data-ecr="dessus" onclick="choisirEcrans(2, 'dessus')">Deux l'un sur l'autre</button>
-  </div>
-  <div id="ligneJoint" class="cache">
-    <label>Espace entre les zones d'affichage des deux écrans
-      <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
-    <p class="aide repliable">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
-  </div>
-  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
-    <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
-    <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
-    <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
-  </div>
-  <p class="aide repliable">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
   <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
   <div id="editeur" class="ecran editeur"></div>
   <button style="width:100%;margin-top:8px" class="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
@@ -162,12 +170,31 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     <p class="aide repliable">Chaque cran agrandit ou réduit tous les textes du bloc d'un palier (environ 25 %). Un texte trop long rétrécit d'abord un peu avant d'être coupé par « … ». Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne. Moderne s'arrête à 42 px, Machine à écrire à 53 px. La température garde toujours ses chiffres hauts et fins.</p>
   </div>
   <div class="puces" id="choixWidgets"></div>
-  <label><input type="checkbox" id="traits"> Traits de séparation entre les blocs</label>
-  <div class="ligne" style="margin-top:6px">
-    <button onclick="reinitialiserDispo()">Disposition par défaut</button>
-    <button class="principal" style="margin-top:0" onclick="enregistrerDispo()">Enregistrer</button>
-  </div>
+  <button style="width:100%;margin-top:6px" onclick="reinitialiserDispo()">Disposition par défaut</button>
   <div class="msg" id="msgDispo"></div>
+</details>
+
+<details class="menu" id="menu-montage">
+  <summary>Montage du cadre</summary>
+  <p class="aide" style="margin:0 0 6px">Nombre d'écrans :</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
+    <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
+    <button data-ecr="dessus" onclick="choisirEcrans(2, 'dessus')">Deux l'un sur l'autre</button>
+  </div>
+  <div id="ligneJoint" class="cache">
+    <label>Espace entre les zones d'affichage des deux écrans
+      <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
+    <p class="aide repliable">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
+  </div>
+  <p class="aide" style="margin:10px 0 6px">Sens du cadre :</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
+    <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
+    <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
+  </div>
+  <p class="aide repliable">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
+  <label style="margin-top:10px"><input type="checkbox" id="traits"> Traits de séparation entre les blocs</label>
 </details>
 
 <details class="menu" id="menu-meteo">
@@ -188,7 +215,6 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <label>Graphique de température sur les
     <select id="mCourbe" style="width:auto"><option>12</option><option>24</option><option>36</option><option>48</option></select> prochaines heures</label>
   <p class="aide repliable">Le graphique montre la température heure par heure, le risque de pluie (barres hachurées) et la nuit (fond grisé). Ajoute le bloc « Graphique de température » dans la Disposition.</p>
-  <button class="principal" onclick="enregistrerMeteo()">Enregistrer la météo</button>
   <div class="msg" id="msgMeteo"></div>
 </details>
 
@@ -196,12 +222,12 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <summary>Agenda</summary>
   <p class="aide">Liens de calendriers publics iCloud, un par ligne (ils commencent par webcal://).</p>
   <textarea id="aUrls" placeholder="webcal://p00-caldav.icloud.com/published/2/..."></textarea>
+  <div class="calendriers" id="etatCalendriers"></div>
   <p class="aide">Anniversaires, un par ligne : prénom puis date (l'année est facultative, elle sert à afficher l'âge).</p>
   <textarea id="aAnniv" placeholder="Léa 14/03/2005&#10;Mamie 02/11"></textarea>
   <label>Nombre maximum d'événements
     <select id="aNb" style="width:auto"><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select></label>
   <p class="aide">Le cadre en affiche autant que la hauteur du bloc Agenda le permet.</p>
-  <button class="principal" onclick="enregistrerAgenda()">Enregistrer l'agenda</button>
   <button style="width:100%;margin-top:8px" onclick="tester()">Voir les données envoyées au cadre</button>
   <div class="msg" id="msgAgenda"></div>
   <pre id="donnees" class="cache"></pre>
@@ -230,7 +256,6 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
     <label>Source du temps réel (laisser vide pour la source par défaut)</label>
     <input type="text" id="busSource" placeholder="https://…">
   </details>
-  <button class="principal" onclick="enregistrerBus()">Enregistrer</button>
   <button style="width:100%;margin-top:8px" onclick="testerBus()">Voir les prochains passages maintenant</button>
   <div class="msg" id="msgBus"></div>
   <pre id="busTest" class="cache"></pre>
@@ -269,7 +294,6 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <label>De <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto"></label>
   <label>Réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
   <p class="aide repliable">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
-  <button class="principal" onclick="enregistrerReveil()">Enregistrer</button>
   <div class="msg" id="msgReveil"></div>
 </details>
 
@@ -302,6 +326,12 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <button style="width:100%;margin-top:8px" onclick="restaurerReglages()">Restaurer</button>
   <div class="msg" id="msgSauvegarde"></div>
 </details>
+
+<div id="barreModifs" class="barreModifs cache" role="status">
+  <span id="texteModifs">Modifications non enregistrées</span>
+  <button class="annuler" onclick="annulerModifs()">Annuler</button>
+  <button class="enreg" onclick="toutEnregistrer()">Enregistrer</button>
+</div>
 
 <div id="panneauPrevisu" class="cache" role="dialog" aria-label="Prévisualisation">
   <div class="tete">
@@ -479,7 +509,7 @@ function dessinerPuces() {
 }
 function afficherScenes() {
   dessinerPuces();
-  $('titreEditeur').textContent = 'Blocs de la scène « ' + (sceneCourante < 0 ? 'Par défaut' : scenes[sceneCourante].nom) + ' »';
+  $('titreEditeur').textContent = 'Blocs de la scène « ' + (sceneCourante < 0 ? 'Par défaut' : scenes[sceneCourante].nom) + ' »' + texteOrientation();
   $('reglagesScene').classList.toggle('cache', sceneCourante < 0);
   $('aideDefaut').classList.toggle('cache', sceneCourante >= 0);
   if (sceneCourante >= 0) {
@@ -495,7 +525,7 @@ function afficherScenes() {
 // Le resume et le nom se mettent a jour pendant la saisie
 $('reglagesScene').addEventListener('change', function () { lireFormScene(); if (sceneCourante >= 0) $('sceneResume').textContent = resumeScene(scenes[sceneCourante]); });
 $('sceneNom').addEventListener('input', function () { if (sceneCourante >= 0 && this.value.trim()) { scenes[sceneCourante].nom = this.value.trim(); dessinerPuces();
-  $('titreEditeur').textContent = 'Blocs de la scène « ' + scenes[sceneCourante].nom + ' »'; } });
+  $('titreEditeur').textContent = 'Blocs de la scène « ' + scenes[sceneCourante].nom + ' »' + texteOrientation(); } });
 function choisirScene(i) {
   lireFormScene(); ranger();
   sceneCourante = i; scenePrevisu = i;
@@ -611,7 +641,13 @@ function appliquerRotation(r) {
   formeEcran($('editeur'), r);
   dessinerEditeur();
 }
-function choisirRotation(r) { ranger(); appliquerRotation(r); }
+function choisirRotation(r) { ranger(); appliquerRotation(r); afficherScenes(); }
+// Rappel de l'orientation et du nombre d'ecrans (reglés dans « Montage du cadre »)
+function texteOrientation() {
+  var t = rot === 0 ? 'paysage' : rot === 1 ? 'portrait' : 'portrait inversé';
+  if (ECR.nb === 2) t += ', deux écrans ' + (ECR.assemblage === 'dessus' ? "l'un sur l'autre" : 'côte à côte');
+  return ' — ' + t;
+}
 function afficherEcrans() {
   var cle = ECR.nb === 2 ? ECR.assemblage : '1';
   var b = document.querySelectorAll('[data-ecr]');
@@ -638,12 +674,13 @@ function choisirEcrans(nb, assemblage) {
   scenes.forEach(function (sc) { sc.disposition = convertir(sc.disposition, 0); sc.dispositionPortrait = convertir(sc.dispositionPortrait, 1); });
   afficherEcrans();
   appliquerRotation(rot);
+  afficherScenes();
   if (image) tramer();
   message('msgDispo', (perdus ? perdus + ' bloc(s) du second écran retiré(s). ' : '') + 'Pense à enregistrer.');
 }
 $('joint').onchange = function () { ECR.joint = Math.max(0, Math.min(100, +this.value || 0)); appliquerRotation(rot); if (image) tramer(); };
 function dessinerEditeur() {
-  demanderPrevisu();
+  demanderPrevisu(); verifierModifs();
   var ed = $('editeur');
   ed.innerHTML = '';
   for (var y = 0; y < G.rangs; y++) for (var x = 0; x < G.cols; x++) {
@@ -706,7 +743,7 @@ function brancher(el, d) {
   function fin() { depart = null; el.classList.remove('actif'); el.classList.remove('refus'); }
   el.addEventListener('pointerup', function () {
     var simpleClic = depart && !depart.bouge && !depart.redim;
-    if (depart && depart.bouge) demanderPrevisu();
+    if (depart && depart.bouge) { demanderPrevisu(); verifierModifs(); }
     fin();
     if (simpleClic) selectionner(d.id);
   });
@@ -735,16 +772,6 @@ function reinitialiserDispo() {
   $('traits').checked = true;
   dessinerEditeur();
   message('msgDispo', 'Disposition par défaut rétablie : pense à enregistrer.');
-}
-function enregistrerDispo() {
-  lireFormScene(); ranger();
-  var avant = scenes.map(function (sc) { return (sc.creneaux || []).length; });
-  enregistrer({ ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
-    affichage: { traits: $('traits').checked, rotation: rot } }, 'msgDispo')
-    .then(function () {
-      var perdu = (config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; });
-      if (perdu) message('msgDispo', 'Enregistré, mais un créneau a été ignoré : coche au moins un jour et mets une fin après le début.');
-    });
 }
 
 // --- Conversion entre l'image "physique" de l'ecran (960 x 680) et l'image "a l'endroit" ---
@@ -878,6 +905,7 @@ function afficherBusSel() {
 }
 
 // Garde seulement les passages aux arrets choisis, avec ce qu'il faut pour les dater
+var propreAvant = true;
 function construireIndexBus() {
   if (!busSel.length) { message('msgBus', "Choisis d'abord au moins un arrêt."); return; }
   var ids = {};
@@ -941,9 +969,14 @@ function construireIndexBus() {
       return api('/api/bus-index', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(index) })
         .then(function () {
           var garde = Array.isArray(config.bus.lignes) ? config.bus.lignes.filter(function (k) { return options[k]; }) : null;
+          propreAvant = !modifie();
           return enregistrer({ bus: { arrets: busSel.slice(), options: opts, lignes: garde && garde.length ? garde : null } });
         })
-        .then(function () { remplirBus(); message('msgBus', passages.length + ' passages trouvés pour ' + busSel.join(' et ') + '.'); });
+        .then(function () {
+          remplirBus();
+          if (propreAvant) prendreReference(); else verifierModifs();
+          message('msgBus', passages.length + ' passages trouvés pour ' + busSel.join(' et ') + '.');
+        });
     })
     .catch(function (e) { $('busEtat').textContent = 'Erreur : ' + e.message; });
 }
@@ -994,10 +1027,6 @@ function lireCreneaux(conteneur) {
   }
   return res;
 }
-function enregistrerBus() {
-  enregistrer({ bus: lireBus() }, 'msgBus')
-    .then(function () { remplirBus(); });
-}
 function testerBus() {
   var z = $('busTest');
   z.classList.remove('cache'); z.textContent = 'Chargement…';
@@ -1015,9 +1044,11 @@ function testerBus() {
 function charger() {
   return api('/api/config').then(function (r) { return r.json(); }).then(function (d) {
     config = d.config;
-    remplirFormulaires();
+    remplirSansSignaler();
+    prendreReference();
     afficherStatut(d.statut, d.maintenant, d.statut1);
     if ($('menu-batterie').open) chargerBatterie();     // menu reste ouvert depuis la derniere visite
+    if ($('menu-agenda').open) verifierCalendriers();
     chargerApercu();
   });
 }
@@ -1037,31 +1068,58 @@ function duree(ms) {
   return 'il y a ' + Math.round(h / 24) + ' jours';
 }
 var NOMS = { tableau: 'tableau de bord', photo: 'photo', pochette: 'pochette', blanc: 'écran blanc' };
+var statutCourant = null, dateApercu = 0;
 function afficherStatut(s, maintenant, s1) {
   dernierStatut = s;
+  statutCourant = { s: s, maintenant: maintenant, s1: s1 };
   if (config.mode === 'tableau' && s && s.sc) setTimeout(dessinerPuces, 0);
-  var t = 'Mode demandé : ' + NOMS[config.mode] + '. ';
-  if (!s) t += "Le cadre ne s'est pas encore connecté.";
-  else {
-    t += 'Dernière connexion du cadre ' + duree(maintenant - s.vu) + '.';
-    if (config.mode === 'tableau' && s.sc) t += ' Scène affichée : ' + s.sc + '.';
-    if (s.bat && s.bat > 2.5) t += ' Batterie ' + pourcentage(s.bat) + ' % (' + s.bat.toFixed(2).replace('.', ',') + ' V).';
-    var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
-    if (prochain > 0) t += ' Prochain réveil dans ' + Math.max(1, Math.round(prochain / 60000)) + ' min environ.';
-  }
-  if (config.ecrans && config.ecrans.nb === 2) {
-    t += s1 ? ' Écran 2 : dernière connexion ' + duree(maintenant - s1.vu) + (s1.bat && s1.bat > 2.5 ? ', batterie ' + pourcentage(s1.bat) + ' %' : '') + '.'
-      : " L'écran 2 ne s'est pas encore connecté.";
-  }
-  $('statut').textContent = t;
+  dessinerStatut();
   afficherFirmware(s);
   var boutons = document.querySelectorAll('[data-mode]');
   for (var i = 0; i < boutons.length; i++) boutons[i].classList.toggle('actif', boutons[i].getAttribute('data-mode') === config.mode);
   var aide = '';
   if (config.mode === 'blanc') aide = "L'écran s'effacera au prochain réveil du cadre. Attends que l'aperçu soit blanc avant de débrancher la batterie.";
-  else if (config.dev) aide = 'Mode développement actif : le changement s\'applique dans ' + config.devSecondes + ' s environ.';
+  else if (config.dev) aide = "Mode développement actif : le changement s'applique dans " + config.devSecondes + ' s environ.';
   else aide = "Le changement s'applique au prochain réveil du cadre (dans " + config.reveilMin + ' min au plus).';
   $('aideMode').textContent = aide;
+}
+// Pastilles : connexion, batterie, prochain reveil, scene, ecran 2, date de l'image
+function dessinerStatut() {
+  if (!statutCourant) return;
+  var s = statutCourant.s, maintenant = statutCourant.maintenant, s1 = statutCourant.s1, z = $('statut');
+  z.innerHTML = '';
+  var ajouter = function (texte, genre, titre) {
+    var e = document.createElement('span'); e.className = 'pastille' + (genre ? ' ' + genre : ''); e.textContent = texte;
+    if (titre) e.title = titre;
+    z.appendChild(e);
+  };
+  var connexion = function (st, nom) {
+    var maj = function (t) { return nom ? nom + t : t.charAt(0).toUpperCase() + t.slice(1); };
+    if (!st) { ajouter(maj('jamais connecté'), 'doux'); return; }
+    var attendu = (st.r ? st.r * 1000 : config.reveilMin * 60000);
+    var age = maintenant - st.vu;
+    if (age > attendu * 2 + 5 * 60000) ajouter(maj('sans nouvelles depuis ') + duree(age).replace('il y a ', ''), 'alerte',
+      "Le cadre aurait dû se connecter depuis longtemps : batterie vide, Wi-Fi perdu ou carte bloquée ?");
+    else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(st.vu).toLocaleString('fr-FR'));
+    if (st.bat && st.bat > 2.5) {
+      var pc = pourcentage(st.bat), tension = st.bat.toFixed(2).replace('.', ',') + ' V';
+      ajouter((nom ? nom : 'Batterie ') + pc + ' %' + (st.bat < 3.5 ? ' — à recharger' : ''), st.bat < 3.5 ? 'alerte' : '', tension);
+    }
+    return age <= attendu * 2 + 5 * 60000;
+  };
+  var vivant = connexion(s, '');
+  if (s && vivant) {
+    var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
+    ajouter(prochain > 60000 ? 'Réveil dans ' + Math.round(prochain / 60000) + ' min' : 'Réveil imminent');
+  }
+  if (config.mode === 'tableau' && s && s.sc) ajouter('Scène : ' + s.sc);
+  if (config.dev) ajouter('Mode développement', 'alerte', "La carte ne se met pas en veille : à désactiver sur batterie (menu Réveil du cadre).");
+  if (config.ecrans && config.ecrans.nb === 2) connexion(s1, 'Écran 2 : ');
+  if (dateApercu) {
+    var d = new Date(dateApercu), auj = new Date().toDateString() === d.toDateString();
+    ajouter('Image de ' + (auj ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })), 'doux',
+      'Image envoyée par le cadre le ' + d.toLocaleString('fr-FR'));
+  }
 }
 
 // Affiche des bits (1 = noir) de taille w x h dans un canvas
@@ -1112,8 +1170,8 @@ function chargerApercu() {
         ctx.fillText('Écran ' + (n + 1) + " : pas encore d'aperçu", ox + g.L / 2, oy + g.H / 2);
       }
     });
-    var t = Math.max.apply(null, ok.map(function (a) { return a.t || 0; }));
-    if (t) $('statut').textContent += ' Aperçu du ' + new Date(t).toLocaleString('fr-FR') + '.';
+    dateApercu = Math.max.apply(null, ok.map(function (a) { return a.t || 0; }));
+    dessinerStatut();
   }).catch(function () {
     var cv = $("apercu"); cv.width = LARG; cv.height = HAUT; formeEcran(cv, 0, LARG, HAUT);
     var ctx = cv.getContext('2d');
@@ -1159,6 +1217,69 @@ function enregistrer(modif, idMsg) {
     .catch(function (e) { if (idMsg) message(idMsg, 'Erreur : ' + e.message); });
 }
 function changerMode(mode) { enregistrer({ mode: mode }); }
+
+// ---------------------------------------------------------------------
+// Un seul bouton Enregistrer : la barre en bas apparait des qu'un reglage differe de ce qui est enregistre
+// ---------------------------------------------------------------------
+var reference = null, enChargement = false;
+// Tous les reglages des formulaires (disposition, montage, meteo, agenda, bus, reveil)
+function modificationsCourantes() {
+  lireFormScene(); ranger();
+  return { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
+    affichage: { traits: $('traits').checked, rotation: rot },
+    meteo: lireMeteo(), agenda: lireAgenda(), bus: lireBus(),
+    reveilMin: +$('reveil').value, dev: $('dev').checked, devSecondes: +$('devSecondes').value,
+    nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
+      intervalleMin: +$('nuitIntervalle').value } };
+}
+function texteBarre() { return window.innerWidth < 480 ? 'Non enregistré' : 'Modifications non enregistrées'; }
+function prendreReference() { reference = JSON.stringify(modificationsCourantes()); verifierModifs(); }
+function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
+var minuteurModifs = null;
+function verifierModifs() {
+  if (enChargement || reference === null) return;
+  clearTimeout(minuteurModifs);
+  minuteurModifs = setTimeout(function () {
+    var b = $('barreModifs');
+    if (b.classList.contains('fait')) return;
+    $('texteModifs').textContent = texteBarre();
+    b.classList.toggle('cache', !modifie());
+    if (previsuActive) placerPanneau(); else ajusterMarge();
+  }, 120);
+}
+function remplirSansSignaler() { enChargement = true; try { remplirFormulaires(); } finally { enChargement = false; } }
+function toutEnregistrer() {
+  var modif = modificationsCourantes();
+  var avant = modif.scenes.map(function (sc) { return (sc.creneaux || []).length; });
+  var devAvant = !!config.dev;
+  $('texteModifs').textContent = 'Enregistrement…';
+  api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      config = d.config; villeTemp = null;
+      remplirSansSignaler();
+      reference = JSON.stringify(modificationsCourantes());
+      // Ce que le serveur n'a pas pu garder
+      if (d.ignorees && d.ignorees.length) $('msgAgenda').textContent = 'Anniversaires non compris : ' + d.ignorees.join(' ; ') + ' (format attendu : Prénom 14/03/2005)';
+      if ((config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; }))
+        $('msgDispo').textContent = 'Un créneau a été ignoré : coche au moins un jour et mets une fin après le début.';
+      if (config.dev && !devAvant) $('msgReveil').textContent = "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).";
+      var b = $('barreModifs');
+      b.classList.add('fait'); b.classList.remove('cache');
+      $('texteModifs').textContent = window.innerWidth < 480 ? 'Enregistré ✓' : 'Enregistré : le cadre se mettra à jour à son prochain réveil.';
+      setTimeout(function () { b.classList.remove('fait'); $('texteModifs').textContent = texteBarre(); b.classList.add('cache'); verifierModifs(); }, 2500);
+      return rafraichir();
+    })
+    .catch(function (e) { $('texteModifs').textContent = 'Erreur : ' + e.message + ' — réessaie'; });
+}
+function annulerModifs() {
+  villeTemp = null;
+  remplirSansSignaler();
+  prendreReference();
+  demanderPrevisu();
+}
+window.addEventListener('beforeunload', function (e) { if (modifie()) { e.preventDefault(); e.returnValue = ''; } });
+['input', 'change'].forEach(function (ev) { document.addEventListener(ev, verifierModifs); });
 function ecranBlanc() {
   if (confirm("Effacer l'écran (tout blanc) ? À faire avant de débrancher la batterie pour une longue absence.")) enregistrer({ mode: 'blanc' });
 }
@@ -1176,7 +1297,7 @@ function chercherVille() {
           villeTemp = { ville: v.name, lat: Math.round(v.latitude * 100) / 100, lon: Math.round(v.longitude * 100) / 100 };
           $('villeChoisie').textContent = 'Ville choisie : ' + v.name + ' (pense à enregistrer)';
           zone.innerHTML = '';
-          demanderPrevisu();
+          demanderPrevisu(); verifierModifs();
         };
         zone.appendChild(div);
       });
@@ -1195,33 +1316,6 @@ function lireBus() {
   var cases = $('busLignes').querySelectorAll('input'), choisies = [], toutes = true;
   for (var i = 0; i < cases.length; i++) { if (cases[i].checked) choisies.push(cases[i].value); else toutes = false; }
   return { lignes: toutes ? null : choisies, nb: +$('busNb').value, horizon: +$('busHorizon').value, sourceRT: $('busSource').value.trim() };
-}
-function enregistrerMeteo() {
-  var m = lireMeteo();
-  villeTemp = null;
-  enregistrer({ meteo: m }, 'msgMeteo');
-}
-function enregistrerAgenda() {
-  var modif = { agenda: lireAgenda() };
-  api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      config = d.config; remplirAgenda();
-      var t = 'Enregistré. Le cadre se mettra à jour à son prochain réveil.';
-      if (d.ignorees && d.ignorees.length) t = 'Enregistré, mais lignes non comprises : ' + d.ignorees.join(' ; ') + ' (format attendu : Prénom 14/03/2005)';
-      $('msgAgenda').textContent = t;
-      return rafraichir();
-    })
-    .catch(function (e) { message('msgAgenda', 'Erreur : ' + e.message); });
-}
-function enregistrerReveil() {
-  var dev = $('dev').checked;
-  enregistrer({ reveilMin: +$('reveil').value, dev: dev, devSecondes: +$('devSecondes').value,
-    nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
-      intervalleMin: +$('nuitIntervalle').value } }, 'msgReveil')
-    .then(function () {
-      if (dev) $('msgReveil').textContent = "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).";
-    });
 }
 function tester() {
   $('donnees').classList.remove('cache'); $('donnees').textContent = 'Chargement…';
@@ -1444,6 +1538,35 @@ function dessinerBatterie(jours) {
 // A l'ouverture du menu (si les reglages sont deja charges ; sinon, charger() s'en occupe)
 $('menu-batterie').addEventListener('toggle', function () { if (this.open && config) chargerBatterie(); });
 
+// --- Etat de chaque calendrier de l'agenda : accessible ? combien d'evenements ? ---
+var minuteurCal = null, numCal = 0;
+function verifierCalendriers() {
+  var urls = $('aUrls').value.split('\n').map(function (u) { return u.trim(); }).filter(Boolean);
+  var z = $('etatCalendriers'), n = ++numCal;
+  if (!urls.length) { z.innerHTML = ''; return; }
+  z.textContent = 'Vérification des calendriers…';
+  api('/api/agenda-etat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls: urls }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (n !== numCal) return;
+      z.innerHTML = '';
+      d.calendriers.forEach(function (c) {
+        var l = document.createElement('div'); l.className = c.ok ? 'bon' : 'mauvais';
+        var court = c.url.replace(/^(webcal|https?):\/\//i, '');
+        court = court.length > 34 ? court.slice(0, 22) + '…' + court.slice(-10) : court;
+        var signe = document.createElement('span'); signe.className = 'signe'; signe.textContent = c.ok ? '✓' : '✗';
+        var t = document.createElement('span');
+        t.textContent = c.ok ? (c.nom || court) + ' — ' + (c.n ? c.n + ' évènement' + (c.n > 1 ? 's' : '') : 'aucun évènement') + ' dans les ' + d.jours + ' prochains jours'
+          : court + ' — ' + c.erreur;
+        t.title = c.url;
+        l.appendChild(signe); l.appendChild(t); z.appendChild(l);
+      });
+    })
+    .catch(function (e) { if (n === numCal) z.textContent = 'Vérification impossible : ' + e.message; });
+}
+$('aUrls').addEventListener('input', function () { clearTimeout(minuteurCal); minuteurCal = setTimeout(verifierCalendriers, 1200); });
+$('menu-agenda').addEventListener('toggle', function () { if (this.open && config) verifierCalendriers(); });
+
 // --- Sauvegarde des reglages ---
 function telechargerReglages() {
   api('/api/sauvegarde').then(function (r) { return r.blob(); }).then(function (b) {
@@ -1551,8 +1674,9 @@ function reduirePrevisu() {
 // par son coin en bas a droite ; retenues sur cet appareil. Double-clic sur la barre : position de depart.
 var posPrevisu = null;
 try { posPrevisu = JSON.parse(localStorage.getItem('cadre-previsu') || 'null'); } catch (e) {}
+function hauteurBarre() { var b = $('barreModifs'); return b.classList.contains('cache') ? 0 : b.offsetHeight + 16; }
 function placerPanneau() {
-  var p = $('panneauPrevisu'), W = window.innerWidth, H = window.innerHeight;
+  var p = $('panneauPrevisu'), W = window.innerWidth, H = window.innerHeight - hauteurBarre();
   var l = Math.max(240, Math.min(posPrevisu && posPrevisu.l ? posPrevisu.l : 460, W - 8));
   p.style.width = l + 'px';
   var h = p.offsetHeight;
@@ -1604,8 +1728,9 @@ window.addEventListener('resize', function () { if (previsuActive) placerPanneau
 // pour qu'il ne cache pas les derniers reglages
 function ajusterMarge() {
   var p = $('panneauPrevisu');
-  document.body.style.paddingBottom = previsuActive && p.offsetTop > window.innerHeight / 2
-    ? (window.innerHeight - p.offsetTop + 12) + 'px' : '';
+  var m = previsuActive && p.offsetTop > window.innerHeight / 2 ? window.innerHeight - p.offsetTop + 12 : 0;
+  m = Math.max(m, hauteurBarre() + 12);
+  document.body.style.paddingBottom = m > 12 ? m + 'px' : '';
 }
 // Liste des scenes dans le panneau (choix de la scene prevue)
 function remplirScenesPrevisu() {
@@ -1619,7 +1744,7 @@ $('scenePrevisu').onchange = function () { scenePrevisu = +this.value; majPrevis
 // Tout reglage modifie dans ces menus met la prevision a jour
 ['input', 'change'].forEach(function (ev) {
   document.addEventListener(ev, function (e) {
-    if (e.target.closest && e.target.closest('#menu-meteo, #menu-agenda, #menu-bus, #menu-dispo')) demanderPrevisu();
+    if (e.target.closest && e.target.closest('#menu-meteo, #menu-agenda, #menu-bus, #menu-dispo, #menu-montage')) demanderPrevisu();
   });
 });
 function demanderPrevisu() {

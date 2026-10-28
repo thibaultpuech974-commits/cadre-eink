@@ -104,6 +104,14 @@ Limite d'iOS : un raccourci ne peut pas se déclencher tout seul à chaque chang
 
 ## 5. Scènes et disposition du tableau de bord
 
+**Enregistrer** : la page n'a qu'un seul bouton Enregistrer. Dès qu'un réglage change (disposition, montage, météo, agenda, bus, réveil), une barre « Modifications non enregistrées » apparaît en bas avec **Enregistrer** et **Annuler** ; la page prévient si tu la quittes sans enregistrer. Les actions immédiates (changer de mode, envoyer une photo ou un programme, choisir les arrêts de bus) ne passent pas par cette barre.
+
+**État du cadre** : sous l'aperçu, des pastilles résument la dernière connexion (orange si le cadre aurait dû se connecter depuis longtemps), la batterie, le prochain réveil, la scène affichée et l'heure de l'image.
+
+**Montage du cadre** (menu à part) : nombre d'écrans, sens du cadre (paysage, portrait, portrait inversé) et traits de séparation, des réglages qu'on ne fait qu'une fois.
+
+**Agenda** : sous les adresses des calendriers, la page indique pour chacun s'il est accessible (✓) et combien d'évènements il contient dans les prochains jours, ou ce qui ne va pas (✗ : adresse invalide, calendrier introuvable ou plus public…).
+
 **Scènes** : une scène est une disposition des blocs affichée pendant une période choisie. La scène **Par défaut** s'affiche quand aucune autre n'est active. Dans la section **Scènes et disposition** :
 - **+ Nouvelle scène** crée une scène (copie de « Par défaut ») ; donne-lui un nom ;
 - **Quand l'afficher** : des créneaux (jours + heures, par exemple « ven de 18:00 à 20:00 »), et/ou la semaine ou le week-end d'un Grand Prix de F1, et/ou des dates (du … au …). Toutes les conditions remplies doivent l'être ; une scène sans condition est affichée tout le temps ;

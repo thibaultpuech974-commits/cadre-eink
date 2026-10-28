@@ -29,6 +29,8 @@ const ATTENDU = {
     /fichier invalide : 400 400/, /ancienne sauvegarde : \[ 'Bus r=5' \] \| défaut \[ 'date' \]/],
   'previsu.mjs': [/apercu.wasm à jour : true/, /par défaut modifiée : Par défaut \| 1 écran \| blocs date,meteo \| points noirs true/,
     /scène forcée : Grand Prix \| blocs date,f1 \| GP GP des États-Unis \| dessin true/, /deux écrans : date \| courbe/, /rien enregistré : true/, /prévision météo\/agenda : true \| aucune écriture : true/],
+  'agenda.mjs': [/ok 1 évènement\(s\) \| webcal:\/\/ics.test\/maths.ics/, /erreur : adresse invalide .* \| pas une adresse/,
+    /erreur : introuvable \(HTTP 404\) .* \| https:\/\/introuvable.test\/x.ics/, /fenêtre : 14 jours/, /panne : inaccessible \(réseau coupé\)/],
   'batterie.mjs': [/288 réveils : 48 écritures, 48 points, de 4100 à 3904 mV/, /après 40 jours : 1 point/, /sans mesure : rien enregistré/],
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];

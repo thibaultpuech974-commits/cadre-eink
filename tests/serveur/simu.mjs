@@ -42,6 +42,7 @@ globalThis.fetch = async (u) => {
   if (globalThis.panne && globalThis.panne.includes(nom)) throw new Error('réseau coupé');
   if (u.includes('open-meteo')) return new Response(JSON.stringify(meteo(maintenant)));
   if (u.includes('ics.test')) return new Response(ICS);
+  if (u.includes('introuvable.test')) return new Response('Not Found', { status: 404 });
   if (u.includes('jolpi.ca') && globalThis.jolpicaKO) return new Response('Too Many Requests', { status: 429 });
   globalThis.appelsJolpica = (globalThis.appelsJolpica || 0) + 1;
   if (u.includes('jolpi.ca/ergast/f1/2026')) return new Response(JSON.stringify(saison));

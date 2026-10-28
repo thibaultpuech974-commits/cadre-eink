@@ -157,6 +157,7 @@ export default {
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
+      if (chemin === '/api/agenda-etat' && m === 'POST') return await routeEtatAgenda(req, env);
       if (chemin === '/api/previsualiser' && m === 'POST') return await routePrevisualiser(req, env);
       if (chemin === '/api/apercu.wasm' && m === 'GET') return new Response(APERCU_WASM, { headers: { 'content-type': 'application/wasm', 'cache-control': 'private, max-age=3600' } });
       if (chemin === '/api/batterie' && m === 'GET') return texte((await env.CADRE.get('batterie' + (url.searchParams.get('ecran') === '1' ? '1' : ''))) || '{"pts":[]}');
@@ -416,6 +417,34 @@ function preparerModif(modif, cfg) {
     delete modif.agenda.anniversairesTexte;
   }
   return ignorees;
+}
+
+// --- Etat de chaque calendrier de l'agenda (page web) : accessible ? combien d'evenements a venir ? ---
+async function routeEtatAgenda(req, env) {
+  let demande;
+  try { demande = await req.json(); } catch (e) { return texte('Demande illisible', 400); }
+  const cfg = await lireConfig(env);
+  const jours = Math.max(1, cfg.agenda.joursMax || 14);
+  const maintenant = Date.now(), fin = maintenant + jours * 86400e3;
+  const urls = (Array.isArray(demande.urls) ? demande.urls : []).map(u => String(u).trim()).filter(Boolean).slice(0, 10);
+  const calendriers = await Promise.all(urls.map(async u => {
+    const url = u.replace(/^webcal:\/\//i, 'https://');
+    if (!/^https:\/\/[^\s/]+\.[^\s/]+/i.test(url)) return { url: u, ok: false, erreur: 'adresse invalide (elle doit commencer par webcal:// ou https://)' };
+    try {
+      const r = await fetch(url, { cf: { cacheTtl: 900, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) {
+        return { url: u, ok: false, erreur: r.status === 404 || r.status === 403
+          ? "introuvable (HTTP " + r.status + ") : le calendrier n'est peut-être plus public" : 'erreur HTTP ' + r.status };
+      }
+      const t = await r.text();
+      if (!/BEGIN:VCALENDAR/.test(t)) return { url: u, ok: false, erreur: "cette adresse ne renvoie pas un calendrier" };
+      const nom = (/^X-WR-CALNAME[^:]*:(.*)$/m.exec(t) || [])[1];
+      return { url: u, ok: true, nom: nom ? nom.trim().replace(/\\([,;\\])/g, '$1').slice(0, 60) : '', n: evenementsICS(t, maintenant, fin).length };
+    } catch (e) {
+      return { url: u, ok: false, erreur: e.name === 'TimeoutError' ? 'pas de réponse' : 'inaccessible (' + e.message + ')' };
+    }
+  }));
+  return json({ jours, calendriers });
 }
 
 // --- Previsualisation : l'etat qu'enverrait le serveur avec des reglages pas encore enregistres ---
