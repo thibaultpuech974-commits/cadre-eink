@@ -28,7 +28,7 @@ const ATTENDU = {
   'sauvegarde.mjs': [/sauvegarde : 200 attachment/, /restauration : 200 .*ville Lattes .*'Léa'.*'Gare'.*photo gardée : true/,
     /fichier invalide : 400 400/, /ancienne sauvegarde : \[ 'Bus r=5' \] \| défaut \[ 'date' \]/],
   'previsu.mjs': [/apercu.wasm à jour : true/, /par défaut modifiée : Par défaut \| 1 écran \| blocs date,meteo \| points noirs true/,
-    /scène forcée : Grand Prix \| blocs date,f1 \| GP GP des États-Unis \| dessin true/, /deux écrans : date \| courbe/, /rien enregistré : true/],
+    /scène forcée : Grand Prix \| blocs date,f1 \| GP GP des États-Unis \| dessin true/, /deux écrans : date \| courbe/, /rien enregistré : true/, /prévision météo\/agenda : true \| aucune écriture : true/],
   'batterie.mjs': [/288 réveils : 48 écritures, 48 points, de 4100 à 3904 mV/, /après 40 jours : 1 point/, /sans mesure : rien enregistré/],
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];

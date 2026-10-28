@@ -57,6 +57,14 @@ code{font-size:13px;word-break:break-all;background:var(--fond);padding:2px 6px;
 pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflow:auto;max-height:260px}
 #connexion{max-width:360px;margin:15vh auto}
 .cache{display:none}
+#panneauPrevisu{position:fixed;right:12px;bottom:12px;width:min(calc(100vw - 24px),460px);max-height:75vh;overflow:auto;background:var(--carte);border:1px solid var(--trait);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.28);padding:10px 12px;z-index:20;box-sizing:border-box}
+#panneauPrevisu .tete{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+#panneauPrevisu .tete b{flex:none}
+#panneauPrevisu .tete select{flex:1;min-width:0;width:auto;padding:5px 8px}
+#panneauPrevisu .tete button{flex:none;padding:4px 11px;line-height:1.2}
+#panneauPrevisu.reduit .corps{display:none}
+#panneauPrevisu.reduit .tete{margin-bottom:0}
+#previsu{--bord:6px}
 .msg{font-size:14px;margin-top:8px;min-height:1.2em}
 </style>
 </head><body><main>
@@ -90,7 +98,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide" id="aideMode"></p>
 </section>
 
-<div class="outilsMenus"><a href="#" onclick="toutesLesSections(true);return false">Tout ouvrir</a><a href="#" onclick="toutesLesSections(false);return false">Tout fermer</a></div>
+<div class="outilsMenus"><a href="#" class="boutonPrevisu" onclick="previsualiser();return false">Prévisualiser</a><a href="#" onclick="toutesLesSections(true);return false">Tout ouvrir</a><a href="#" onclick="toutesLesSections(false);return false">Tout fermer</a></div>
 
 <details class="menu" id="menu-dispo">
   <summary>Scènes et disposition</summary>
@@ -133,12 +141,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
   <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
   <div id="editeur" class="ecran editeur"></div>
-  <button style="width:100%;margin-top:8px" id="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
-  <div id="zonePrevisu" class="cache" style="margin-top:8px">
-    <p style="margin:0 0 4px;font-weight:600">Prévisualisation</p>
-    <canvas id="previsu" class="ecran"></canvas>
-    <p class="aide" id="infoPrevisu"></p>
-  </div>
+  <button style="width:100%;margin-top:8px" class="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
   <p class="aide">Touche un bloc (sans le déplacer) pour régler la taille et la police de son texte.</p>
   <div id="styleBloc" class="cache" style="margin-top:8px;padding:10px 12px;border:1px solid var(--trait);border-radius:10px">
     <p style="margin:0 0 4px;font-weight:600" id="styleTitre"></p>
@@ -289,6 +292,19 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <button style="width:100%;margin-top:8px" onclick="restaurerReglages()">Restaurer</button>
   <div class="msg" id="msgSauvegarde"></div>
 </details>
+
+<div id="panneauPrevisu" class="cache" role="dialog" aria-label="Prévisualisation">
+  <div class="tete">
+    <b>Prévisualisation</b>
+    <select id="scenePrevisu" aria-label="Scène prévisualisée"></select>
+    <button id="reduirePrevisu" title="Réduire" aria-label="Réduire" onclick="reduirePrevisu()">–</button>
+    <button title="Fermer" aria-label="Fermer" onclick="fermerPrevisu()">✕</button>
+  </div>
+  <div class="corps">
+    <canvas id="previsu" class="ecran"></canvas>
+    <p class="aide" id="infoPrevisu"></p>
+  </div>
+</div>
 
 <p class="aide" style="text-align:center"><a href="#" onclick="deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
 </div>
@@ -471,7 +487,7 @@ $('sceneNom').addEventListener('input', function () { if (sceneCourante >= 0 && 
   $('titreEditeur').textContent = 'Blocs de la scène « ' + scenes[sceneCourante].nom + ' »'; } });
 function choisirScene(i) {
   lireFormScene(); ranger();
-  sceneCourante = i;
+  sceneCourante = i; scenePrevisu = i;
   afficherScenes();
   appliquerRotation(rot);
 }
@@ -968,10 +984,7 @@ function lireCreneaux(conteneur) {
   return res;
 }
 function enregistrerBus() {
-  var cases = $('busLignes').querySelectorAll('input'), choisies = [], toutes = true;
-  for (var i = 0; i < cases.length; i++) { if (cases[i].checked) choisies.push(cases[i].value); else toutes = false; }
-  enregistrer({ bus: { lignes: toutes ? null : choisies, nb: +$('busNb').value, horizon: +$('busHorizon').value,
-    sourceRT: $('busSource').value.trim() } }, 'msgBus')
+  enregistrer({ bus: lireBus() }, 'msgBus')
     .then(function () { remplirBus(); });
 }
 function testerBus() {
@@ -1152,20 +1165,33 @@ function chercherVille() {
           villeTemp = { ville: v.name, lat: Math.round(v.latitude * 100) / 100, lon: Math.round(v.longitude * 100) / 100 };
           $('villeChoisie').textContent = 'Ville choisie : ' + v.name + ' (pense à enregistrer)';
           zone.innerHTML = '';
+          demanderPrevisu();
         };
         zone.appendChild(div);
       });
       if (!d.results) zone.textContent = 'Aucune ville trouvée';
     });
 }
-function enregistrerMeteo() {
+// Reglages tels qu'ils sont dans les formulaires (enregistres ou non)
+function lireMeteo() {
   var m = { vent: $('mVent').checked, details: $('mDetails').checked, soleil: $('mSoleil').checked,
     pasHeures: +$('mPas').value, nbHeures: +$('mNbHeures').value, nbJours: +$('mNbJours').value, courbeHeures: +$('mCourbe').value };
-  if (villeTemp) { m.ville = villeTemp.ville; m.lat = villeTemp.lat; m.lon = villeTemp.lon; villeTemp = null; }
+  if (villeTemp) { m.ville = villeTemp.ville; m.lat = villeTemp.lat; m.lon = villeTemp.lon; }
+  return m;
+}
+function lireAgenda() { return { urls: $('aUrls').value.split('\n'), nb: +$('aNb').value, anniversairesTexte: $('aAnniv').value }; }
+function lireBus() {
+  var cases = $('busLignes').querySelectorAll('input'), choisies = [], toutes = true;
+  for (var i = 0; i < cases.length; i++) { if (cases[i].checked) choisies.push(cases[i].value); else toutes = false; }
+  return { lignes: toutes ? null : choisies, nb: +$('busNb').value, horizon: +$('busHorizon').value, sourceRT: $('busSource').value.trim() };
+}
+function enregistrerMeteo() {
+  var m = lireMeteo();
+  villeTemp = null;
   enregistrer({ meteo: m }, 'msgMeteo');
 }
 function enregistrerAgenda() {
-  var modif = { agenda: { urls: $('aUrls').value.split('\n'), nb: +$('aNb').value, anniversairesTexte: $('aAnniv').value } };
+  var modif = { agenda: lireAgenda() };
   api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -1463,26 +1489,66 @@ function chargerMoteur() {
     });
   });
 }
-var previsuActive = false, minuteurPrevisu = null, numPrevisu = 0;
+var previsuActive = false, minuteurPrevisu = null, numPrevisu = 0, scenePrevisu = -1;
+function boutonsPrevisu(visibles) {
+  var b = document.querySelectorAll('.boutonPrevisu');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('cache', !visibles);
+}
 function previsualiser() {
   previsuActive = true;
-  $('zonePrevisu').classList.remove('cache');
-  $('boutonPrevisu').classList.add('cache');
+  scenePrevisu = sceneCourante;
+  $('panneauPrevisu').classList.remove('cache', 'reduit');
+  $('reduirePrevisu').textContent = '–';
+  boutonsPrevisu(false);
+  remplirScenesPrevisu();
   majPrevisu();
 }
+function fermerPrevisu() {
+  previsuActive = false; numPrevisu++;
+  clearTimeout(minuteurPrevisu);
+  $('panneauPrevisu').classList.add('cache');
+  boutonsPrevisu(true);
+  document.body.style.paddingBottom = '';
+}
+function reduirePrevisu() {
+  var r = $('panneauPrevisu').classList.toggle('reduit');
+  $('reduirePrevisu').textContent = r ? '+' : '–';
+  $('reduirePrevisu').title = r ? 'Agrandir' : 'Réduire';
+  ajusterMarge();
+}
+// Laisse de la place en bas de la page pour que le panneau ne cache pas les derniers reglages
+function ajusterMarge() { document.body.style.paddingBottom = previsuActive ? ($('panneauPrevisu').offsetHeight + 24) + 'px' : ''; }
+// Liste des scenes dans le panneau (choix de la scene prevue)
+function remplirScenesPrevisu() {
+  var sel = $('scenePrevisu'), noms = ['Par défaut'].concat(scenes.map(function (sc) { return sc.nom; }));
+  sel.innerHTML = '';
+  noms.forEach(function (n, i) { var o = document.createElement('option'); o.value = String(i - 1); o.textContent = n; sel.appendChild(o); });
+  if (scenePrevisu >= scenes.length) scenePrevisu = -1;
+  sel.value = String(scenePrevisu);
+}
+$('scenePrevisu').onchange = function () { scenePrevisu = +this.value; majPrevisu(); };
+// Tout reglage modifie dans ces menus met la prevision a jour
+['input', 'change'].forEach(function (ev) {
+  document.addEventListener(ev, function (e) {
+    if (e.target.closest && e.target.closest('#menu-meteo, #menu-agenda, #menu-bus, #menu-dispo')) demanderPrevisu();
+  });
+});
 function demanderPrevisu() {
   if (!previsuActive) return;
   clearTimeout(minuteurPrevisu);
   minuteurPrevisu = setTimeout(majPrevisu, 600);
 }
 function majPrevisu() {
+  if (!previsuActive) return;
   lireFormScene(); ranger();
+  remplirScenesPrevisu();
   var n = ++numPrevisu;
+  // Tous les reglages des formulaires, enregistres ou non
   var modif = { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
-    affichage: { traits: $('traits').checked, rotation: rot } };
+    affichage: { traits: $('traits').checked, rotation: rot }, meteo: lireMeteo(), agenda: lireAgenda(), bus: lireBus() };
   $('infoPrevisu').textContent = 'Préparation…';
   Promise.all([chargerMoteur(), api('/api/previsualiser', { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ modif: modif, scene: sceneCourante }) }).then(function (r) { return r.json(); })])
+    body: JSON.stringify({ modif: modif, scene: scenePrevisu }) }).then(function (r) { return r.json(); })])
     .then(function (r) {
       if (n !== numPrevisu) return;                // une demande plus recente est en cours
       var m = r[0], d = r[1], g = grilleUI(rot);
@@ -1494,8 +1560,9 @@ function majPrevisu() {
         var l = physVersLog(m.dessiner(etat, vBat), rot);
         dessinerBitsA(ctx, l.bits, l.w, l.h, g.nx > 1 ? k * (g.L + g.JE) : 0, g.ny > 1 ? k * (g.H + g.JE) : 0);
       });
-      $('infoPrevisu').textContent = 'Scène « ' + d.scene + ' », dessinée comme sur le cadre, avec les données actuelles. ' +
-        "Elle suit tes modifications ; rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.";
+      $('infoPrevisu').textContent = "Dessinée comme sur le cadre, avec les données actuelles et tes réglages (même non enregistrés). " +
+        "Rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.";
+      ajusterMarge();
     })
     .catch(function (e) { if (n === numPrevisu) $('infoPrevisu').textContent = 'Prévisualisation impossible : ' + e.message; });
 }

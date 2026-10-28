@@ -429,7 +429,12 @@ async function routePrevisualiser(req, env) {
   if (typeof err === 'string') return texte(err, 400);
   fusionner(cfg, modif);
   const scene = Number.isInteger(demande.scene) ? demande.scene : null;
-  const contenu = await construireTableau(cfg, Date.now(), env, scene);
+  // Lecture seule : une prevision ne doit rien ecrire (copies de secours, calendrier F1...),
+  // par exemple une ville essayee sans l'enregistrer ne doit pas remplacer la copie de la vraie ville
+  const kv = env.CADRE;
+  const lecture = { get: (...a) => kv.get(...a), getWithMetadata: (...a) => kv.getWithMetadata(...a),
+    put: async () => {}, delete: async () => {} };
+  const contenu = await construireTableau(cfg, Date.now(), Object.assign({}, env, { CADRE: lecture }), scene);
   const nb = cfg.ecrans && cfg.ecrans.nb === 2 ? 2 : 1;
   const ecrans = [];
   for (let n = 0; n < nb; n++) {

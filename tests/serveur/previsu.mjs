@@ -34,3 +34,8 @@ d = await demande({ ecrans: { nb: 2, assemblage: 'cote' }, disposition: [{ id: '
 console.log('deux écrans :', d.ecrans.map(e => e.disposition.map(b => b.id).join(',')).join(' | '));
 const apres = (await (await req('/api/config')).json()).config;
 console.log('rien enregistré :', apres.version === avant.version && apres.ecrans.nb === 1 && apres.disposition.length === 1);
+// Une prévision avec une autre ville et un autre agenda n'écrit rien dans le KV
+import { kv } from './simu.mjs';
+const cles = [...kv.keys()].sort().join(','), copie = kv.get('secours-meteo') && kv.get('secours-meteo').m;
+d = await demande({ meteo: { ville: 'Lyon', lat: 45.76, lon: 4.84 }, agenda: { urls: ['https://ics.test/autre.ics'], nb: 3 }, bus: { nb: 2 } }, -1);
+console.log('prévision météo/agenda :', d.ecrans.length === 1, '| aucune écriture :', [...kv.keys()].sort().join(',') === cles && (kv.get('secours-meteo') && kv.get('secours-meteo').m) === copie);
