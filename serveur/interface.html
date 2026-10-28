@@ -985,6 +985,7 @@ function charger() {
     config = d.config;
     remplirFormulaires();
     afficherStatut(d.statut, d.maintenant, d.statut1);
+    if ($('menu-batterie').open) chargerBatterie();     // menu reste ouvert depuis la derniere visite
     chargerApercu();
   });
 }
@@ -1345,7 +1346,10 @@ function dessinerBatterie(jours) {
   for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', +b[i].getAttribute('data-jours') === jours);
   if (!histoBat) return;
   var cv = $('courbeBatterie'), r = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
-  if (!W) return;                                  // menu ferme : dessine a l'ouverture
+  if (!W) {                                        // page pas encore affichee : on reessaie un peu plus tard
+    if ($('menu-batterie').open) setTimeout(function () { dessinerBatterie(jours); }, 200);
+    return;
+  }
   cv.width = W * r; cv.height = H * r;
   var ctx = cv.getContext('2d'); ctx.scale(r, r);
   var css = getComputedStyle(document.documentElement);
@@ -1392,7 +1396,8 @@ function dessinerBatterie(jours) {
   });
   $('resumeBatterie').textContent = texte.join(' ') + (histoBat.length > 1 ? ' Trait plein : écran 1, pointillés : écran 2.' : '');
 }
-$('menu-batterie').addEventListener('toggle', function () { if (this.open) (histoBat ? Promise.resolve() : chargerBatterie()).then(function () { dessinerBatterie(joursBat); }); });
+// A l'ouverture du menu (si les reglages sont deja charges ; sinon, charger() s'en occupe)
+$('menu-batterie').addEventListener('toggle', function () { if (this.open && config) chargerBatterie(); });
 
 // --- Sauvegarde des reglages ---
 function telechargerReglages() {
