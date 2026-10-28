@@ -69,7 +69,7 @@ canvas.photo{width:100%;aspect-ratio:960/680;background:#fff;border:1px solid va
 code{font-size:13px;word-break:break-all;background:var(--fond);padding:2px 6px;border-radius:6px}
 pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflow:auto;max-height:260px}
 #connexion{max-width:360px;margin:15vh auto}
-.cache{display:none}
+.cache{display:none!important}   /* toujours prioritaire sur le display des autres regles */
 /* Barre "modifications non enregistrees" (un seul bouton Enregistrer pour toute la page) */
 .barreModifs{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;
   background:var(--accent);color:var(--fond);border-radius:14px;padding:8px 8px 8px 16px;box-shadow:0 6px 24px rgba(0,0,0,.3);
