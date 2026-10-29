@@ -1601,6 +1601,24 @@ function estimation(pts) {
   var pente = (n * sxy - sx * sy) / (n * sxx - sx * sx);
   return { pente: pente, depuis: p[0][0], actuel: p[n - 1][1] };
 }
+// Periodes de charge : une montee de la tension d'au moins 0,06 V au total. Le chargeur de la XIAO est
+// lent (plus d'une journee pour 3 700 mAh : ~ 0,01 V par heure, a peine plus que le bruit de mesure),
+// donc la charge continue tant que la tension ne retombe pas de plus de 0,02 V sous son maximum.
+// Renvoie [debut, fin, enCours] (minutes) ; enCours : la charge dure jusqu'a la derniere mesure.
+function periodesCharge(pts) {
+  var res = [], i = 0;
+  while (i < pts.length - 1) {
+    if (pts[i + 1][1] - pts[i][1] <= 5 || pts[i + 1][0] - pts[i][0] > 300) { i++; continue; }   // pas de montee (> 5 mV)
+    var deb = i, j = i + 1, max = j;
+    while (j + 1 < pts.length && pts[j + 1][1] >= pts[max][1] - 20 && pts[j + 1][0] - pts[j][0] <= 300) {
+      j++;
+      if (pts[j][1] >= pts[max][1]) max = j;
+    }
+    if (pts[max][1] - pts[deb][1] >= 60) res.push([pts[deb][0], pts[max][0], j === pts.length - 1]);
+    i = Math.max(max, i + 1);
+  }
+  return res;
+}
 function dessinerBatterie(jours) {
   joursBat = jours;
   var b = document.querySelectorAll('[data-jours]');
@@ -1619,6 +1637,18 @@ function dessinerBatterie(jours) {
   var X = function (m) { return g + (m - debut) / (fin - debut) * (W - g - d); };
   var Y = function (p) { return hh + (100 - p) / 100 * (H - hh - bas); };
   ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.lineWidth = 1;
+  // Periodes de charge : fond grise et mention "en charge"
+  var charges = histoBat.map(function (h) { return periodesCharge(h.pts); });
+  charges.forEach(function (liste) {
+    liste.forEach(function (c) {
+      var x1 = Math.max(g, X(c[0])), x2 = Math.min(W - d, X(c[1]));
+      if (x2 <= g || x1 >= W - d) return;
+      ctx.fillStyle = cTrait; ctx.globalAlpha = 0.55;
+      ctx.fillRect(x1, hh, Math.max(2, x2 - x1), H - hh - bas);
+      ctx.globalAlpha = 1;
+      if (x2 - x1 >= 52) { ctx.fillStyle = cDoux; ctx.textAlign = 'center'; ctx.fillText('en charge', (x1 + x2) / 2, hh + 14); }
+    });
+  });
   [0, 25, 50, 75, 100].forEach(function (p) {
     ctx.strokeStyle = cTrait; ctx.beginPath(); ctx.moveTo(g, Y(p) + 0.5); ctx.lineTo(W - d, Y(p) + 0.5); ctx.stroke();
     ctx.fillStyle = cDoux; ctx.textAlign = 'right'; ctx.fillText(p + ' %', g - 6, Y(p) + 4);
@@ -1645,6 +1675,13 @@ function dessinerBatterie(jours) {
     });
     ctx.stroke(); ctx.setLineDash([]);
     var nom = histoBat.length > 1 ? 'Écran ' + (n + 1) + ' : ' : '';
+    // Derniere recharge
+    var dc = charges[n][charges[n].length - 1];
+    if (dc && dc[2] && Date.now() / 60000 - dc[1] < 180) texte.push(nom + 'en charge (ou branché) en ce moment.');
+    else if (dc) {
+      var fin = h.pts.filter(function (q) { return q[0] === dc[1]; })[0];
+      texte.push(nom + 'dernière recharge ' + duree(Date.now() - dc[1] * 60000) + ' (jusqu\'à ' + pourcentage(fin[1] / 1000) + ' %).');
+    } else if (h.pts.length) texte.push(nom + 'pas de recharge sur les 30 derniers jours.');
     var e = estimation(h.pts);
     if (!h.pts.length) texte.push(nom + 'pas encore de mesure (un point par heure).');
     else if (!e) texte.push(nom + "pas encore assez de mesures depuis la dernière recharge pour estimer l'autonomie.");
@@ -1655,7 +1692,8 @@ function dessinerBatterie(jours) {
         (restant < 2 ? Math.round(restant * 24) + ' heures' : Math.round(restant) + ' jours') + ' (' + e.actuel + ' %).');
     }
   });
-  $('resumeBatterie').textContent = texte.join(' ') + (histoBat.length > 1 ? ' Trait plein : écran 1, pointillés : écran 2.' : '');
+  $('resumeBatterie').textContent = texte.join('\n') + (histoBat.length > 1 ? '\nTrait plein : écran 1, pointillés : écran 2.' : '');
+  $('resumeBatterie').style.whiteSpace = 'pre-line';
 }
 // A l'ouverture du menu (si les reglages sont deja charges ; sinon, charger() s'en occupe)
 $('menu-batterie').addEventListener('toggle', function () { if (this.open && config) chargerBatterie(); });
