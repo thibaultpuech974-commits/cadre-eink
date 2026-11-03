@@ -24,11 +24,30 @@ Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou l
 6. Toujours dans **Paramètres** → **Variables et secrets** → **Ajouter** :
    - Type : **Secret**
    - Nom : `CLE`
-   - Valeur : un mot de passe de ton choix (il protège ton cadre)
+   - Valeur : un mot de passe de ton choix (il protège ton cadre tant que Cloudflare Access n'est pas activé, voir 1 bis)
 7. Ton adresse est affichée en haut de la page du Worker, du type
    `https://cadre.ton-nom.workers.dev`. Ouvre-la et connecte-toi avec ton mot de passe.
 
-**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur, avec ses trois fichiers (`worker.js`, `interface.html`, `circuits.js`). Le secret `CLE` reste dans Cloudflare.
+## 1 bis. Protéger l'accès avec Cloudflare Access (recommandé)
+
+Avec Access, personne n'atteint le serveur sans s'être identifié : la page web demande une connexion (code reçu par email + code d'une app d'authentification), et la carte et le raccourci iPhone présentent chacun un **jeton de service**. Le mot de passe `CLE` ne sert plus qu'en secours, si Access est désactivé.
+
+**Ordre à respecter** (sinon le cadre est bloqué dès l'activation d'Access) : d'abord installer les jetons sur la carte et dans le raccourci, ensuite activer Access.
+
+1. **Zero Trust** : dans le tableau de bord, ouvre **Zero Trust**. La première fois, choisis un nom d'équipe et l'offre **Free** (gratuite jusqu'à 50 utilisateurs).
+2. **Jetons de service** : **Zero Trust → Access controls → Service credentials → Service Tokens → Create Service Token**. Crée-en deux : `cadre-esp32` et `raccourci-iphone` (durée : sans expiration). Note à chaque fois le **Client ID** et le **Client Secret** : le secret n'est affiché qu'une seule fois. Deux jetons séparés permettent d'en couper un sans toucher à l'autre.
+3. **Carte** : remplis `ACCES_ID` et `ACCES_SECRET` en haut de `cadre_eink.ino` avec le jeton `cadre-esp32`, puis installe ce programme (par câble ou par Wi-Fi, voir partie 2). Il marche avant comme après l'activation d'Access.
+4. **Raccourci iPhone** : ajoute les deux en-têtes du jeton `raccourci-iphone` (partie 4, étape 9).
+5. **Activer Access** : **Workers & Pages → cadre → onglet Access → Protect this Worker behind Access**, choisis **All traffic**, et une règle qui n'autorise que ton adresse email. Toutes les adresses du Worker sont protégées, `workers.dev` compris.
+6. **Autoriser les jetons** : **Zero Trust → Access controls → Applications**, ouvre l'application du Worker → **Policies → Add a policy**, action **Service Auth**, règle **Include → Service Token** avec `cadre-esp32` et `raccourci-iphone`.
+7. **Double authentification** : **Zero Trust → Access controls → Access settings**, active l'**Independent MFA** (méthode : application d'authentification, TOTP). Puis, dans l'application du Worker → **Authentication → MFA**, choisis de l'exiger. À la première connexion, tu scannes un QR code avec une app comme Google Authenticator ou Authy.
+8. **Vérifier** : ouvre l'adresse du Worker dans une fenêtre privée. Tu dois tomber sur la page de connexion Cloudflare, puis arriver directement sur l'interface, sans mot de passe. En bas de la page, « Se déconnecter » affiche ton adresse. Attends un réveil du cadre et lance le raccourci une fois pour vérifier qu'ils passent.
+
+Ensuite, tu peux garder le secret `CLE` (il n'est utilisé que si Access est désactivé) ou le supprimer : sans Access ni `CLE`, le serveur refuse tout.
+
+En cas de fuite d'un jeton (téléphone perdu, code publié par erreur) : dans **Service Tokens**, désactive-le ou fais **Rotate** pour en générer un nouveau. Ne mets jamais les vraies valeurs de `WIFI_MDP`, `CLE` ou `ACCES_SECRET` dans un envoi sur GitHub.
+
+**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur, avec ses trois fichiers (`worker.js`, `interface.html`, `circuits.js`). Le secret `CLE` et les réglages d'Access restent dans Cloudflare.
 
 **Tests avant chaque déploiement** : dans **Paramètres → Builds → Configuration du build**, mets `npm test` comme **commande de build** (la commande de déploiement reste `npx wrangler deploy`). Cloudflare lance alors les tests du serveur avant de déployer : si l'un d'eux échoue, le déploiement est annulé et l'ancienne version reste en ligne. Pour les lancer toi-même : `npm test` à la racine du dépôt (Node.js 20.6 ou plus, rien à installer). Serveur de test local avec la page web : `cd tests/serveur && node --import ./html-texte.mjs serveur_bus.mjs`, puis http://localhost:8787 (mot de passe `secret`).
 
@@ -44,6 +63,7 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
    - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
    - `CLE` : le même mot de passe que dans Cloudflare
+   - `ACCES_ID` et `ACCES_SECRET` : le jeton de service du cadre si tu utilises Cloudflare Access (partie 1 bis), sinon laisse-les vides
    - `ECRAN_PRESENT` : mets **0** tant que tu n'as pas la nouvelle dalle. La carte dessine quand même et envoie l'image à l'aperçu web.
 4. Téléverse, puis ouvre le moniteur série (115200 bauds) pour suivre le premier réveil.
 5. Quelques secondes plus tard, l'aperçu apparaît dans l'interface web.
@@ -95,6 +115,7 @@ Dans l'app **Raccourcis**, crée un nouveau raccourci « Pochette sur le cadre �
    - URL : le **Texte** de l'étape 8
    - Méthode : **POST**
    - Corps de la requête : **Fichier** → l'**image convertie** de l'étape 4
+   - Avec Cloudflare Access (partie 1 bis), **En-têtes** : ajoute `CF-Access-Client-Id` et `CF-Access-Client-Secret` avec les valeurs du jeton `raccourci-iphone`. L'adresse de l'étape 8 ne contient alors plus de mot de passe.
 
 Lance-le pendant que la musique joue : le cadre passe en mode Pochette à son prochain réveil.
 

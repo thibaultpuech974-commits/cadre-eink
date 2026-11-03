@@ -19,7 +19,11 @@
 const char* WIFI_SSID   = "NOM_DE_TA_BOX";
 const char* WIFI_MDP    = "MOT_DE_PASSE";
 const char* SERVEUR     = "https://cadre.TON-NOM.workers.dev";   // sans / a la fin
-const char* CLE         = "TON_MOT_DE_PASSE";                    // la meme que dans Cloudflare
+const char* CLE         = "TON_MOT_DE_PASSE";                    // la meme que dans Cloudflare (secours sans Access)
+// Jeton de service Cloudflare Access du cadre (Zero Trust -> Access -> Service credentials).
+// Laisser vide tant qu'Access n'est pas active sur le Worker.
+const char* ACCES_ID     = "";   // CF-Access-Client-Id     (se termine par .access)
+const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 #define ECRAN_PRESENT 1   // 0 = pas d'ecran branche : on dessine quand meme et on envoie l'apercu
 // =====================================================================
 
@@ -1077,6 +1081,17 @@ bool connecterWifi() {
   return true;
 }
 
+// Identifie la carte aupres du serveur : jeton de service Cloudflare Access s'il est rempli,
+// et mot de passe CLE (utilise seulement si Access n'est pas active).
+// (static : les tests sur ordinateur, sans HTTPClient, ne generent pas son prototype)
+static void identifier(HTTPClient* http) {
+  http->addHeader("X-Cle", CLE);
+  if (ACCES_ID[0]) {
+    http->addHeader("CF-Access-Client-Id", ACCES_ID);
+    http->addHeader("CF-Access-Client-Secret", ACCES_SECRET);
+  }
+}
+
 // Encode le mot de passe pour le mettre dans une adresse
 String encoderURL(const char* s) {
   String r;
@@ -1099,7 +1114,9 @@ void mettreAJourProgramme(const char* version) {
   client.setTimeout(30);
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.setLedPin(LED_BUILTIN, LOW);   // la petite LED s'allume pendant l'ecriture
-  t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin?cle=" + encoderURL(CLE));
+  // le 4e argument ajoute les en-tetes d'identification a la requete de telechargement
+  t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin?cle=" + encoderURL(CLE), "",
+                                            [](HTTPClient* h) { identifier(h); });
   if (r == HTTP_UPDATE_OK) {
     Serial.println("Mise a jour terminee : redemarrage");
     Serial.flush();
@@ -1118,7 +1135,7 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
   client.setInsecure();
   HTTPClient http;
   if (!http.begin(client, String(SERVEUR) + chemin)) return 0;
-  http.addHeader("X-Cle", CLE);
+  identifier(&http);
   http.setTimeout(20000);
   int code = http.GET();
   if (code != 200) { Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code); http.end(); return 0; }
@@ -1143,7 +1160,7 @@ void envoyerApercu(int rotation) {
   client.setInsecure();
   HTTPClient http;
   if (!http.begin(client, String(SERVEUR) + "/api/apercu?r=" + String(rotation))) return;
-  http.addHeader("X-Cle", CLE);
+  identifier(&http);
   http.addHeader("Content-Type", "application/octet-stream");
   int code = http.POST(canvas.getBuffer(), OCTETS);
   Serial.printf("Apercu envoye : HTTP %d\n", code);

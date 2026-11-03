@@ -302,6 +302,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide" id="pochetteActuelle">Aucune pochette reçue pour l'instant.</p>
   <p class="aide">Adresse à mettre dans le raccourci iPhone :</p>
   <p><code id="urlPochette"></code></p>
+  <p class="aide cache" id="aidePochetteAccess">Dans l'action « Obtenir le contenu de l'URL », ajoute les en-têtes <code>CF-Access-Client-Id</code> et <code>CF-Access-Client-Secret</code> du jeton de service du raccourci (voir le guide d'installation).</p>
 </details>
 
 <details class="menu" id="menu-reveil">
@@ -370,7 +371,7 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <div class="poignee" id="poigneePrevisu" title="Agrandir ou réduire"></div>
 </div>
 
-<p class="aide" style="text-align:center"><a href="#" onclick="deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
+<p class="aide" style="text-align:center"><a href="#" id="lienDeconnexion" onclick="return deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
 </div>
 </main>
 
@@ -382,12 +383,19 @@ var image = null;
 try { cle = localStorage.getItem('cadre-cle') || ''; } catch (e) {}
 
 function $(id) { return document.getElementById(id); }
+// Connexion : par Cloudflare Access (cookie envoye automatiquement par le navigateur)
+// ou, en secours sans Access, par le mot de passe CLE
+var session = { access: false, email: '' };
 function api(chemin, options) {
   options = options || {};
   options.headers = options.headers || {};
-  options.headers['X-Cle'] = cle;
+  if (cle) options.headers['X-Cle'] = cle;
+  // Session Access expiree : Access repond par une redirection vers sa page de connexion,
+  // qu'un fetch ne peut pas suivre. On recharge la page pour se reconnecter.
+  options.redirect = 'manual';
   return fetch(chemin, options).then(function (r) {
-    if (r.status === 401) { afficherConnexion('Mot de passe incorrect'); throw new Error('cle'); }
+    if (r.type === 'opaqueredirect') { location.reload(); throw new Error('Session expirée, reconnexion…'); }
+    if (r.status === 401) { afficherConnexion(cle ? 'Mot de passe incorrect' : ''); throw new Error('cle'); }
     if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
     return r;
   });
@@ -396,11 +404,20 @@ function message(id, t) { $(id).textContent = t; if (t) setTimeout(function () {
 
 function afficherConnexion(t) { $('app').classList.add('cache'); $('connexion').classList.remove('cache'); $('msgCle').textContent = t || ''; }
 function seConnecter() { cle = $('champCle').value.trim(); try { localStorage.setItem('cadre-cle', cle); } catch (e) {} demarrer(); }
-function deconnexion() { try { localStorage.removeItem('cadre-cle'); } catch (e) {} cle = ''; afficherConnexion(''); return false; }
+function deconnexion() {
+  try { localStorage.removeItem('cadre-cle'); } catch (e) {}
+  cle = '';
+  if (session.access) { location.href = '/cdn-cgi/access/logout'; return false; }   // ferme la session Access
+  afficherConnexion(''); return false;
+}
 
+// Sans mot de passe enregistre, on essaie quand meme : avec Access, la session suffit
 function demarrer() {
-  if (!cle) { afficherConnexion(''); return; }
-  charger().then(function () {
+  api('/api/session').then(function (r) { return r.json(); }).then(function (s) {
+    session = s;
+    $('lienDeconnexion').textContent = s.access && s.email ? 'Se déconnecter (' + s.email + ')' : 'Se déconnecter';
+    return charger();
+  }).then(function () {
     $('connexion').classList.add('cache'); $('app').classList.remove('cache');
   }).catch(function () {});
 }
@@ -1280,7 +1297,9 @@ function remplirFormulaires() {
   $('bordure').value = String(config.affichage.bordureApercu); appliquerBordure();
   var p = config.pochette;
   if (p.version) $('pochetteActuelle').textContent = 'Dernière pochette : ' + (p.titre || '?') + ' — ' + (p.artiste || '?') + ' (' + new Date(p.t).toLocaleString('fr-FR') + ')';
-  $('urlPochette').textContent = location.origin + '/api/pochette?cle=' + encodeURIComponent(cle);
+  // Avec Access, le raccourci s'identifie par son jeton de service (en-tetes), pas par l'adresse
+  $('urlPochette').textContent = location.origin + '/api/pochette?' + (session.access ? '' : 'cle=' + encodeURIComponent(cle));
+  $('aidePochetteAccess').classList.toggle('cache', !session.access);
 }
 function remplirMeteo() {
   var m = config.meteo;

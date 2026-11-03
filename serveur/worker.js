@@ -10,7 +10,9 @@
 //
 //  A configurer dans Cloudflare :
 //   - un espace KV lie sous le nom  CADRE
-//   - une variable secrete           CLE   (ton mot de passe)
+//   - Cloudflare Access sur le Worker (connexion + double authentification
+//     pour la page web, jetons de service pour la carte et le raccourci iPhone)
+//   - en secours, sans Access : une variable secrete CLE (mot de passe)
 // =====================================================================
 
 import CIRCUITS from './circuits.js';
@@ -138,7 +140,7 @@ const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
 //  Point d'entree
 // ---------------------------------------------------------------------
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const chemin = url.pathname;
 
@@ -146,14 +148,21 @@ export default {
       return new Response(INTERFACE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
     if (!chemin.startsWith('/api/')) return new Response('Introuvable', { status: 404 });
-    if (!env.CLE) return texte('La variable secrete CLE n\'est pas definie dans Cloudflare.', 500);
+    // Cloudflare Access : ctx.access n'existe que si Access a authentifie la requete
+    // (personne connectee a la page web, ou carte / raccourci avec leur jeton de service)
+    const access = ctx && ctx.access ? ctx.access : null;
+    if (!access && !env.CLE) return texte('Ni Cloudflare Access ni la variable secrete CLE ne sont configures.', 500);
     if (!env.CADRE) return texte('L\'espace KV "CADRE" n\'est pas lie au Worker.', 500);
 
-    const cle = req.headers.get('X-Cle') || url.searchParams.get('cle');
-    if (cle !== env.CLE) return texte('Cle incorrecte', 401);
+    // Sans Access (mode de secours) : mot de passe CLE
+    if (!access) {
+      const cle = req.headers.get('X-Cle') || url.searchParams.get('cle');
+      if (cle !== env.CLE) return texte('Cle incorrecte', 401);
+    }
 
     try {
       const m = req.method;
+      if (chemin === '/api/session' && m === 'GET') return await routeSession(access);
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
@@ -181,6 +190,14 @@ export default {
     }
   },
 };
+
+// Comment la page web est connectee : par Cloudflare Access (avec l'adresse email) ou par mot de passe
+async function routeSession(access) {
+  if (!access) return json({ access: false });
+  let email = '';
+  try { const id = await access.getIdentity(); email = (id && id.email) || ''; } catch (e) { /* jeton de service : pas d'identite */ }
+  return json({ access: true, email });
+}
 
 // ---------------------------------------------------------------------
 //  Utilitaires
