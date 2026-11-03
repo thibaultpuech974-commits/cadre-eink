@@ -31,6 +31,9 @@ const ATTENDU = {
     /scène forcée : Grand Prix \| blocs date,f1 \| GP GP des États-Unis \| dessin true/, /deux écrans : date \| courbe/, /rien enregistré : true/, /prévision météo\/agenda : true \| aucune écriture : true/],
   'agenda.mjs': [/ok 1 évènement\(s\) \| webcal:\/\/ics.test\/maths.ics/, /erreur : adresse invalide .* \| pas une adresse/,
     /erreur : introuvable \(HTTP 404\) .* \| https:\/\/introuvable.test\/x.ics/, /fenêtre : 14 jours/, /panne : inaccessible \(réseau coupé\)/],
+  'access.mjs': [/access sans CLE : 200/, /access \+ mauvaise CLE : 200/, /session personne : \{"access":true,"email":"moi@exemple.fr"\}/,
+    /session jeton : \{"access":true,"email":""\}/, /pochette par jeton : 200 So What/, /secours sans cle : 401/,
+    /secours avec cle : 200/, /session secours : \{"access":false\}/, /rien de configure : 500/],
   'batterie.mjs': [/288 réveils : 48 écritures, 48 points, de 4100 à 3904 mV/, /après 40 jours : 1 point/, /sans mesure : rien enregistré/],
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
