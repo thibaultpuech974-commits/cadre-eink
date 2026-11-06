@@ -1175,7 +1175,27 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
   identifier(&http);
   http.setTimeout(20000);
   int code = http.GET();
-  if (code != 200) { Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code); http.end(); return 0; }
+  if (code != 200) {
+    Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code);
+    if (code < 0) {   // pas de reponse du serveur : on detaille la cause
+      Serial.printf("  erreur : %s\n", http.errorToString(code).c_str());
+      Serial.printf("  Wi-Fi : IP %s, passerelle %s, DNS %s, signal %d dBm\n",
+                    WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
+                    WiFi.dnsIP().toString().c_str(), WiFi.RSSI());
+      String hote = String(SERVEUR);
+      hote.replace("https://", "");
+      int s = hote.indexOf('/');
+      if (s >= 0) hote = hote.substring(0, s);
+      IPAddress ip;
+      if (WiFi.hostByName(hote.c_str(), ip)) Serial.printf("  %s -> %s\n", hote.c_str(), ip.toString().c_str());
+      else Serial.printf("  %s : nom introuvable (DNS)\n", hote.c_str());
+      char e[120] = "";
+      int n = client.lastError(e, sizeof e);
+      Serial.printf("  connexion securisee : %d %s\n", n, e);
+    }
+    http.end();
+    return 0;
+  }
   int taille = http.getSize();
   if (taille <= 0 || taille > max) { Serial.println("Taille inattendue"); http.end(); return 0; }
   if (!*dest) *dest = (uint8_t*)ps_malloc(taille);
