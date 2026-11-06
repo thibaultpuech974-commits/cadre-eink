@@ -15,7 +15,7 @@ let mem;
 const v = () => new DataView(mem.buffer);
 const wasi = { fd_prestat_get: () => 8, fd_prestat_dir_name: () => 8, fd_close: () => 0, fd_fdstat_get: () => 0, fd_seek: () => 0,
   fd_write: (fd, iovs, n, pE) => { let t = 0; for (let i = 0; i < n; i++) t += v().getUint32(iovs + 8 * i + 4, true); v().setUint32(pE, t, true); return 0; },
-  clock_time_get: (a, b, p) => { v().setBigUint64(p, 0n, true); return 0; }, proc_exit: c => { throw new Error('exit ' + c); } };
+  clock_time_get: (a, b, p) => { v().setBigUint64(p, 0n, true); return 0; }, poll_oneoff: () => 52, proc_exit: c => { throw new Error('exit ' + c); } };
 const { instance } = await WebAssembly.instantiate(octets, { wasi_snapshot_preview1: wasi });
 mem = instance.exports.memory; instance.exports._initialize();
 const dessiner = etat => { const b = new TextEncoder().encode(JSON.stringify(etat)); const p = instance.exports.zone(b.length);

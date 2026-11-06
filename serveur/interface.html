@@ -1783,6 +1783,7 @@ function chargerMoteur() {
         vue().setUint32(pEcrits, t, true); return 0;
       },
       clock_time_get: function (id, prec, p) { vue().setBigUint64(p, BigInt(0), true); return 0; },
+      poll_oneoff: function () { return 52; },     // attente de verrou de la libc : jamais appelee (dessin sur un seul fil)
       proc_exit: function (c) { throw new Error('arrêt ' + c); }
     };
     return WebAssembly.instantiate(octets, { wasi_snapshot_preview1: wasi }).then(function (res) {

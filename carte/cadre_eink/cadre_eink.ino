@@ -1,5 +1,5 @@
 // =====================================================================
-//  Cadre e-ink - programme de la carte (XIAO ESP32S3)
+//  Cadre e-ink - programme de la carte (Adafruit Feather ESP32-S3, 4 Mo flash / 2 Mo PSRAM)
 //
 //  A chaque reveil :
 //   1. connexion Wi-Fi, puis demande au serveur ce qu'il faut afficher
@@ -10,7 +10,8 @@
 //  Bibliotheques (gestionnaire de bibliotheques de l'IDE Arduino) :
 //    GxEPD2, U8g2_for_Adafruit_GFX, ArduinoJson, JPEGDEC (bitbank2)
 //
-//  Reglage obligatoire dans l'IDE : Outils -> PSRAM -> "OPI PSRAM"
+//  Carte a choisir dans l'IDE : "Adafruit Feather ESP32-S3 2MB PSRAM"
+//  (la PSRAM, indispensable pour les pochettes, est alors activee d'office)
 //  Pour la mise a jour par Wi-Fi : Outils -> Partition Scheme -> un schema
 //  avec OTA (celui par defaut convient ; pas "Huge APP (no OTA)")
 // =====================================================================
@@ -33,6 +34,7 @@ const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 #include <WiFiClientSecure.h>
 #include <HTTPUpdate.h>
 #include <GxEPD2_BW.h>
+#include <Wire.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
 #endif
@@ -42,14 +44,15 @@ const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 #include <JPEGDEC.h>
 #include <math.h>
 
-// --- Broches (cf. schema) ---
-#define EPD_CS        D1
-#define EPD_DC        D2
-#define EPD_RST       D3
-#define EPD_BUSY      D7
-#define EPD_PWR       D6
-#define PIN_BATTERIE  D9          // milieu du pont diviseur 470k / 470k
-// DIN -> D10, CLK -> D8
+// --- Broches (Feather ESP32-S3) ---
+// Ecran : DIN -> MO, CLK -> SCK, VCC -> 3V, GND -> GND
+#define EPD_CS        5           // broche 5
+#define EPD_DC        6           // broche 6 (sera partagee avec le 2e ecran)
+#define EPD_RST       9           // broche 9
+#define EPD_BUSY      10          // broche 10
+#define EPD_PWR       A2          // (sera partagee avec le 2e ecran)
+// Reserve pour le 2e ecran : CS -> 12, RST -> A0, BUSY -> A1
+// Batterie : lue par la jauge MAX17048 integree a la Feather (I2C, adresse 0x36)
 
 #define LARGEUR 960
 #define HAUTEUR 680
@@ -281,7 +284,11 @@ void policeQuiTient(bool gras, float hMax, const char* texte, int lMax) {
 }
 void policeChiffres(float taille) { choisirDans(CHIFFRES, taille); }
 
+// Pourcentage donne par la jauge MAX17048 de la carte (-1 = inconnu : on l'estime alors
+// d'apres la tension, comme dans l'apercu web qui ne recoit que la tension)
+int pctMesure = -1;
 int pourcentBatterie(float v) {
+  if (pctMesure >= 0) return pctMesure;
   const float T[] = {3.30, 3.50, 3.60, 3.65, 3.70, 3.75, 3.80, 3.90, 4.00, 4.10, 4.20};
   const int   P[] = {   0,    5,   10,   20,   30,   40,   50,   65,   80,   90,  100};
   if (v <= T[0]) return 0;
@@ -1023,11 +1030,41 @@ RTC_DATA_ATTR uint32_t secondesDepuisAffichage = 0;
 RTC_DATA_ATTR uint32_t reveilSecondes = 600;
 RTC_DATA_ATTR bool     alerteBatterieAffichee = false;
 
+// Jauge de batterie MAX17048 de la Feather. On lit ses registres directement, sans
+// bibliotheque : la puce reste alimentee par la batterie pendant la veille et suit la
+// charge en continu, il ne faut surtout pas la reinitialiser a chaque reveil.
+const uint8_t JAUGE = 0x36;
+bool lireJauge(uint8_t reg, uint16_t& val) {
+  Wire.beginTransmission(JAUGE);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(JAUGE, (uint8_t)2) != 2) return false;
+  uint8_t fort = Wire.read();
+  uint8_t faible = Wire.read();
+  val = (fort << 8) | faible;
+  return true;
+}
+
+// Renvoie la tension (V) et met a jour pctMesure. 0 si la jauge ne repond pas (pas de batterie).
 float lireBatterie() {
-  pinMode(PIN_BATTERIE, INPUT);
-  uint32_t somme = 0;
-  for (int i = 0; i < 16; i++) { somme += analogReadMilliVolts(PIN_BATTERIE); delay(2); }
-  return (somme / 16.0f) * 2.0f / 1000.0f;   // x2 : pont diviseur
+#ifdef PIN_I2C_POWER
+  pinMode(PIN_I2C_POWER, OUTPUT);   // alimente les resistances de tirage du bus I2C
+  digitalWrite(PIN_I2C_POWER, HIGH);
+  delay(10);
+#endif
+  Wire.begin();
+  pctMesure = -1;
+  uint16_t brut = 0, soc = 0;
+  float v = 0;
+  for (int i = 0; i < 20; i++) {
+    if (!lireJauge(0x02, brut)) return 0;   // registre VCELL
+    v = brut * 78.125e-6f;                  // 78,125 uV par unite
+    if (v > 1.0f) break;
+    delay(50);   // juste apres le branchement de la batterie, la 1re mesure n'est pas prete
+  }
+  if (v > 2.5f && lireJauge(0x04, soc))     // registre SOC : % dans l'octet de poids fort
+    pctMesure = min(100, (soc + 128) >> 8);
+  return v;
 }
 
 // Connexion rapide : on garde en memoire (pendant la veille) le canal, la borne et
@@ -1113,7 +1150,7 @@ void mettreAJourProgramme(const char* version) {
   client.setInsecure();
   client.setTimeout(30);
   httpUpdate.rebootOnUpdate(false);
-  httpUpdate.setLedPin(LED_BUILTIN, LOW);   // la petite LED s'allume pendant l'ecriture
+  httpUpdate.setLedPin(LED_BUILTIN, HIGH);  // la LED rouge s'allume pendant l'ecriture
   // le 4e argument ajoute les en-tetes d'identification a la requete de telechargement
   t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin?cle=" + encoderURL(CLE), "",
                                             [](HTTPClient* h) { identifier(h); });
@@ -1138,7 +1175,27 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
   identifier(&http);
   http.setTimeout(20000);
   int code = http.GET();
-  if (code != 200) { Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code); http.end(); return 0; }
+  if (code != 200) {
+    Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code);
+    if (code < 0) {   // pas de reponse du serveur : on detaille la cause
+      Serial.printf("  erreur : %s\n", http.errorToString(code).c_str());
+      Serial.printf("  Wi-Fi : IP %s, passerelle %s, DNS %s, signal %d dBm\n",
+                    WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
+                    WiFi.dnsIP().toString().c_str(), WiFi.RSSI());
+      String hote = String(SERVEUR);
+      hote.replace("https://", "");
+      int s = hote.indexOf('/');
+      if (s >= 0) hote = hote.substring(0, s);
+      IPAddress ip;
+      if (WiFi.hostByName(hote.c_str(), ip)) Serial.printf("  %s -> %s\n", hote.c_str(), ip.toString().c_str());
+      else Serial.printf("  %s : nom introuvable (DNS)\n", hote.c_str());
+      char e[120] = "";
+      int n = client.lastError(e, sizeof e);
+      Serial.printf("  connexion securisee : %d %s\n", n, e);
+    }
+    http.end();
+    return 0;
+  }
   int taille = http.getSize();
   if (taille <= 0 || taille > max) { Serial.println("Taille inattendue"); http.end(); return 0; }
   if (!*dest) *dest = (uint8_t*)ps_malloc(taille);
@@ -1293,7 +1350,15 @@ uint32_t cycle() {
 
 void setup() {
   Serial.begin(115200);
-  delay(300);
+  // Apres un appui sur RESET (ou a la mise sous tension), on laisse jusqu'a 10 s au
+  // moniteur serie pour se connecter. Les reveils de veille n'attendent pas (batterie).
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+    unsigned long t0 = millis();
+    while (!Serial && millis() - t0 < 10000) delay(10);
+    delay(500);
+  } else {
+    delay(300);
+  }
   calculerVersion();
   Serial.printf("Cadre e-ink, programme du %s\n", versionCarte);
   preparerDessin();
