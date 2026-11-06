@@ -58,7 +58,9 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
 ## 2. Programmer la carte
 
 1. Dans l'IDE Arduino, installe les bibliothèques **GxEPD2**, **U8g2_for_Adafruit_GFX**, **ArduinoJson** (Benoit Blanchon) et **JPEGDEC** (bitbank2).
-2. **Outils → PSRAM → OPI PSRAM** : indispensable pour les pochettes. Garde le **Partition Scheme** par défaut (il faut un schéma avec OTA pour la mise à jour par Wi-Fi, donc pas « Huge APP (no OTA) »).
+2. Carte : **Adafruit Feather ESP32-S3 2MB PSRAM** (la PSRAM, indispensable pour les pochettes, est activée d'office). Garde le **Partition Scheme** par défaut (il faut un schéma avec OTA pour la mise à jour par Wi-Fi, donc pas « Huge APP (no OTA) »).
+
+   **Câblage de l'écran** (connecteur 9 broches de la carte pilote → Feather) : VCC → 3V, GND → GND, DIN → MO, CLK → SCK, CS → 5, DC → 6, RST → 9, BUSY → 10, PWR → A2. La batterie est lue par la jauge MAX17048 intégrée à la Feather : aucun câblage. Broches réservées au 2e écran : CS → 12, RST → A0, BUSY → A1 (DC, PWR, DIN et CLK partagés).
 3. En haut de `cadre_eink.ino`, remplis :
    - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
@@ -69,14 +71,14 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
 5. Quelques secondes plus tard, l'aperçu apparaît dans l'interface web.
 
 **Pour téléverser à nouveau** : la carte dort presque tout le temps. Deux solutions :
-- active le **Mode développement** dans la section **Réveil du cadre** de la page web. La carte ne se met plus en veille, vérifie toutes les 15 à 60 s, et le téléversement marche normalement. À utiliser branché en USB, et à désactiver une fois fini. Il prend effet au prochain réveil, ou tout de suite si tu appuies sur le bouton **R** de la carte ;
-- ou débranche-la, maintiens le bouton **B (BOOT)** en la rebranchant, puis téléverse.
+- active le **Mode développement** dans la section **Réveil du cadre** de la page web. La carte ne se met plus en veille, vérifie toutes les 15 à 60 s, et le téléversement marche normalement. À utiliser branché en USB, et à désactiver une fois fini. Il prend effet au prochain réveil, ou tout de suite si tu appuies sur le bouton **RESET** de la carte ;
+- ou maintiens le bouton **BOOT**, appuie sur **RESET**, relâche BOOT, puis téléverse (le numéro du port COM peut changer : vérifie **Outils → Port**). Après le téléversement, appuie une fois sur **RESET**.
 
 **Mettre à jour la carte par Wi-Fi** (une fois ce programme installé par câble) :
 1. Dans l'IDE Arduino, **Croquis → Exporter les binaires compilés**.
 2. Dans le dossier du croquis, ouvre `build`, puis le sous-dossier de la carte : le fichier à prendre est `cadre_eink.ino.bin` (pas `merged`, `bootloader` ni `partitions`).
 3. Dans la page web, section **Programme de la carte**, choisis ce fichier puis **Envoyer le programme**.
-4. Au réveil suivant, la carte le télécharge (la petite LED orange s'allume environ 30 s), redémarre et redessine l'écran. La section affiche alors « installé ».
+4. Au réveil suivant, la carte le télécharge (la LED rouge s'allume environ 30 s), redémarre et redessine l'écran. La section affiche alors « installé ».
 
 La carte ne se met à jour que si sa batterie dépasse 3,6 V, et seulement vers un programme plus récent que le sien. Si un programme envoyé plante au démarrage, la carte ne peut plus se mettre à jour par Wi-Fi : il faut la reprogrammer par câble (bouton BOOT). Teste donc d'abord par câble les grosses modifications.
 

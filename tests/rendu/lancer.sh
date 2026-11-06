@@ -8,9 +8,11 @@ for r in adafruit/Adafruit-GFX-Library olikraus/U8g2_for_Adafruit_GFX bblanchon/
 done
 python3 proto.py
 L=libs
+# Adafruit GFX range ses sources dans src/ depuis ses dernieres versions
+G=$L/Adafruit-GFX-Library; [ -d $G/src ] && G=$G/src
 g++ -std=gnu++17 -O1 -w -DHOTE -D__LINUX__ -DARDUINO=100 -DARDUINOJSON_ENABLE_ARDUINO_STRING=0 -DARDUINOJSON_ENABLE_ARDUINO_STREAM=0 \
-  -DARDUINOJSON_ENABLE_ARDUINO_PRINT=0 -DARDUINOJSON_ENABLE_PROGMEM=0 -Istubs -I$L/Adafruit-GFX-Library -I$L/U8g2_for_Adafruit_GFX/src \
-  -I$L/ArduinoJson/src -I$L/JPEGDEC/src harness3.cpp $L/Adafruit-GFX-Library/Adafruit_GFX.cpp $L/U8g2_for_Adafruit_GFX/src/U8g2_for_Adafruit_GFX.cpp \
+  -DARDUINOJSON_ENABLE_ARDUINO_PRINT=0 -DARDUINOJSON_ENABLE_PROGMEM=0 -Istubs -I$G -I$L/U8g2_for_Adafruit_GFX/src \
+  -I$L/ArduinoJson/src -I$L/JPEGDEC/src harness3.cpp $G/Adafruit_GFX.cpp $L/U8g2_for_Adafruit_GFX/src/U8g2_for_Adafruit_GFX.cpp \
   -x c $L/U8g2_for_Adafruit_GFX/src/u8g2_fonts.c -x c++ $L/JPEGDEC/src/JPEGDEC.cpp -o rendu
 ./rendu
 python3 - <<'PY'
