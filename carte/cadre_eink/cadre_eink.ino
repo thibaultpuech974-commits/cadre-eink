@@ -1350,7 +1350,15 @@ uint32_t cycle() {
 
 void setup() {
   Serial.begin(115200);
-  delay(300);
+  // Apres un appui sur RESET (ou a la mise sous tension), on laisse jusqu'a 10 s au
+  // moniteur serie pour se connecter. Les reveils de veille n'attendent pas (batterie).
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+    unsigned long t0 = millis();
+    while (!Serial && millis() - t0 < 10000) delay(10);
+    delay(500);
+  } else {
+    delay(300);
+  }
   calculerVersion();
   Serial.printf("Cadre e-ink, programme du %s\n", versionCarte);
   preparerDessin();
