@@ -37,6 +37,7 @@ const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 #include <Wire.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
+#include <esp_heap_caps.h>
 #endif
 #include <Adafruit_GFX.h>
 #include <U8g2_for_Adafruit_GFX.h>
@@ -1007,7 +1008,9 @@ void preparerDessin() {
 // =====================================================================
 #ifndef HOTE
 
-GxEPD2_BW<GxEPD2_1330_GDEM133T91, GxEPD2_1330_GDEM133T91::HEIGHT> display(
+// L'ecran recoit l'image par quarts (170 lignes a la fois) : un tampon de 20 Ko au lieu
+// de 81,6 Ko en memoire interne, sinon il n'en reste plus assez pour la connexion securisee
+GxEPD2_BW<GxEPD2_1330_GDEM133T91, GxEPD2_1330_GDEM133T91::HEIGHT / 4> display(
   GxEPD2_1330_GDEM133T91(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 
 // Version du programme = date de compilation. La page web la relit dans le fichier .bin
@@ -1233,9 +1236,11 @@ void afficherSurEcran() {
   display.init(115200, true, 2, false);
   display.setRotation(0);
   display.setFullWindow();
-  display.fillScreen(GxEPD_WHITE);
-  display.drawBitmap(0, 0, canvas.getBuffer(), LARGEUR, HAUTEUR, GxEPD_BLACK);
-  display.display(false);       // rafraichissement complet
+  display.firstPage();          // un quart d'image a la fois, puis rafraichissement complet
+  do {
+    display.fillScreen(GxEPD_WHITE);
+    display.drawBitmap(0, 0, canvas.getBuffer(), LARGEUR, HAUTEUR, GxEPD_BLACK);
+  } while (display.nextPage());
   display.hibernate();
   digitalWrite(EPD_PWR, LOW);
   gpio_hold_en((gpio_num_t)EPD_PWR);
@@ -1274,6 +1279,9 @@ void mettreEcranAJour() {
 uint32_t cycle() {
   float vBat = lireBatterie();
   Serial.printf("Batterie : %.2f V\n", vBat);
+  Serial.printf("Memoire libre : interne %u Ko (plus grand bloc %u Ko), PSRAM %u Ko\n",
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
+                heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024, ESP.getFreePsram() / 1024);
 
   // Batterie presque vide : on le signale une fois, puis on dort longtemps
   if (vBat > 2.5 && vBat < 3.4) {
