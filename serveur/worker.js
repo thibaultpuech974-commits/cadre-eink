@@ -145,7 +145,9 @@ export default {
     const chemin = url.pathname;
 
     if (chemin === '/' || chemin === '/index.html') {
-      return new Response(INTERFACE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      // no-cache : le navigateur revalide la page a chaque visite, pour qu'elle reste
+      // accordee a la previsualisation (apercu.wasm) apres un deploiement
+      return new Response(INTERFACE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
     }
     if (!chemin.startsWith('/api/')) return new Response('Introuvable', { status: 404 });
     // Cloudflare Access : ctx.access n'existe que si Access a authentifie la requete

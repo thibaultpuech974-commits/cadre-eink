@@ -1786,7 +1786,12 @@ function chargerMoteur() {
       poll_oneoff: function () { return 52; },     // attente de verrou de la libc : jamais appelee (dessin sur un seul fil)
       proc_exit: function (c) { throw new Error('arrêt ' + c); }
     };
-    return WebAssembly.instantiate(octets, { wasi_snapshot_preview1: wasi }).then(function (res) {
+    // Toute autre fonction systeme demandee par une future version de la libc : on repond
+    // « non disponible » (52) au lieu de refuser de charger la previsualisation
+    var wasiComplet = new Proxy(wasi, {
+      get: function (o, nom) { return nom in o ? o[nom] : function () { return 52; }; }
+    });
+    return WebAssembly.instantiate(octets, { wasi_snapshot_preview1: wasiComplet }).then(function (res) {
       var ex = res.instance.exports;
       mem = ex.memory; ex._initialize();
       moteur = {
