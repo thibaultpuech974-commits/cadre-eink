@@ -5,7 +5,7 @@ Le projet a trois parties :
 | Partie | Fichier | Rôle |
 |---|---|---|
 | Serveur web | `serveur/` : `worker.js` (serveur), `interface.html` (page web), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
-| Carte ESP32 | `cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
+| Carte ESP32 | `carte/cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
 | Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
 
 Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou la retirer.
@@ -66,7 +66,7 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
    - `CLE` : le même mot de passe que dans Cloudflare
    - `ACCES_ID` et `ACCES_SECRET` : le jeton de service du cadre si tu utilises Cloudflare Access (partie 1 bis), sinon laisse-les vides
-   - `ECRAN_PRESENT` : mets **0** tant que tu n'as pas la nouvelle dalle. La carte dessine quand même et envoie l'image à l'aperçu web.
+   - `ECRAN_PRESENT` : laisse **1** quand l'écran est branché. À **0**, la carte fonctionne sans écran : elle dessine quand même et envoie l'image à l'aperçu web.
 4. Téléverse, puis ouvre le moniteur série (115200 bauds) pour suivre le premier réveil.
 5. Quelques secondes plus tard, l'aperçu apparaît dans l'interface web.
 
