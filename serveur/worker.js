@@ -26,6 +26,7 @@
 //   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
+//   acces.js             droits des jetons de service Cloudflare Access (carte, raccourci)
 // =====================================================================
 
 // Page web de reglage : fichier a part, integre par Cloudflare au deploiement (regle "Text" de wrangler.jsonc)
@@ -41,6 +42,7 @@ import { GTFS_TANGO, oublierIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
 import { construireTableau } from './tableau.js';
 import { empreinteImage, encoderPlan, planRafraichissement, resumePlan } from './rafraichissement.js';
+import { controlerAcces, routeEcrireJetons, routeLireJetons } from './acces.js';
 
 // ---------------------------------------------------------------------
 //  Point d'entree
@@ -70,6 +72,14 @@ export default {
 
     try {
       const m = req.method;
+      // Jetons de service : chacun limite aux routes de son role (carte, raccourci) ; voir acces.js
+      const droit = await controlerAcces(req, access, env, url);
+      if (droit.refus) return droit.refus;
+      if (chemin === '/api/jetons') {
+        if (!droit.personne) return texte('Réservé aux personnes connectées', 403);
+        if (m === 'GET') return await routeLireJetons(env);
+        if (m === 'POST') return await routeEcrireJetons(req, env);
+      }
       if (chemin === '/api/session' && m === 'GET') return await routeSession(access);
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);

@@ -3,3 +3,6 @@ tests/rendu/rendu
 tests/rendu/r3_*
 tests/serveur/node_modules/
 *.bin
+
+# Identifiants de la carte (modele : carte/cadre_eink/secrets.exemple.h)
+carte/cadre_eink/secrets.h

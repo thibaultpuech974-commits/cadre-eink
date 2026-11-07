@@ -50,6 +50,13 @@ const ATTENDU = {
     /ancienne carte : ok/, /en-tête x-plan : P;1;1/,
     /réglages invalides ignorés : \{"partiel":true,"completH":24,"seuil":40,"methode":"simple","maxPartiels":0\}/,
     /réglages : \{"partiel":true,"completH":12,"seuil":60,"methode":"simple","maxPartiels":0\} \| cp envoyé à la carte : 43200/],
+  'jetons.mjs': [/personne : config 200 \| jetons 200/, /carte : état 200 \| aperçu 200 \| programme 404/,
+    /carte refusée : config 403 \| réglages 403 \| sauvegarde 403 \| envoi programme 403 \| jetons 403/,
+    /raccourci : pochette 200 \| refusé : config 403 \| état 403/, /autre jeton : config 200/,
+    /rôles devinés : abc123.access=carte def456.access=raccourci zzz999.access=null/,
+    /choix du rôle : 200 \| puis config 403 \| rôle inconnu 400 \| par un jeton 403/, /oublier : 200 abc123.access def456.access$/m,
+    /signature pirate 403 \| autre application 403 \| autre équipe 403 \| expiré 403 \| clé inconnue 403 \| abîmé 403/,
+    /clés gardées en mémoire : true/, /clés introuvables : 503/],
   'agenda-recurrences.mjs': [
     /mensuel : Mar 10 18:00 2e mardi \| Ven 27 19:00 Dernier vendredi \| Lun 30 09:00 Fin de mois \| Mar 1 07:00 1er jour ouvré \| Mar 8 18:00 2e mardi \| Ven 25 19:00 Dernier vendredi \| Jeu 31 09:00 Fin de mois \| Ven 1 07:00 1er jour ouvré$/m,
     /divers : Aujourd'hui 18:00 Footing \| Aujourd'hui 20:00 Projet \| Demain 18:00 Footing \| Demain 20:00 Projet \| Lun 9 20:00 Projet \| Jeu 12 14:00 Code de la route \| Sam 14 18:00 Footing \| Dim 15 18:00 Footing \| Mer 18 17:00 Club \| Jeu 19 14:00 Code de la route$/m,

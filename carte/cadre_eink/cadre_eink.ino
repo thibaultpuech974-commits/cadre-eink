@@ -7,8 +7,9 @@
 //      envoi d'une copie de l'image au serveur (apercu web)
 //   3. veille profonde jusqu'au prochain reveil
 //
-//  Ce fichier : reglages, Wi-Fi, ecran, veille. Le dessin de l'image est dans dessin.h
-//  (meme dossier, second onglet de l'IDE Arduino).
+//  Ce fichier : reglages, Wi-Fi, ecran, veille. Dans le meme dossier (autres onglets de l'IDE) :
+//  dessin.h (dessin de l'image), certificats.h (verification du serveur) et secrets.h (tes
+//  identifiants, a creer depuis secrets.exemple.h).
 //
 //  Bibliotheques (gestionnaire de bibliotheques de l'IDE Arduino) :
 //    GxEPD2, U8g2_for_Adafruit_GFX, ArduinoJson, JPEGDEC (bitbank2)
@@ -21,15 +22,18 @@
 // =====================================================================
 
 // ======================= A PERSONNALISER ==============================
-const char* WIFI_SSID   = "NOM_DE_TA_BOX";
-const char* WIFI_MDP    = "MOT_DE_PASSE";
-const char* SERVEUR     = "https://cadre.TON-NOM.workers.dev";   // sans / a la fin
-const char* CLE         = "TON_MOT_DE_PASSE";                    // la meme que dans Cloudflare (secours sans Access)
-// Jeton de service Cloudflare Access du cadre (Zero Trust -> Access -> Service credentials).
-// Laisser vide tant qu'Access n'est pas active sur le Worker.
-const char* ACCES_ID     = "";   // CF-Access-Client-Id     (se termine par .access)
-const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
+// Identifiants (Wi-Fi, adresse du serveur, mot de passe, jeton Access) : dans secrets.h, a cote de
+// ce fichier, jamais envoye sur GitHub. La premiere fois : copier secrets.exemple.h en secrets.h,
+// puis le remplir.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Fichier secrets.h introuvable : copie secrets.exemple.h en secrets.h (meme dossier) et remplis-le"
+#endif
 #define ECRAN_PRESENT 1   // 0 = pas d'ecran branche : on dessine quand meme et on envoie l'apercu
+// 1 = la carte verifie le certificat du serveur (voir certificats.h). 0 = sans verification, comme
+// avant : seulement pour depanner (Cloudflare passe a une autorite absente de certificats.h).
+#define VERIFIER_CERTIFICAT 1
 // =====================================================================
 
 #include <WiFi.h>
@@ -58,6 +62,8 @@ const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 
 // Dessin de l'image (dimensions, polices, blocs du tableau de bord, pochette...) : voir dessin.h
 #include "dessin.h"
+// Certificats racine des autorites qu'utilise Cloudflare (verification du serveur)
+#include "certificats.h"
 
 // =====================================================================
 //  PARTIE CARTE ESP32 (reseau, ecran, veille)
@@ -213,6 +219,17 @@ bool connecterWifi() {
   return true;
 }
 
+// Connexion securisee : la carte verifie que le serveur est bien le sien (certificat signe par une
+// autorite de certificats.h, au nom du serveur). Sans cela, une fausse borne Wi-Fi au meme nom pourrait
+// lire ses jetons et lui envoyer un faux programme.
+void securiser(WiFiClientSecure& client) {
+#if VERIFIER_CERTIFICAT
+  client.setCACert(RACINES);
+#else
+  client.setInsecure();
+#endif
+}
+
 // Identifie la carte aupres du serveur : jeton de service Cloudflare Access s'il est rempli,
 // et mot de passe CLE (utilise seulement si Access n'est pas active).
 // (static : les tests sur ordinateur, sans HTTPClient, ne generent pas son prototype)
@@ -303,7 +320,7 @@ void mettreAJourProgramme(const char* version) {
   }
   Serial.printf("Mise a jour du programme : %s -> %s\n", versionCarte, version);
   WiFiClientSecure client;
-  client.setInsecure();
+  securiser(client);
   client.setTimeout(30);
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.setLedPin(LED_BUILTIN, HIGH);  // la LED rouge s'allume pendant l'ecriture
@@ -351,7 +368,7 @@ char causeEchec = 'S';
 
 int telecharger(const String& chemin, uint8_t** dest, int max) {
   WiFiClientSecure client;
-  client.setInsecure();
+  securiser(client);
   HTTPClient http;
   causeEchec = 'S';
   if (!http.begin(client, String(SERVEUR) + chemin)) return 0;
@@ -397,7 +414,7 @@ static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   snprintf(chemin, sizeof chemin, "/api/apercu?r=%d&plan=1&crc=%08lx&dc=%lu&pr=%lu&np=%lu", rotation, (unsigned long)empreinteAffichee,
            (unsigned long)secondesDepuisComplet, (unsigned long)reveilSecondes, (unsigned long)partielsDepuisComplet);
   WiFiClientSecure client;
-  client.setInsecure();
+  securiser(client);
   HTTPClient http;
   if (!http.begin(client, String(SERVEUR) + chemin)) return 'C';
   identifier(&http);

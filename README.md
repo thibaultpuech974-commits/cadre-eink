@@ -36,7 +36,7 @@ Avec Access, personne n'atteint le serveur sans s'être identifié : la page web
 
 1. **Zero Trust** : dans le tableau de bord, ouvre **Zero Trust**. La première fois, choisis un nom d'équipe et l'offre **Free** (gratuite jusqu'à 50 utilisateurs).
 2. **Jetons de service** : **Zero Trust → Access controls → Service credentials → Service Tokens → Create Service Token**. Crée-en deux : `cadre-esp32` et `raccourci-iphone` (durée : sans expiration). Note à chaque fois le **Client ID** et le **Client Secret** : le secret n'est affiché qu'une seule fois. Deux jetons séparés permettent d'en couper un sans toucher à l'autre.
-3. **Carte** : remplis `ACCES_ID` et `ACCES_SECRET` en haut de `cadre_eink.ino` avec le jeton `cadre-esp32`, puis installe ce programme (par câble ou par Wi-Fi, voir partie 2). Il marche avant comme après l'activation d'Access.
+3. **Carte** : remplis `ACCES_ID` et `ACCES_SECRET` dans `secrets.h` (voir partie 2) avec le jeton `cadre-esp32`, puis installe ce programme (par câble ou par Wi-Fi, voir partie 2). Il marche avant comme après l'activation d'Access.
 4. **Raccourci iPhone** : ajoute les deux en-têtes du jeton `raccourci-iphone` (partie 4, étape 9).
 5. **Activer Access** : **Workers & Pages → cadre → onglet Access → Protect this Worker behind Access**, choisis **All traffic**, et une règle qui n'autorise que ton adresse email. Toutes les adresses du Worker sont protégées, `workers.dev` compris.
 6. **Autoriser les jetons** : **Zero Trust → Access controls → Applications**, ouvre l'application du Worker → **Policies → Add a policy**, action **Service Auth**, règle **Include → Service Token** avec `cadre-esp32` et `raccourci-iphone`.
@@ -45,7 +45,9 @@ Avec Access, personne n'atteint le serveur sans s'être identifié : la page web
 
 Ensuite, tu peux garder le secret `CLE` (il n'est utilisé que si Access est désactivé) ou le supprimer : sans Access ni `CLE`, le serveur refuse tout.
 
-En cas de fuite d'un jeton (téléphone perdu, code publié par erreur) : dans **Service Tokens**, désactive-le ou fais **Rotate** pour en générer un nouveau. Ne mets jamais les vraies valeurs de `WIFI_MDP`, `CLE` ou `ACCES_SECRET` dans un envoi sur GitHub.
+**Droits de chaque jeton** : le serveur vérifie le jeton signé par Cloudflare à chaque requête, et limite chaque jeton de service à son rôle. La carte n'a accès qu'à ses routes : son état, la photo, la pochette, son programme et l'envoi de l'aperçu. Le raccourci ne peut qu'envoyer la pochette. Un jeton volé ne peut donc ni changer les réglages, ni lire la sauvegarde, ni envoyer un programme à la carte. Le rôle est deviné à la première requête du jeton : la carte demande son état avec sa version, le raccourci envoie une pochette. Il se vérifie et se change dans la page web, menu **Accès des jetons**. Un jeton dont le rôle n'a pas pu être deviné garde tous les droits jusqu'à ce que tu lui en choisisses un. Les personnes connectées gardent tous les droits.
+
+En cas de fuite d'un jeton (téléphone perdu, code publié par erreur) : dans **Service Tokens**, désactive-le ou fais **Rotate** pour en générer un nouveau. Les vraies valeurs de `WIFI_MDP`, `CLE` et `ACCES_SECRET` restent dans `secrets.h`, qui n'est jamais envoyé sur GitHub.
 
 **Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur, avec tous les fichiers du dossier `serveur/`. Le secret `CLE` et les réglages d'Access restent dans Cloudflare.
 
@@ -61,13 +63,18 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
 2. Carte : **Adafruit Feather ESP32-S3 2MB PSRAM** (la PSRAM, indispensable pour les pochettes, est activée d'office). Dans **Outils → Partition Scheme**, choisis **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** : le programme (environ 1,6 Mo) ne tient pas dans le schéma par défaut (1,2 Mo), et la mise à jour par Wi-Fi demande un schéma « with OTA ». Avec un schéma « No OTA » ou « Huge APP », la carte refuse les mises à jour par Wi-Fi (« Partition Could Not be Found »). À la compilation, le maximum annoncé doit être 1 966 080 octets ; si le programme approche cette limite, il faudra alléger les polices.
 
    **Câblage de l'écran** (connecteur 9 broches de la carte pilote → Feather) : VCC → 3V, GND → GND, DIN → MO, CLK → SCK, CS → 5, DC → 6, RST → 9, BUSY → 10, PWR → A2. La batterie est lue par la jauge MAX17048 intégrée à la Feather : aucun câblage. Broches réservées au 2e écran : CS → 12, RST → A0, BUSY → A1 (DC, PWR, DIN et CLK partagés).
-   Ouvre `cadre_eink.ino` : l'IDE affiche aussi `dessin.h` dans un second onglet. Les deux fichiers doivent rester ensemble dans le dossier `cadre_eink`.
-3. En haut de `cadre_eink.ino`, remplis :
+   Ouvre `cadre_eink.ino` : l'IDE affiche aussi `dessin.h`, `certificats.h` et `secrets.h` dans d'autres onglets. Tous ces fichiers doivent rester ensemble dans le dossier `cadre_eink`.
+3. **Tes identifiants** : dans le dossier `cadre_eink`, copie `secrets.exemple.h` sous le nom `secrets.h`, puis remplis `secrets.h` :
    - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
    - `CLE` : le même mot de passe que dans Cloudflare
    - `ACCES_ID` et `ACCES_SECRET` : le jeton de service du cadre si tu utilises Cloudflare Access (partie 1 bis), sinon laisse-les vides
+
+   `secrets.h` est ignoré par Git (`.gitignore`) : il reste sur ton ordinateur, et une nouvelle version du programme récupérée sur GitHub ne l'écrase pas. Sans lui, la compilation s'arrête sur « Fichier secrets.h introuvable ».
+
+   En haut de `cadre_eink.ino`, deux réglages :
    - `ECRAN_PRESENT` : laisse **1** quand l'écran est branché. À **0**, la carte fonctionne sans écran : elle dessine quand même et envoie l'image à l'aperçu web.
+   - `VERIFIER_CERTIFICAT` : laisse **1**. La carte vérifie alors que le serveur est bien le sien : son certificat doit être signé par l'une des autorités de `certificats.h`, celles qu'utilise Cloudflare (Let's Encrypt, Google Trust Services, SSL.com). Sans cette vérification, une fausse borne Wi-Fi au même nom pourrait lire les jetons de la carte et lui envoyer un faux programme. Si la carte affiche « Certificat du serveur refusé » (Cloudflare serait passé à une autre autorité), mets **0** le temps de mettre à jour `certificats.h` (`python3 outils/certificats.py`), puis remets **1**. Installe la première version avec vérification **par câble**, moniteur série ouvert : si la connexion échoue, la ligne « connexion securisee » en donne la raison.
 4. Téléverse, puis ouvre le moniteur série (115200 bauds) pour suivre le premier réveil.
 5. Quelques secondes plus tard, l'aperçu apparaît dans l'interface web.
 
