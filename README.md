@@ -4,8 +4,8 @@ Le projet a trois parties :
 
 | Partie | Fichier | Rôle |
 |---|---|---|
-| Serveur web | `serveur/` : `worker.js` (serveur), `interface.html` (page web), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
-| Carte ESP32 | `carte/cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
+| Serveur web | `serveur/` : `worker.js` (point d'entrée et routes) et un fichier par thème (`meteo.js`, `agenda.js`, `bus.js`, `f1.js`, `scenes.js`, `tableau.js`, `rafraichissement.js`…, liste en tête de `worker.js`), `interface.html` (page web), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
+| Carte ESP32 | `carte/cadre_eink/` : `cadre_eink.ino` (réglages, Wi-Fi, écran, veille) et `dessin.h` (dessin de l'image, partagé avec l'aperçu web) | Se réveille, demande quoi afficher, dessine, se rendort |
 | Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
 
 Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou la retirer.
@@ -47,7 +47,7 @@ Ensuite, tu peux garder le secret `CLE` (il n'est utilisé que si Access est dé
 
 En cas de fuite d'un jeton (téléphone perdu, code publié par erreur) : dans **Service Tokens**, désactive-le ou fais **Rotate** pour en générer un nouveau. Ne mets jamais les vraies valeurs de `WIFI_MDP`, `CLE` ou `ACCES_SECRET` dans un envoi sur GitHub.
 
-**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur, avec ses trois fichiers (`worker.js`, `interface.html`, `circuits.js`). Le secret `CLE` et les réglages d'Access restent dans Cloudflare.
+**Déploiement automatique depuis GitHub** : le fichier `wrangler.jsonc` du dépôt décrit le Worker (nom `cadre`, fichier `serveur/worker.js`, espace KV `CADRE`). Une fois le dépôt connecté dans **Paramètres → Builds**, chaque envoi sur la branche `main` redéploie le serveur, avec tous les fichiers du dossier `serveur/`. Le secret `CLE` et les réglages d'Access restent dans Cloudflare.
 
 **Tests avant chaque déploiement** : dans **Paramètres → Builds → Configuration du build**, mets `npm test` comme **commande de build** (la commande de déploiement reste `npx wrangler deploy`). Cloudflare lance alors les tests du serveur avant de déployer : si l'un d'eux échoue, le déploiement est annulé et l'ancienne version reste en ligne. Pour les lancer toi-même : `npm test` à la racine du dépôt (Node.js 20.6 ou plus, rien à installer). Serveur de test local avec la page web : `cd tests/serveur && node --import ./html-texte.mjs serveur_bus.mjs`, puis http://localhost:8787 (mot de passe `secret`).
 
@@ -61,6 +61,7 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
 2. Carte : **Adafruit Feather ESP32-S3 2MB PSRAM** (la PSRAM, indispensable pour les pochettes, est activée d'office). Dans **Outils → Partition Scheme**, choisis **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** : le programme (environ 1,6 Mo) ne tient pas dans le schéma par défaut (1,2 Mo), et la mise à jour par Wi-Fi demande un schéma « with OTA ». Avec un schéma « No OTA » ou « Huge APP », la carte refuse les mises à jour par Wi-Fi (« Partition Could Not be Found »). À la compilation, le maximum annoncé doit être 1 966 080 octets ; si le programme approche cette limite, il faudra alléger les polices.
 
    **Câblage de l'écran** (connecteur 9 broches de la carte pilote → Feather) : VCC → 3V, GND → GND, DIN → MO, CLK → SCK, CS → 5, DC → 6, RST → 9, BUSY → 10, PWR → A2. La batterie est lue par la jauge MAX17048 intégrée à la Feather : aucun câblage. Broches réservées au 2e écran : CS → 12, RST → A0, BUSY → A1 (DC, PWR, DIN et CLK partagés).
+   Ouvre `cadre_eink.ino` : l'IDE affiche aussi `dessin.h` dans un second onglet. Les deux fichiers doivent rester ensemble dans le dossier `cadre_eink`.
 3. En haut de `cadre_eink.ino`, remplis :
    - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
@@ -150,7 +151,7 @@ Exemples : « Bus » (ven 18:00-20:00, mise à jour 3 min, bloc bus en grand), �
 
 **Prévisualisation** : le bouton **Prévisualiser** (sous les blocs, ou en haut des menus) ouvre un panneau en bas de l'écran qui dessine une scène exactement comme le cadre l'affichera, avec les données actuelles et tes réglages de disposition, météo, agenda et bus, même pas encore enregistrés. L'image suit chaque modification ; le menu du panneau choisit la scène, « – » le réduit et « ✕ » le ferme. Tire la barre de titre pour le déplacer, et son coin en bas à droite pour l'agrandir ou le réduire ; la page retient sa place (double-clic sur la barre : retour en bas à droite). Rien n'est enregistré ni envoyé au cadre. Elle utilise le même code de dessin que la carte, compilé en WebAssembly (`serveur/apercu.wasm`).
 
-> **Après chaque modification de `cadre_eink.ino`**, recompile la prévisualisation : `bash outils/apercu/preparer-outils.sh` (une seule fois), puis `bash outils/apercu/construire.sh`. Les tests refusent le déploiement si elle n'est pas à jour.
+> **Après chaque modification de `dessin.h`** (le dessin de l'image), recompile la prévisualisation : `bash outils/apercu/preparer-outils.sh` (une seule fois), puis `bash outils/apercu/construire.sh`. Les tests refusent le déploiement si elle n'est pas à jour. Une modification de `cadre_eink.ino` seul (réseau, écran, veille) n'en demande pas.
 
 Pour les blocs de la scène choisie :
 - fais glisser un bloc pour le déplacer (au doigt ou à la souris) ;

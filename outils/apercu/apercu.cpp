@@ -1,6 +1,6 @@
 // Previsualisation dans la page web : le meme code de dessin que la carte, compile en WebAssembly.
 // La page envoie l'etat (JSON, comme /api/etat) et recupere l'image 960 x 680 (1 bit par point).
-#include "ino_arduino.cpp"
+#include "dessin.h"
 void* operator new(size_t n) { return malloc(n); }
 void* operator new[](size_t n) { return malloc(n); }
 void operator delete(void* p) noexcept { free(p); }

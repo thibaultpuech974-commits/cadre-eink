@@ -3,12 +3,12 @@ import fs from 'fs';
 import { createHash } from 'crypto';
 import { req, post, horloge } from './simu.mjs';
 horloge('2026-10-24T20:00:00+02:00');
-// 1. Le module WebAssembly correspond au programme actuel de la carte
-const ino = fs.readFileSync('../../carte/cadre_eink/cadre_eink.ino');
-const attendu = createHash('sha1').update(ino).digest('hex').slice(0, 12);
+// 1. Le module WebAssembly correspond au dessin actuel de la carte (carte/cadre_eink/dessin.h)
+const dessin = fs.readFileSync('../../carte/cadre_eink/dessin.h');
+const attendu = createHash('sha1').update(dessin).digest('hex').slice(0, 12);
 const version = fs.readFileSync('../../serveur/apercu.version', 'utf8').trim();
 console.log('apercu.wasm à jour :', version === attendu);
-if (version !== attendu) console.log('-> le programme de la carte a changé : recompile la prévisualisation avec  bash outils/apercu/construire.sh');
+if (version !== attendu) console.log('-> le dessin de la carte (dessin.h) a changé : recompile la prévisualisation avec  bash outils/apercu/construire.sh');
 // 2. Il se charge et dessine (servi par le serveur, comme pour la page)
 const octets = await (await req('/api/apercu.wasm')).arrayBuffer();
 let mem;

@@ -1,4 +1,4 @@
-#include "ino_arduino.cpp"
+#include "dessin.h"
 #include <fstream>
 #include <sstream>
 static std::string lire(const char* n) { std::ifstream f(n, std::ios::binary); std::stringstream s; s << f.rdbuf(); return s.str(); }
