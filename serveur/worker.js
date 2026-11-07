@@ -1363,7 +1363,21 @@ function evenementsICS(texte, debutFenetre, finFenetre) {
   return res;
 }
 
+// Date d'un champ ICS lue comme si elle etait en UTC (sans fuseau) : a 14 h pres, de quoi ecarter vite
+// un evenement tres loin de la fenetre
+function dateNaiveICS(v) {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/.exec(String(v).trim());
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : null;
+}
+
 function occurrences(ev, debutFenetre, finFenetre) {
+  // Evenement unique nettement hors de la fenetre (les centaines d'evenements passes d'un calendrier) :
+  // ecarte sans conversion de fuseau, la partie la plus couteuse. Marge de 2 jours pour les fuseaux.
+  if (!ev.RRULE || ev['RECURRENCE-ID']) {
+    const n0 = dateNaiveICS(ev.DTSTART.v), n1 = ev.DTEND ? dateNaiveICS(ev.DTEND.v) : null;
+    const dn = n1 !== null && n0 !== null ? n1 - n0 : ev.DURATION ? lireDuree(ev.DURATION.v) : 0;
+    if (n0 !== null && (n0 - 2 * 86400e3 >= finFenetre || n0 + Math.max(dn, 86400e3) + 2 * 86400e3 <= debutFenetre)) return [];
+  }
   const ds = lireDateICS(ev.DTSTART.v, ev.DTSTART.p);
   if (!ds) return [];
   let duree;
@@ -1399,16 +1413,35 @@ function occurrences(ev, debutFenetre, finFenetre) {
     if (u) jusqua = u.journee ? u.utc + 86400e3 - 1 : u.utc;
   }
   const NUM = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
-  const parJour = r.BYDAY ? r.BYDAY.split(',').map(s => NUM[s.trim().slice(-2).toUpperCase()]).filter(x => x !== undefined) : [];
+  // BYDAY : jours de la semaine, avec un rang facultatif en mensuel ("2TU" = 2e mardi, "-1FR" = dernier vendredi)
+  const parJourRang = (r.BYDAY || '').split(',').map(s => /^([+-]?\d{1,2})?(SU|MO|TU|WE|TH|FR|SA)$/i.exec(s.trim()))
+    .filter(Boolean).map(m => ({ n: m[1] ? parseInt(m[1], 10) : 0, j: NUM[m[2].toUpperCase()] }));
+  const parJour = parJourRang.map(x => x.j);
+  // BYMONTHDAY : jours du mois ("15", "-1" = dernier jour) ; BYSETPOS : une position parmi les dates du mois
+  const parJourMois = (r.BYMONTHDAY || '').split(',').map(s => parseInt(s, 10)).filter(n => n && Math.abs(n) <= 31);
+  const position = parseInt(r.BYSETPOS || '0', 10) || 0;
   const J = 86400e3;
   const w0 = ds.w;
   const base = Date.UTC(w0.y, w0.m - 1, w0.d);
+  const heureMs = ((w0.hh || 0) * 3600 + (w0.mi || 0) * 60 + (w0.ss || 0)) * 1000;
   const aUTC = dateMs => {
     const d = new Date(dateMs);
     return versUTC({ y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), hh: w0.hh, mi: w0.mi, ss: w0.ss }, ds.tz);
   };
+  // Une date finie bien avant la fenetre n'est pas convertie dans son fuseau (deux appels a Intl, la partie
+  // la plus couteuse) : elle compte seulement pour COUNT. Marge de 2 jours pour l'heure et le fuseau.
+  const avantFenetre = dm => dm + heureMs + Math.max(duree, 0) + 2 * J < debutFenetre;
+  // Sans COUNT, on part directement de la periode qui precede la fenetre, au lieu de tout derouler depuis
+  // la premiere date (un cours hebdomadaire de la rentree, un rappel quotidien de 2005...). Les mois sont
+  // comptes pour 31 jours et les annees pour 366 : on ne saute jamais une periode qui toucherait la fenetre.
+  let k0 = 0;
+  const recul = debutFenetre - Math.max(duree, 0) - 3 * J - base;
+  if (compte === Infinity && recul > 0) {
+    const periode = { DAILY: 1, WEEKLY: 7, MONTHLY: 31, YEARLY: 366 }[freq];
+    if (periode) k0 = Math.floor(recul / (inter * periode * J));
+  }
 
-  for (let k = 0; k < 6000 && compte > 0; k++) {
+  for (let k = k0; k < k0 + 6000 && compte > 0; k++) {
     let dates = [];
     if (freq === 'DAILY') {
       const dm = base + k * inter * J;
@@ -1419,9 +1452,24 @@ function occurrences(ev, debutFenetre, finFenetre) {
         dates = parJour.map(j => lundi + ((j + 6) % 7) * J).sort((a, b) => a - b).filter(x => x >= base);
       } else dates = [base + k * inter * 7 * J];
     } else if (freq === 'MONTHLY') {
-      const debutMois = new Date(Date.UTC(w0.y, w0.m - 1 + k * inter, 1));
-      const nbJ = new Date(Date.UTC(debutMois.getUTCFullYear(), debutMois.getUTCMonth() + 1, 0)).getUTCDate();
-      if (w0.d <= nbJ) dates = [Date.UTC(debutMois.getUTCFullYear(), debutMois.getUTCMonth(), w0.d)];
+      const m = new Date(Date.UTC(w0.y, w0.m - 1 + k * inter, 1));
+      const an = m.getUTCFullYear(), mois = m.getUTCMonth();
+      const nbJ = new Date(Date.UTC(an, mois + 1, 0)).getUTCDate();
+      const jourDuMois = n => (n > 0 ? n : nbJ + 1 + n);
+      let jours = [];
+      if (parJourRang.length) {
+        for (const { n, j } of parJourRang) {
+          const tous = [];
+          for (let d = 1 + ((j - m.getUTCDay() + 7) % 7); d <= nbJ; d += 7) tous.push(d);
+          if (!n) jours.push(...tous);
+          else { const d = n > 0 ? tous[n - 1] : tous[tous.length + n]; if (d) jours.push(d); }
+        }
+        if (parJourMois.length) jours = jours.filter(d => parJourMois.some(n => jourDuMois(n) === d));   // ex. vendredi 13
+      } else if (parJourMois.length) jours = parJourMois.map(jourDuMois);
+      else jours = [w0.d];
+      jours = [...new Set(jours)].filter(d => d >= 1 && d <= nbJ).sort((a, b) => a - b);
+      if (position) { const d = position > 0 ? jours[position - 1] : jours[jours.length + position]; jours = d ? [d] : []; }
+      dates = jours.map(d => Date.UTC(an, mois, d)).filter(x => x >= base);
     } else if (freq === 'YEARLY') {
       const dm = Date.UTC(w0.y + k * inter, w0.m - 1, w0.d);
       if (new Date(dm).getUTCDate() === w0.d) dates = [dm];
@@ -1431,8 +1479,10 @@ function occurrences(ev, debutFenetre, finFenetre) {
     }
     let stop = false;
     for (const dm of dates) {
+      if (compte <= 0) { stop = true; break; }
+      if (avantFenetre(dm)) { compte--; continue; }
       const utc = aUTC(dm);
-      if (utc > jusqua || compte <= 0 || utc >= finFenetre) { stop = true; break; }
+      if (utc > jusqua || utc >= finFenetre) { stop = true; break; }
       compte--;
       ajouter(utc);
     }
