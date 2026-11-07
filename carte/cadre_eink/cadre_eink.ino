@@ -12,8 +12,9 @@
 //
 //  Carte a choisir dans l'IDE : "Adafruit Feather ESP32-S3 2MB PSRAM"
 //  (la PSRAM, indispensable pour les pochettes, est alors activee d'office)
-//  Pour la mise a jour par Wi-Fi : Outils -> Partition Scheme -> un schema
-//  avec OTA (celui par defaut convient ; pas "Huge APP (no OTA)")
+//  Pour la mise a jour par Wi-Fi : Outils -> Partition Scheme -> "Minimal SPIFFS
+//  (1.9MB APP with OTA/128KB SPIFFS)" (le programme ne tient pas dans celui par
+//  defaut, et un schema "No OTA" ou "Huge APP" empeche la mise a jour par Wi-Fi)
 // =====================================================================
 
 // ======================= A PERSONNALISER ==============================
@@ -1024,10 +1025,10 @@ uint32_t empreinteImage(const uint8_t* p, size_t n) {
   return h ? h : 1;
 }
 
-// Lit les zones d'un plan "P" (verifie tout : taille, bornes, x et largeur multiples de 8).
-// Renvoie le nombre de zones, ou -1 si le plan est illisible.
+// Lit les zones d'un plan partiel (P simple, D double, I inversion ; verifie tout : taille, bornes,
+// x et largeur multiples de 8). Renvoie le nombre de zones, ou -1 si le plan est illisible.
 int zonesDuPlan(const uint8_t* plan, int taille, ZonePlan* zones, int max) {
-  if (taille < 2 || plan[0] != 'P' || plan[1] < 1 || plan[1] > max) return -1;
+  if (taille < 2 || !strchr("PDI", plan[0]) || !plan[0] || plan[1] < 1 || plan[1] > max) return -1;
   int n = plan[1], pos = 2;
   for (int k = 0; k < n; k++) {
     if (pos + 8 > taille) return -1;
@@ -1075,6 +1076,7 @@ RTC_DATA_ATTR bool     alerteBatterieAffichee = false;
 // Rafraichissement commande par le serveur et temps d'eveil (envoyes au serveur a chaque reveil)
 RTC_DATA_ATTR uint32_t empreinteAffichee = 0;       // image vraiment a l'ecran (0 = inconnue)
 RTC_DATA_ATTR uint32_t secondesDepuisComplet = 0;   // depuis le dernier rafraichissement complet
+RTC_DATA_ATTR uint32_t partielsDepuisComplet = 0;   // mises a jour partielles depuis le dernier complet
 RTC_DATA_ATTR uint32_t eveilTotalMs = 0;            // temps passe hors veille, cumule
 RTC_DATA_ATTR uint32_t ecranTotalMs = 0;            // dont temps de rafraichissement de l'ecran
 RTC_DATA_ATTR char     versionRtc[16] = "";         // programme qui a ecrit ces valeurs
@@ -1279,14 +1281,15 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
 }
 
 // Envoie l'image dessinee (apercu de la page web) et recoit du serveur comment rafraichir l'ecran :
-// 'R' rien (image identique), 'P' partiel (zones dans *plan), 'C' complet, 'N' complet avec nettoyage.
+// 'R' rien (image identique), 'P', 'D' ou 'I' partiel (zones dans *plan, voir afficherZones),
+// 'C' complet, 'N' complet avec nettoyage.
 // Sans reponse lisible (serveur ancien, erreur) : 'C', sans risque.
 static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   *plan = nullptr;
   *taillePlan = 0;
   char chemin[160];
-  snprintf(chemin, sizeof chemin, "/api/apercu?r=%d&plan=1&crc=%08lx&dc=%lu&pr=%lu", rotation, (unsigned long)empreinteAffichee,
-           (unsigned long)secondesDepuisComplet, (unsigned long)reveilSecondes);
+  snprintf(chemin, sizeof chemin, "/api/apercu?r=%d&plan=1&crc=%08lx&dc=%lu&pr=%lu&np=%lu", rotation, (unsigned long)empreinteAffichee,
+           (unsigned long)secondesDepuisComplet, (unsigned long)reveilSecondes, (unsigned long)partielsDepuisComplet);
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
@@ -1298,10 +1301,10 @@ static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   char type = 'C';
   if (code == 200) {
     int t = lireCorps(http, plan, 60000);
-    if (t >= 1 && (*plan)[0] && strchr("RPCN", (*plan)[0])) { type = (char)(*plan)[0]; *taillePlan = t; }
+    if (t >= 1 && (*plan)[0] && strchr("RPDICN", (*plan)[0])) { type = (char)(*plan)[0]; *taillePlan = t; }
   }
   http.end();
-  if (type != 'P') { free(*plan); *plan = nullptr; *taillePlan = 0; }
+  if (!strchr("PDI", type)) { free(*plan); *plan = nullptr; *taillePlan = 0; }
   Serial.printf("Apercu envoye : HTTP %d, plan %c (%d octets)\n", code, type, *taillePlan);
   return type;
 }
@@ -1338,19 +1341,36 @@ void afficherComplet(bool nettoyage) {
 #endif
 }
 
-// Mise a jour partielle (~0,6 s, sans clignotement). Le controleur fait bouger les pixels qui different
-// entre sa memoire "precedente" (l'image a l'ecran) et sa memoire "courante" (la nouvelle). Ces memoires
-// sont perdues pendant la veille : on met la nouvelle image dans les deux, puis l'ancien contenu des zones
-// changees (envoye par le serveur) dans la "precedente". Le canvas a 1 = noir, l'ecran 1 = blanc : on inverse.
+// Mise a jour partielle (~0,5 s par passe). Le controleur fait bouger les pixels qui different entre sa
+// memoire "precedente" (l'image a l'ecran) et sa memoire "courante" (la nouvelle). Ces memoires sont perdues
+// pendant la veille : on met la nouvelle image dans les deux, puis on prepare les zones selon la methode.
+// Le canvas a 1 = noir, l'ecran 1 = blanc : "true" inverse a l'ecriture, "false" donne le negatif.
+//  P (simple)    : ancien contenu des zones (envoye par le serveur) dans la "precedente", une passe ;
+//                  seuls les pixels qui changent bougent, sans clignotement.
+//  D (double)    : pareil, en deux passes : les pixels qui changent recoivent deux impulsions.
+//  I (inversion) : chaque zone passe en negatif, puis revient a la nouvelle image : tous ses pixels font
+//                  un aller-retour complet (moins de traces, petit clignotement des seules zones).
 bool afficherZones(const uint8_t* plan, int taille) {
   ZonePlan zones[16];
   int n = zonesDuPlan(plan, taille, zones, 16);
   if (n < 0) { Serial.println("Plan partiel illisible : rafraichissement complet"); return false; }
 #if ECRAN_PRESENT
+  uint8_t* img = canvas.getBuffer();
   allumerEcran(false);
-  display.epd2.writeImageAgain(canvas.getBuffer(), 0, 0, LARGEUR, HAUTEUR, true);
-  for (int k = 0; k < n; k++) display.epd2.writeImageToPrevious(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
-  display.epd2.refresh(true);   // partiel sur tout l'ecran : seuls les pixels differents bougent
+  display.epd2.writeImageAgain(img, 0, 0, LARGEUR, HAUTEUR, true);
+  if (plan[0] == 'I') {
+    for (int k = 0; k < n; k++) display.epd2.writeImagePart(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, false);
+    display.epd2.refresh(true);    // zones en negatif
+    for (int k = 0; k < n; k++) {
+      display.epd2.writeImagePartToPrevious(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, false);
+      display.epd2.writeImagePart(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
+    }
+    display.epd2.refresh(true);    // retour a la nouvelle image
+  } else {
+    for (int k = 0; k < n; k++) display.epd2.writeImageToPrevious(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
+    display.epd2.refresh(true);    // partiel sur tout l'ecran : seuls les pixels differents bougent
+    if (plan[0] == 'D') display.epd2.refresh(true);   // memoires inchangees : memes pixels, 2e impulsion
+  }
   eteindreEcran();
 #endif
   return true;
@@ -1375,19 +1395,22 @@ void dormir(uint32_t secondes) {
 void mettreEcranAJour(char type, const uint8_t* plan, int taille) {
   if (empreinteAffichee == 0) type = 'N';       // image a l'ecran inconnue (demarrage) : nettoyage
   if (type == 'R') { ecranEnAttente = false; Serial.println("Ecran : image identique, rien a rafraichir"); return; }
+  bool demandePartiel = strchr("PDI", type) != nullptr;
   if (dernierAffichageMs && millis() - dernierAffichageMs < 180000UL) {
     Serial.println("Ecran : rafraichissement reporte (3 min minimum entre deux)");
     ecranEnAttente = true;
     return;
   }
   unsigned long t0 = millis();
-  bool partiel = type == 'P' && afficherZones(plan, taille);
+  bool partiel = demandePartiel && afficherZones(plan, taille);
   if (!partiel) afficherComplet(type == 'N');
   unsigned long duree = millis() - t0;
   ecranTotalMs += duree;
-  Serial.printf("Ecran : %s en %lu ms\n", partiel ? "mise a jour partielle" : type == 'N' ? "complet avec nettoyage" : "complet", duree);
+  if (partiel) Serial.printf("Ecran : mise a jour partielle (%s) en %lu ms\n", type == 'I' ? "inversion" : type == 'D' ? "double" : "simple", duree);
+  else Serial.printf("Ecran : %s en %lu ms\n", type == 'N' ? "complet avec nettoyage" : "complet", duree);
   empreinteAffichee = empreinteImage(canvas.getBuffer(), OCTETS);
-  if (!partiel) secondesDepuisComplet = 0;
+  if (partiel) partielsDepuisComplet++;
+  else { secondesDepuisComplet = 0; partielsDepuisComplet = 0; }
   dernierAffichageMs = millis();
   ecranEnAttente = false;
 }
@@ -1411,6 +1434,7 @@ uint32_t cycle() {
       // le serveur n'a pas cette image : la prochaine mise a jour sera complete
       empreinteAffichee = empreinteImage(canvas.getBuffer(), OCTETS);
       secondesDepuisComplet = 0;
+      partielsDepuisComplet = 0;
       alerteBatterieAffichee = true;
       derniereSig[0] = 0;
     }
@@ -1503,7 +1527,7 @@ void setup() {
   // Valeurs gardees pendant la veille : remises a zero si elles viennent d'un autre programme (apres une
   // mise a jour, leur place en memoire a pu changer). L'ecran sera alors nettoye au prochain affichage.
   if (strncmp(versionRtc, versionCarte, sizeof versionRtc) != 0) {
-    empreinteAffichee = 0; secondesDepuisComplet = 0; eveilTotalMs = 0; ecranTotalMs = 0;
+    empreinteAffichee = 0; secondesDepuisComplet = 0; partielsDepuisComplet = 0; eveilTotalMs = 0; ecranTotalMs = 0;
     strncpy(versionRtc, versionCarte, sizeof versionRtc - 1);
     versionRtc[sizeof versionRtc - 1] = 0;
   }
