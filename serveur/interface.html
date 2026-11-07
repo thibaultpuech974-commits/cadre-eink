@@ -1197,8 +1197,13 @@ function dessinerStatut() {
       "Le cadre aurait dû se connecter depuis longtemps : batterie vide, Wi-Fi perdu ou carte bloquée ?");
     else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(st.vu).toLocaleString('fr-FR'));
     if (st.bat && st.bat > 2.5) {
-      var pc = pourcentage(st.bat), tension = st.bat.toFixed(2).replace('.', ',') + ' V';
-      ajouter((nom ? nom : 'Batterie ') + pc + ' %' + (st.bat < 3.5 ? ' — à recharger' : ''), st.bat < 3.5 ? 'alerte' : '', tension);
+      // Pourcentage de la jauge de la carte s'il est connu, sinon deduit de la tension
+      var jauge = typeof st.pct === 'number', pc = jauge ? Math.round(Math.min(100, st.pct)) : pourcentage(st.bat);
+      var charge = st.crate >= 2;
+      var detail = st.bat.toFixed(2).replace('.', ',') + ' V' + (jauge ? ', pourcentage mesuré par la jauge' : ', pourcentage estimé d\'après la tension') +
+        (typeof st.crate === 'number' ? ', ' + (st.crate > 0 ? '+' : '') + String(st.crate).replace('.', ',') + ' % par heure' : '');
+      ajouter((nom ? nom : 'Batterie ') + pc + ' %' + (charge ? ' · en charge' : st.bat < 3.5 ? ' — à recharger' : ''),
+        st.bat < 3.5 && !charge ? 'alerte' : '', detail);
     }
     return age <= attendu * 2 + 5 * 60000;
   };
@@ -1609,20 +1614,31 @@ function chargerBatterie() {
   var lire = function (n) { return api('/api/batterie' + (n ? '?ecran=1' : '')).then(function (r) { return r.json(); }).catch(function () { return { pts: [] }; }); };
   return Promise.all(deux ? [lire(0), lire(1)] : [lire(0)]).then(function (h) { histoBat = h; dessinerBatterie(joursBat); });
 }
-// Depuis la derniere recharge : pente (en % par jour) par moindres carres
+// Depuis la derniere recharge : pente (en % par jour) par moindres carres.
+// Les 6 h qui suivent une charge sont ignorees : la tension y redescend d'elle-meme (relaxation de la
+// batterie) sans qu'elle se vide, ce qui ferait croire a une consommation plusieurs fois trop forte.
+// Apres un trou de plus de 12 h (batterie debranchee, carte changee), on repart des mesures suivantes.
 function estimation(pts) {
-  var debut = 0;
-  for (var i = 1; i < pts.length; i++) if (pts[i][1] - pts[i - 1][1] > 80) debut = i;     // +0,08 V : recharge
-  var p = pts.slice(debut).map(function (q) { return [q[0] / 1440, pourcentage(q[1] / 1000)]; });
+  var debut = 0, ch = periodesCharge(pts);
+  if (ch.length) { var apres = ch[ch.length - 1][1] + 6 * 60; while (debut < pts.length && pts[debut][0] < apres) debut++; }
+  for (var i = debut + 1; i < pts.length; i++) if (pts[i][0] - pts[i - 1][0] > 720) debut = i;
+  var p = pts.slice(debut).map(function (q) { return [q[0] / 1440, pctPoint(q)]; });
   if (p.length < 6 || p[p.length - 1][0] - p[0][0] < 0.5) return null;
   var n = p.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
   p.forEach(function (q) { sx += q[0]; sy += q[1]; sxx += q[0] * q[0]; sxy += q[0] * q[1]; });
   var pente = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-  return { pente: pente, depuis: p[0][0], actuel: p[n - 1][1] };
+  return { pente: pente, depuis: p[0][0], actuel: Math.round(p[n - 1][1]) };
 }
-// Periodes de charge : une montee de la tension d'au moins 0,06 V au total. Le chargeur de la XIAO est
-// lent (plus d'une journee pour 3 700 mAh : ~ 0,01 V par heure, a peine plus que le bruit de mesure),
-// donc la charge continue tant que la tension ne retombe pas de plus de 0,02 V sous son maximum.
+// Pourcentage d'un point de l'historique : celui de la jauge de la carte quand il existe (3e valeur, en
+// dixiemes), sinon deduit de la tension (anciennes mesures, ou carte sans jauge)
+function pctPoint(q) {
+  return q.length > 2 && q[2] !== null && q[2] !== undefined ? Math.min(100, q[2] / 10) : pourcentage(q[1] / 1000);
+}
+// Periodes de charge : une montee de la tension d'au moins 0,06 V au total. Une charge lente (~ 0,01 V
+// par heure, a peine plus que le bruit de mesure) continue tant que la tension ne retombe pas de plus de
+// 0,02 V sous son maximum. Mais un palier bruite peut alors s'etirer sur des heures avant une montee
+// franche (chargeur rapide de la Feather : +0,17 V en une heure) : la charge commence donc a la derniere
+// mesure encore au niveau d'avant (a 15 mV pres du plus bas de la periode), pas a la premiere petite hausse.
 // Renvoie [debut, fin, enCours] (minutes) ; enCours : la charge dure jusqu'a la derniere mesure.
 function periodesCharge(pts) {
   var res = [], i = 0;
@@ -1633,10 +1649,32 @@ function periodesCharge(pts) {
       j++;
       if (pts[j][1] >= pts[max][1]) max = j;
     }
+    var bas = pts[deb][1], k;
+    for (k = deb; k < max; k++) bas = Math.min(bas, pts[k][1]);
+    for (k = max - 1; k > deb && pts[k][1] > bas + 15; k--);
+    deb = k;
     if (pts[max][1] - pts[deb][1] >= 60) res.push([pts[deb][0], pts[max][0], j === pts.length - 1]);
     i = Math.max(max, i + 1);
   }
-  return res;
+  // Avec la jauge (4e valeur : vitesse en dixiemes de % par heure), toute mesure faite pendant une charge
+  // (au moins +2 % par heure) en fait partie, depuis la mesure precedente
+  for (var a = 0; a < pts.length; a++) {
+    if (!(pts[a][3] >= 20)) continue;
+    var b = a;
+    while (b + 1 < pts.length && pts[b + 1][3] >= 20 && pts[b + 1][0] - pts[b][0] <= 300) b++;
+    res.push([a && pts[a][0] - pts[a - 1][0] <= 300 ? pts[a - 1][0] : pts[a][0], pts[b][0], b === pts.length - 1]);
+    a = b;
+  }
+  // Periodes qui se chevauchent (trouvees par la tension et par la jauge) : une seule
+  res.sort(function (x, y) { return x[0] - y[0]; });
+  var fusion = [];
+  res.forEach(function (c) {
+    var l = fusion[fusion.length - 1];
+    if (!l || c[0] > l[1]) fusion.push(c.slice());
+    else if (c[1] > l[1]) { l[1] = c[1]; l[2] = c[2]; }
+    else if (c[1] === l[1]) l[2] = l[2] || c[2];
+  });
+  return fusion;
 }
 function dessinerBatterie(jours) {
   joursBat = jours;
@@ -1689,21 +1727,28 @@ function dessinerBatterie(jours) {
     ctx.strokeStyle = cTexte; ctx.lineWidth = 2; ctx.setLineDash(n ? [6, 4] : []);
     ctx.beginPath();
     pts.forEach(function (q, i) {
-      var x = X(q[0]), y = Y(pourcentage(q[1] / 1000));
+      var x = X(q[0]), y = Y(pctPoint(q));
       if (i && q[0] - pts[i - 1][0] > 180) ctx.moveTo(x, y); else if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);   // trou > 3 h : pas de trait
     });
     ctx.stroke(); ctx.setLineDash([]);
     var nom = histoBat.length > 1 ? 'Écran ' + (n + 1) + ' : ' : '';
     // Derniere recharge
     var dc = charges[n][charges[n].length - 1];
-    if (dc && dc[2] && Date.now() / 60000 - dc[1] < 180) texte.push(nom + 'en charge (ou branché) en ce moment.');
+    // En charge d'apres la jauge, au dernier reveil (plus fiable que la tension)
+    var st = statutCourant && (n ? statutCourant.s1 : statutCourant.s);
+    var enCharge = !!(st && st.crate >= 2 && Date.now() - st.vu < 3 * 3600e3) || !!(dc && dc[2] && Date.now() / 60000 - dc[1] < 180);
+    if (st && st.crate >= 2 && Date.now() - st.vu < 3 * 3600e3)
+      texte.push(nom + 'en charge en ce moment (+' + String(st.crate).replace('.', ',') + ' % par heure).');
+    else if (enCharge) texte.push(nom + 'en charge (ou branché) en ce moment.');
     else if (dc) {
       var fin = h.pts.filter(function (q) { return q[0] === dc[1]; })[0];
-      texte.push(nom + 'dernière recharge ' + duree(Date.now() - dc[1] * 60000) + ' (jusqu\'à ' + pourcentage(fin[1] / 1000) + ' %).');
+      texte.push(nom + 'dernière recharge ' + duree(Date.now() - dc[1] * 60000) + ' (jusqu\'à ' + Math.round(pctPoint(fin)) + ' %).');
     } else if (h.pts.length) texte.push(nom + 'pas de recharge sur les 30 derniers jours.');
     var e = estimation(h.pts);
-    if (!h.pts.length) texte.push(nom + 'pas encore de mesure (un point par heure).');
-    else if (!e) texte.push(nom + "pas encore assez de mesures depuis la dernière recharge pour estimer l'autonomie.");
+    if (enCharge) { /* pas d'autonomie pendant une charge */ }
+    else if (!h.pts.length) texte.push(nom + 'pas encore de mesure (un point par heure).');
+    else if (!e) texte.push(nom + (dc ? "autonomie estimée une fois la tension stabilisée, environ 18 h après la recharge."
+      : "pas encore assez de mesures pour estimer l'autonomie (une demi-journée)."));
     else if (e.pente >= -0.2) texte.push(nom + 'la batterie ne baisse presque pas (' + e.actuel + ' %).');
     else {
       var restant = e.actuel / -e.pente;
@@ -1716,6 +1761,23 @@ function dessinerBatterie(jours) {
 }
 // A l'ouverture du menu (si les reglages sont deja charges ; sinon, charger() s'en occupe)
 $('menu-batterie').addEventListener('toggle', function () { if (this.open && config) chargerBatterie(); });
+// Le dessin garde les couleurs du theme du moment ou il est fait : on le refait quand l'iPhone ou l'iPad
+// passe du clair au sombre (ou l'inverse), au retour sur la page, et quand la largeur change (rotation)
+(function () {
+  var redessiner = function () { if (histoBat && $('menu-batterie').open) dessinerBatterie(joursBat); };
+  try {
+    var sombre = window.matchMedia('(prefers-color-scheme: dark)');
+    if (sombre.addEventListener) sombre.addEventListener('change', redessiner); else if (sombre.addListener) sombre.addListener(redessiner);
+  } catch (e) {}
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) redessiner(); });
+  window.addEventListener('pageshow', redessiner);
+  var largeur = 0, attente = null;
+  window.addEventListener('resize', function () {
+    var w = $('courbeBatterie').clientWidth;
+    if (!w || w === largeur) return;
+    largeur = w; clearTimeout(attente); attente = setTimeout(redessiner, 150);
+  });
+})();
 
 // --- Etat de chaque calendrier de l'agenda : accessible ? combien d'evenements ? ---
 var minuteurCal = null, numCal = 0;

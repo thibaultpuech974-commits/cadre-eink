@@ -904,38 +904,47 @@ int rappelJPEG(JPEGDRAW* d) {
   return 1;
 }
 
-// Tramage Floyd-Steinberg d'une image en niveaux de gris vers le canvas
-void tramer(const uint8_t* g, int gl, int gh, int x0, int y0, int w, int h, float contraste) {
-  float* err = (float*)ps_malloc(sizeof(float) * w * h);
-  if (!err) return;
-  for (int y = 0; y < h; y++) {
+// Tramage Floyd-Steinberg d'une image en niveaux de gris vers le canvas.
+// Il ne faut que deux lignes d'erreur (la courante et la suivante) : 2 x w flottants (5 Ko pour 640 px)
+// au lieu de w x h (1,6 Mo, plus que ce qui reste des 2 Mo de PSRAM de la Feather).
+// Renvoie false si la memoire manque.
+bool tramer(const uint8_t* g, int gl, int gh, int x0, int y0, int w, int h, float contraste) {
+  float* tampon = (float*)ps_malloc(sizeof(float) * w * 2);
+  if (!tampon) return false;
+  float* cour = tampon;
+  float* suiv = tampon + w;
+  auto ligne = [&](int y, float* dst) {          // redimensionnement bilineaire d'une ligne
     float sy = (y + 0.5f) * gh / h - 0.5f;
     int ya = max(0, (int)floorf(sy)), yb = min(gh - 1, ya + 1);
     float fy = sy - floorf(sy);
-    for (int x = 0; x < w; x++) {        // redimensionnement bilineaire
+    for (int x = 0; x < w; x++) {
       float sx = (x + 0.5f) * gl / w - 0.5f;
       int xa = max(0, (int)floorf(sx)), xb = min(gl - 1, xa + 1);
       float fx = sx - floorf(sx);
       float v = (g[ya * gl + xa] * (1 - fx) + g[ya * gl + xb] * fx) * (1 - fy) +
                 (g[yb * gl + xa] * (1 - fx) + g[yb * gl + xb] * fx) * fy;
-      err[y * w + x] = (v - 128) * contraste + 128;
+      dst[x] = (v - 128) * contraste + 128;
     }
-  }
+  };
+  ligne(0, cour);
   for (int y = 0; y < h; y++) {
+    if (y + 1 < h) ligne(y + 1, suiv);
     for (int x = 0; x < w; x++) {
-      float ancien = err[y * w + x];
+      float ancien = cour[x];
       float nouveau = ancien < 128 ? 0 : 255;
       float q = ancien - nouveau;
       canvas.drawPixel(x0 + x, y0 + y, nouveau == 0 ? NOIR : BLANC);
-      if (x + 1 < w) err[y * w + x + 1] += q * 7 / 16;
+      if (x + 1 < w) cour[x + 1] += q * 7 / 16;
       if (y + 1 < h) {
-        if (x > 0) err[(y + 1) * w + x - 1] += q * 3 / 16;
-        err[(y + 1) * w + x] += q * 5 / 16;
-        if (x + 1 < w) err[(y + 1) * w + x + 1] += q / 16;
+        if (x > 0) suiv[x - 1] += q * 3 / 16;
+        suiv[x] += q * 5 / 16;
+        if (x + 1 < w) suiv[x + 1] += q / 16;
       }
     }
+    float* t = cour; cour = suiv; suiv = t;
   }
-  free(err);
+  free(tampon);
+  return true;
 }
 
 bool dessinerPochette(uint8_t* jpg, int taille, const char* titre, const char* artiste, const char* album) {
@@ -961,11 +970,11 @@ bool dessinerPochette(uint8_t* jpg, int taille, const char* titre, const char* a
     const int C = 640;
     float e = min((float)C / grisL, (float)C / grisH);
     int w = grisL * e, h = grisH * e;
-    if (portrait) tramer(gris, grisL, grisH, 20 + (C - w) / 2, 20 + (C - h) / 2, w, h, 1.1f);
-    else          tramer(gris, grisL, grisH, 20 + (C - w) / 2, (canvas.height() - h) / 2, w, h, 1.1f);
+    if (portrait) ok = tramer(gris, grisL, grisH, 20 + (C - w) / 2, 20 + (C - h) / 2, w, h, 1.1f);
+    else          ok = tramer(gris, grisL, grisH, 20 + (C - w) / 2, (canvas.height() - h) / 2, w, h, 1.1f);
   }
   free(gris); gris = nullptr;
-  if (!ok) return false;
+  if (!ok) return false;     // decodage ou tramage impossible : pas de pochette a moitie dessinee
 
   // Textes a droite de la pochette (paysage) ou dessous (portrait)
   int x = portrait ? 20 : 690, largeur = portrait ? 640 : 940 - x, y = portrait ? 712 : 90;
@@ -1048,7 +1057,12 @@ bool lireJauge(uint8_t reg, uint16_t& val) {
   return true;
 }
 
-// Renvoie la tension (V) et met a jour pctMesure. 0 si la jauge ne repond pas (pas de batterie).
+// Mesures de la jauge envoyees au serveur (historique de la page web)
+float pctJauge = -1;          // pourcentage au 1/256 pres (-1 : pas de mesure)
+float vitesseJauge = 0;       // registre CRATE : vitesse de charge (+) ou de decharge (-), en % par heure
+bool  vitesseLue = false;
+
+// Renvoie la tension (V) et met a jour pctMesure, pctJauge et vitesseJauge. 0 si la jauge ne repond pas.
 float lireBatterie() {
 #ifdef PIN_I2C_POWER
   pinMode(PIN_I2C_POWER, OUTPUT);   // alimente les resistances de tirage du bus I2C
@@ -1056,8 +1070,8 @@ float lireBatterie() {
   delay(10);
 #endif
   Wire.begin();
-  pctMesure = -1;
-  uint16_t brut = 0, soc = 0;
+  pctMesure = -1; pctJauge = -1; vitesseLue = false;
+  uint16_t brut = 0, soc = 0, crate = 0;
   float v = 0;
   for (int i = 0; i < 20; i++) {
     if (!lireJauge(0x02, brut)) return 0;   // registre VCELL
@@ -1065,8 +1079,13 @@ float lireBatterie() {
     if (v > 1.0f) break;
     delay(50);   // juste apres le branchement de la batterie, la 1re mesure n'est pas prete
   }
-  if (v > 2.5f && lireJauge(0x04, soc))     // registre SOC : % dans l'octet de poids fort
+  if (v > 2.5f && lireJauge(0x04, soc)) {   // registre SOC : % dans l'octet de poids fort, 1/256 % dans l'autre
+    pctJauge = soc / 256.0f;
     pctMesure = min(100, (soc + 128) >> 8);
+  }
+  // Registre CRATE : entier signe, 0,208 % par heure par unite. Assez fin pour voir une charge
+  // (plusieurs % par heure), pas pour la consommation du cadre (~ 0,04 % par heure, sous une unite).
+  if (v > 2.5f && lireJauge(0x16, crate)) { vitesseJauge = (int16_t)crate * 0.208f; vitesseLue = true; }
   return v;
 }
 
@@ -1278,7 +1297,10 @@ void mettreEcranAJour() {
 // Un cycle complet. Renvoie le nombre de secondes avant le suivant.
 uint32_t cycle() {
   float vBat = lireBatterie();
-  Serial.printf("Batterie : %.2f V\n", vBat);
+  Serial.printf("Batterie : %.2f V", vBat);
+  if (pctJauge >= 0) Serial.printf(", jauge %.1f %%", pctJauge);
+  if (vitesseLue) Serial.printf(", %+.1f %%/h", vitesseJauge);
+  Serial.println();
   Serial.printf("Memoire libre : interne %u Ko (plus grand bloc %u Ko), PSRAM %u Ko\n",
                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024, ESP.getFreePsram() / 1024);
@@ -1299,8 +1321,10 @@ uint32_t cycle() {
 
   // 1. Que faut-il afficher ?
   uint8_t* brut = nullptr;
-  char chemin[80];
-  snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
+  char chemin[128];
+  int lg = snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
+  if (pctJauge >= 0) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pct=%.1f", pctJauge);
+  if (vitesseLue) snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
   int n = telecharger(chemin, &brut, 32768);
   if (!n) { free(brut); return reveilSecondes; }
   JsonDocument etat;

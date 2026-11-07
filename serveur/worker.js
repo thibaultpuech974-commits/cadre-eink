@@ -367,10 +367,15 @@ async function routeEtat(url, env) {
     // L'offre gratuite limite les ecritures (~1 000 par jour) : l'etat du cadre n'est enregistre
     // que toutes les 10 min, ou quand quelque chose d'important change (mode, version, batterie).
     const bat = parseFloat(url.searchParams.get('bat'));
+    // Jauge de la carte (MAX17048) : pourcentage et vitesse de charge (+) ou de decharge (-) en % par heure
+    const lu = (nom, min, max) => { const x = parseFloat(url.searchParams.get(nom)); return isNaN(x) ? null : Math.round(Math.max(min, Math.min(max, x)) * 10) / 10; };
+    const pct = lu('pct', 0, 110), crate = lu('crate', -200, 200);
     const cleStatut = ecran ? 'statut' + ecran : 'statut';
     const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null, hb: (ancien && ancien.hb) || 0 };
+    if (pct !== null) nouveau.pct = pct;
+    if (crate !== null) nouveau.crate = crate;
     // Historique de la batterie : un point par heure, 30 jours (24 ecritures par jour au plus)
     let historique = false;
     if (nouveau.bat > 2.5 && maintenant - nouveau.hb >= 55 * 60000) {
@@ -379,13 +384,19 @@ async function routeEtat(url, env) {
         const h = JSON.parse((await env.CADRE.get(cleH)) || '{"pts":[]}');
         const debut = Math.floor((maintenant - 30 * 86400e3) / 60000);
         h.pts = h.pts.filter(p => p[0] >= debut);
-        h.pts.push([Math.floor(maintenant / 60000), Math.round(nouveau.bat * 1000)]);   // minutes, millivolts
+        // minutes, millivolts, et si la carte a une jauge : dixiemes de %, dixiemes de % par heure
+        const p = [Math.floor(maintenant / 60000), Math.round(nouveau.bat * 1000)];
+        if (pct !== null) p.push(Math.round(pct * 10), crate !== null ? Math.round(crate * 10) : null);
+        h.pts.push(p);
         await env.CADRE.put(cleH, JSON.stringify(h));
         nouveau.hb = maintenant; historique = true;
       } catch (e) { /* limite d'ecriture */ }
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
-      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
+      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
+      // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
+      // qu'une vitesse qui hesite autour du seuil en fin de charge n'ecrive pas a chaque reveil)
+      (crate !== null && (ancien.crate >= 2) !== (crate >= 2) && Math.abs(crate - (ancien.crate || 0)) >= 1);
     if (aEcrire) {
       try { await env.CADRE.put(cleStatut, JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
     }
@@ -1363,7 +1374,21 @@ function evenementsICS(texte, debutFenetre, finFenetre) {
   return res;
 }
 
+// Date d'un champ ICS lue comme si elle etait en UTC (sans fuseau) : a 14 h pres, de quoi ecarter vite
+// un evenement tres loin de la fenetre
+function dateNaiveICS(v) {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/.exec(String(v).trim());
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : null;
+}
+
 function occurrences(ev, debutFenetre, finFenetre) {
+  // Evenement unique nettement hors de la fenetre (les centaines d'evenements passes d'un calendrier) :
+  // ecarte sans conversion de fuseau, la partie la plus couteuse. Marge de 2 jours pour les fuseaux.
+  if (!ev.RRULE || ev['RECURRENCE-ID']) {
+    const n0 = dateNaiveICS(ev.DTSTART.v), n1 = ev.DTEND ? dateNaiveICS(ev.DTEND.v) : null;
+    const dn = n1 !== null && n0 !== null ? n1 - n0 : ev.DURATION ? lireDuree(ev.DURATION.v) : 0;
+    if (n0 !== null && (n0 - 2 * 86400e3 >= finFenetre || n0 + Math.max(dn, 86400e3) + 2 * 86400e3 <= debutFenetre)) return [];
+  }
   const ds = lireDateICS(ev.DTSTART.v, ev.DTSTART.p);
   if (!ds) return [];
   let duree;
@@ -1399,16 +1424,35 @@ function occurrences(ev, debutFenetre, finFenetre) {
     if (u) jusqua = u.journee ? u.utc + 86400e3 - 1 : u.utc;
   }
   const NUM = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
-  const parJour = r.BYDAY ? r.BYDAY.split(',').map(s => NUM[s.trim().slice(-2).toUpperCase()]).filter(x => x !== undefined) : [];
+  // BYDAY : jours de la semaine, avec un rang facultatif en mensuel ("2TU" = 2e mardi, "-1FR" = dernier vendredi)
+  const parJourRang = (r.BYDAY || '').split(',').map(s => /^([+-]?\d{1,2})?(SU|MO|TU|WE|TH|FR|SA)$/i.exec(s.trim()))
+    .filter(Boolean).map(m => ({ n: m[1] ? parseInt(m[1], 10) : 0, j: NUM[m[2].toUpperCase()] }));
+  const parJour = parJourRang.map(x => x.j);
+  // BYMONTHDAY : jours du mois ("15", "-1" = dernier jour) ; BYSETPOS : une position parmi les dates du mois
+  const parJourMois = (r.BYMONTHDAY || '').split(',').map(s => parseInt(s, 10)).filter(n => n && Math.abs(n) <= 31);
+  const position = parseInt(r.BYSETPOS || '0', 10) || 0;
   const J = 86400e3;
   const w0 = ds.w;
   const base = Date.UTC(w0.y, w0.m - 1, w0.d);
+  const heureMs = ((w0.hh || 0) * 3600 + (w0.mi || 0) * 60 + (w0.ss || 0)) * 1000;
   const aUTC = dateMs => {
     const d = new Date(dateMs);
     return versUTC({ y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), hh: w0.hh, mi: w0.mi, ss: w0.ss }, ds.tz);
   };
+  // Une date finie bien avant la fenetre n'est pas convertie dans son fuseau (deux appels a Intl, la partie
+  // la plus couteuse) : elle compte seulement pour COUNT. Marge de 2 jours pour l'heure et le fuseau.
+  const avantFenetre = dm => dm + heureMs + Math.max(duree, 0) + 2 * J < debutFenetre;
+  // Sans COUNT, on part directement de la periode qui precede la fenetre, au lieu de tout derouler depuis
+  // la premiere date (un cours hebdomadaire de la rentree, un rappel quotidien de 2005...). Les mois sont
+  // comptes pour 31 jours et les annees pour 366 : on ne saute jamais une periode qui toucherait la fenetre.
+  let k0 = 0;
+  const recul = debutFenetre - Math.max(duree, 0) - 3 * J - base;
+  if (compte === Infinity && recul > 0) {
+    const periode = { DAILY: 1, WEEKLY: 7, MONTHLY: 31, YEARLY: 366 }[freq];
+    if (periode) k0 = Math.floor(recul / (inter * periode * J));
+  }
 
-  for (let k = 0; k < 6000 && compte > 0; k++) {
+  for (let k = k0; k < k0 + 6000 && compte > 0; k++) {
     let dates = [];
     if (freq === 'DAILY') {
       const dm = base + k * inter * J;
@@ -1419,9 +1463,24 @@ function occurrences(ev, debutFenetre, finFenetre) {
         dates = parJour.map(j => lundi + ((j + 6) % 7) * J).sort((a, b) => a - b).filter(x => x >= base);
       } else dates = [base + k * inter * 7 * J];
     } else if (freq === 'MONTHLY') {
-      const debutMois = new Date(Date.UTC(w0.y, w0.m - 1 + k * inter, 1));
-      const nbJ = new Date(Date.UTC(debutMois.getUTCFullYear(), debutMois.getUTCMonth() + 1, 0)).getUTCDate();
-      if (w0.d <= nbJ) dates = [Date.UTC(debutMois.getUTCFullYear(), debutMois.getUTCMonth(), w0.d)];
+      const m = new Date(Date.UTC(w0.y, w0.m - 1 + k * inter, 1));
+      const an = m.getUTCFullYear(), mois = m.getUTCMonth();
+      const nbJ = new Date(Date.UTC(an, mois + 1, 0)).getUTCDate();
+      const jourDuMois = n => (n > 0 ? n : nbJ + 1 + n);
+      let jours = [];
+      if (parJourRang.length) {
+        for (const { n, j } of parJourRang) {
+          const tous = [];
+          for (let d = 1 + ((j - m.getUTCDay() + 7) % 7); d <= nbJ; d += 7) tous.push(d);
+          if (!n) jours.push(...tous);
+          else { const d = n > 0 ? tous[n - 1] : tous[tous.length + n]; if (d) jours.push(d); }
+        }
+        if (parJourMois.length) jours = jours.filter(d => parJourMois.some(n => jourDuMois(n) === d));   // ex. vendredi 13
+      } else if (parJourMois.length) jours = parJourMois.map(jourDuMois);
+      else jours = [w0.d];
+      jours = [...new Set(jours)].filter(d => d >= 1 && d <= nbJ).sort((a, b) => a - b);
+      if (position) { const d = position > 0 ? jours[position - 1] : jours[jours.length + position]; jours = d ? [d] : []; }
+      dates = jours.map(d => Date.UTC(an, mois, d)).filter(x => x >= base);
     } else if (freq === 'YEARLY') {
       const dm = Date.UTC(w0.y + k * inter, w0.m - 1, w0.d);
       if (new Date(dm).getUTCDate() === w0.d) dates = [dm];
@@ -1431,8 +1490,10 @@ function occurrences(ev, debutFenetre, finFenetre) {
     }
     let stop = false;
     for (const dm of dates) {
+      if (compte <= 0) { stop = true; break; }
+      if (avantFenetre(dm)) { compte--; continue; }
       const utc = aUTC(dm);
-      if (utc > jusqua || compte <= 0 || utc >= finFenetre) { stop = true; break; }
+      if (utc > jusqua || utc >= finFenetre) { stop = true; break; }
       compte--;
       ajouter(utc);
     }
