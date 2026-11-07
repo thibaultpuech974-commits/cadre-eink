@@ -231,7 +231,9 @@ async function routeEtat(url, env) {
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
-      ancien.fwko !== nouveau.fwko || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
+      ancien.fwko !== nouveau.fwko ||
+      // carte redemarree (bouton RESET, nouveau programme...) : son compteur d'eveil repart de zero
+      (ev !== null && typeof ancien.ev === 'number' && ev < ancien.ev) || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
       // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
       // qu'une vitesse qui hesite autour du seuil en fin de charge n'ecrive pas a chaque reveil)
       (crate !== null && (ancien.crate >= 2) !== (crate >= 2) && Math.abs(crate - (ancien.crate || 0)) >= 1);

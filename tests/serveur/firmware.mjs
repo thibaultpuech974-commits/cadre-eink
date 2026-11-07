@@ -42,5 +42,12 @@ console.log('plantages :', st.pa, st.ra, typeof st.pat === 'number', '| quand :'
 const pat = st.pat;
 await req('/api/etat?fw=' + v + '&pa=2&ra=W');
 console.log('même compteur : date gardée', JSON.parse(kv.get('statut').v).pat === pat, '| cause :', JSON.parse(kv.get('statut').v).ra);
+// Dernier contact : enregistré au plus toutes les 10 min, sauf si la carte vient de redémarrer
+const ilYa = Date.now() - 5 * 60000;
+kv.set('statut', { v: JSON.stringify(Object.assign(JSON.parse(kv.get('statut').v), { vu: ilYa, ev: 50000, ee: 1000 })) });
+await req('/api/etat?fw=' + v + '&ev=60000&ee=1000');
+const vuSansRedemarrage = JSON.parse(kv.get('statut').v).vu === ilYa;
+await req('/api/etat?fw=' + v + '&ev=3000&ee=0');
+console.log('contact 5 min après : pas d\'écriture', vuSansRedemarrage, '| carte redémarrée : enregistré', JSON.parse(kv.get('statut').v).vu > ilYa);
 await req('/api/firmware', { method: 'DELETE' });
 console.log('après retrait -> fw proposé :', await etat('20261001-120000'), '| binaire :', (await req('/api/firmware.bin')).status);
