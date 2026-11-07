@@ -5,7 +5,7 @@ Le projet a trois parties :
 | Partie | Fichier | Rôle |
 |---|---|---|
 | Serveur web | `serveur/` : `worker.js` (serveur), `interface.html` (page web), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
-| Carte ESP32 | `cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
+| Carte ESP32 | `carte/cadre_eink/cadre_eink.ino` | Se réveille, demande quoi afficher, dessine, se rendort |
 | Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
 
 Le cadre n'a plus besoin de l'horloge DS3231 : tu peux la laisser branchée ou la retirer.
@@ -66,7 +66,7 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
    - `CLE` : le même mot de passe que dans Cloudflare
    - `ACCES_ID` et `ACCES_SECRET` : le jeton de service du cadre si tu utilises Cloudflare Access (partie 1 bis), sinon laisse-les vides
-   - `ECRAN_PRESENT` : mets **0** tant que tu n'as pas la nouvelle dalle. La carte dessine quand même et envoie l'image à l'aperçu web.
+   - `ECRAN_PRESENT` : laisse **1** quand l'écran est branché. À **0**, la carte fonctionne sans écran : elle dessine quand même et envoie l'image à l'aperçu web.
 4. Téléverse, puis ouvre le moniteur série (115200 bauds) pour suivre le premier réveil.
 5. Quelques secondes plus tard, l'aperçu apparaît dans l'interface web.
 
@@ -200,7 +200,10 @@ Le calendrier vient de l'API libre Jolpica (ex-Ergast). Les tracés viennent du 
 
 - Le cadre se réveille selon l'intervalle choisi dans l'interface (10 min par défaut), se connecte quelques secondes, puis se rendort. Il retient les réglages de la connexion Wi-Fi précédente pour se reconnecter en 1 s environ.
 - **Mode nuit** (section Réveil du cadre) : pendant la plage choisie, par exemple de 23:00 à 07:00, le cadre ne se réveille que toutes les 30, 60 ou 120 min. Il se réveille tout seul à la fin de la nuit, et au début de chaque scène. Une scène qui a son propre rythme l'emporte sur le mode nuit.
-- L'écran ne se rafraîchit **que si le contenu a changé** (environ une fois par heure pour la météo), et au moins une fois par jour pour le préserver.
+- L'écran ne se rafraîchit **que si le contenu a changé**, et au moins une fois par jour pour le préserver.
+- **Rafraîchissement commandé par le serveur** (menu Réveil du cadre) : la carte envoie l'image qu'elle vient de dessiner, et le serveur la compare à l'image affichée. Si peu de choses changent, il renvoie les zones concernées et la carte fait une **mise à jour partielle** (environ 0,6 s, sans clignotement). Sinon, rafraîchissement complet (environ 4,5 s) : quand plus de 40 % de l'écran change (réglable), pour une photo, une pochette ou l'écran blanc. Avec un **nettoyage** (l'écran passe d'abord au blanc, environ 9 s) au démarrage de la carte et au moins une fois toutes les 24 h (réglable), comme le conseille le fabricant de l'écran. La carte garde l'empreinte de l'image vraiment affichée : en cas de doute (rafraîchissement raté ou reporté), le serveur demande un rafraîchissement complet. La pastille « Image de … » indique comment la dernière image a été affichée.
+- Le Wi-Fi est coupé pendant le rafraîchissement de l'écran (sauf en mode développement).
+- **Temps d'éveil** (menu Batterie) : la carte compte le temps passé hors veille, et le temps d'écran, et les envoie au réveil suivant. La page affiche les secondes d'éveil par jour : le meilleur indicateur de consommation sans multimètre.
 - Les changements faits dans l'interface s'appliquent au prochain réveil.
 - **Graphique de batterie** (menu Batterie) : les périodes de charge sont grisées et marquées « en charge » : celles où la jauge de la carte mesure une charge (au moins +2 % par heure), ou où la tension monte nettement (au moins +60 mV). Sous le graphique, une ligne indique la dernière recharge (« il y a 2 jours, jusqu'à 100 % ») ou « en charge en ce moment ». Le pourcentage est celui de la jauge MAX17048 de la Feather ; pour les mesures plus anciennes, il est déduit de la tension. L'autonomie est estimée à partir de 6 h après une recharge (avant, la tension redescend d'elle-même) ; il faut donc environ 18 h de mesures. La vitesse de la jauge (0,2 % par heure par cran) sert à repérer les charges : la consommation du cadre, bien plus faible, se lit sur la pente du pourcentage.
 - **Avant une longue absence** : bouton **Écran blanc**, attends que l'aperçu devienne blanc, puis débranche la batterie. Au retour, rebranche-la et choisis un mode dans l'interface.

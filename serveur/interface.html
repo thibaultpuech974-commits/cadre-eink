@@ -317,6 +317,10 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <label>De <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto"></label>
   <label>Réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
   <p class="aide repliable">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
+  <label style="margin-top:12px"><input type="checkbox" id="partiel"> Mises à jour partielles de l'écran</label>
+  <label>Rafraîchissement complet au moins toutes les <select id="completH" style="width:auto"><option>6</option><option>12</option><option>24</option></select> h</label>
+  <label>Complet dès que plus de <select id="seuilPartiel" style="width:auto"><option>20</option><option>40</option><option>60</option></select> % de l'écran change</label>
+  <p class="aide repliable">Quand peu de choses changent (température, heure d'un bus), seules ces zones sont redessinées : environ 0,6 s sans clignotement, au lieu de 4,5 s pour un rafraîchissement complet. Le cadre repasse en complet quand une grande partie de l'écran change, pour une photo ou une pochette, et avec un nettoyage (l'écran passe d'abord au blanc) à son démarrage et au moins une fois par période choisie, comme le conseille le fabricant de l'écran. Si des traces d'anciennes images apparaissent, raccourcis cette période ou décoche les mises à jour partielles.</p>
   <div class="msg" id="msgReveil"></div>
 </details>
 
@@ -1163,7 +1167,7 @@ function duree(ms) {
   return 'il y a ' + Math.round(h / 24) + ' jours';
 }
 var NOMS = { tableau: 'tableau de bord', photo: 'photo', pochette: 'pochette', blanc: 'écran blanc' };
-var statutCourant = null, dateApercu = 0;
+var statutCourant = null, dateApercu = 0, planApercu = '';
 function afficherStatut(s, maintenant, s1) {
   dernierStatut = s;
   statutCourant = { s: s, maintenant: maintenant, s1: s1 };
@@ -1177,6 +1181,16 @@ function afficherStatut(s, maintenant, s1) {
   else if (config.dev) aide = "Mode développement actif : le changement s'applique dans " + config.devSecondes + ' s environ.';
   else aide = "Le changement s'applique au prochain réveil du cadre (dans " + config.reveilMin + ' min au plus).';
   $('aideMode').textContent = aide;
+}
+// Comment l'ecran a ete rafraichi pour la derniere image (plan du serveur : "P;2;3", "C;seuil", "N;quotidien", "R")
+function decrirePlan(p) {
+  var m = String(p || '').split(';');
+  if (m[0] === 'P') return { court: 'partielle', long: 'mise à jour partielle, ' + m[1] + (m[1] === '1' ? ' zone' : ' zones') + ' (' + m[2] + ' % de l\'écran)' };
+  if (m[0] === 'R') return { court: 'identique', long: 'image identique, écran non rafraîchi' };
+  var raisons = { seuil: 'trop de changements', inconnue: 'image à l\'écran inconnue', desactive: 'mises à jour partielles désactivées',
+    mode: 'photo, pochette ou écran blanc', orientation: 'orientation changée', demarrage: 'démarrage de la carte', quotidien: 'nettoyage régulier' };
+  if (m[0] === 'C' || m[0] === 'N') return { court: 'complète', long: 'rafraîchissement complet' + (m[0] === 'N' ? ' avec nettoyage' : '') + (raisons[m[1]] ? ' (' + raisons[m[1]] + ')' : '') };
+  return null;     // ancien programme de la carte
 }
 // Pastilles : connexion, batterie, prochain reveil, scene, ecran 2, date de l'image
 function dessinerStatut() {
@@ -1217,8 +1231,9 @@ function dessinerStatut() {
   if (config.ecrans && config.ecrans.nb === 2) connexion(s1, 'Écran 2 : ');
   if (dateApercu) {
     var d = new Date(dateApercu), auj = new Date().toDateString() === d.toDateString();
-    ajouter('Image de ' + (auj ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })), 'doux',
-      'Image envoyée par le cadre le ' + d.toLocaleString('fr-FR'));
+    var pl = decrirePlan(planApercu);
+    ajouter('Image de ' + (auj ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })) +
+      (pl ? ' · ' + pl.court : ''), 'doux', 'Image envoyée par le cadre le ' + d.toLocaleString('fr-FR') + (pl ? '\nÉcran : ' + pl.long : ''));
   }
 }
 
@@ -1246,8 +1261,8 @@ function dessinerBits(canvas, octets, w, h) {
 }
 function lireApercu(n) {
   return api('/api/apercu' + (n ? '?ecran=1' : '')).then(function (r) {
-    var t = +r.headers.get('x-date'), rr = +(r.headers.get('x-rotation') || 0);
-    return r.arrayBuffer().then(function (b) { return { t: t, rr: rr, l: physVersLog(new Uint8Array(b), rr) }; });
+    var t = +r.headers.get('x-date'), rr = +(r.headers.get('x-rotation') || 0), plan = r.headers.get('x-plan') || '';
+    return r.arrayBuffer().then(function (b) { return { t: t, rr: rr, plan: plan, l: physVersLog(new Uint8Array(b), rr) }; });
   }).catch(function () { return null; });
 }
 function chargerApercu() {
@@ -1271,6 +1286,7 @@ function chargerApercu() {
       }
     });
     dateApercu = Math.max.apply(null, ok.map(function (a) { return a.t || 0; }));
+    planApercu = ok[0].plan;
     dessinerStatut();
   }).catch(function () {
     var cv = $("apercu"); cv.width = LARG; cv.height = HAUT; formeEcran(cv, 0, LARG, HAUT);
@@ -1299,6 +1315,9 @@ function remplirFormulaires() {
   var n = config.nuit || {};
   $('nuitActif').checked = !!n.actif; $('nuitDebut').value = heure2(n.debut) || '23:00'; $('nuitFin').value = heure2(n.fin) || '07:00';
   choisirValeur($('nuitIntervalle'), n.intervalleMin || 60);
+  var rf = config.rafraich || {};
+  $('partiel').checked = rf.partiel !== false;
+  choisirValeur($('completH'), rf.completH || 24); choisirValeur($('seuilPartiel'), rf.seuil || 40);
   $('bordure').value = String(config.affichage.bordureApercu); appliquerBordure();
   var p = config.pochette;
   if (p.version) $('pochetteActuelle').textContent = 'Dernière pochette : ' + (p.titre || '?') + ' — ' + (p.artiste || '?') + ' (' + new Date(p.t).toLocaleString('fr-FR') + ')';
@@ -1343,7 +1362,8 @@ function modificationsCourantes() {
     meteo: lireMeteo(), agenda: lireAgenda(), bus: lireBus(),
     reveilMin: +$('reveil').value, dev: $('dev').checked, devSecondes: +$('devSecondes').value,
     nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
-      intervalleMin: +$('nuitIntervalle').value } };
+      intervalleMin: +$('nuitIntervalle').value },
+    rafraich: { partiel: $('partiel').checked, completH: +$('completH').value, seuil: +$('seuilPartiel').value } };
 }
 // Detail des differences (reglage : enregistre -> actuel), pour comprendre ce que la page croit modifie
 function detailModifs() {
@@ -1373,7 +1393,7 @@ function prendreReference() { reference = JSON.stringify(modificationsCourantes(
 function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
 // Menus dont les reglages different de ceux enregistres
 var PARTIES = [['Scènes', ['disposition', 'dispositionPortrait', 'scenes']], ['Montage', ['ecrans', 'affichage']],
-  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit']]];
+  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'rafraich']]];
 function partiesModifiees() {
   var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes()));
   return PARTIES.filter(function (p) { return p[1].some(function (k) { return JSON.stringify(r[k]) !== JSON.stringify(c[k]); }); })
@@ -1629,6 +1649,22 @@ function estimation(pts) {
   var pente = (n * sxy - sx * sy) / (n * sxx - sx * sx);
   return { pente: pente, depuis: p[0][0], actuel: Math.round(p[n - 1][1]) };
 }
+// Temps d'eveil et d'ecran par jour sur les dernieres 24 h, d'apres les compteurs cumules de la carte
+// (5e et 6e valeurs des points, en dixiemes de seconde). Un compteur qui baisse = carte redemarree.
+function eveilParJour(pts) {
+  var dernier = pts.length ? pts[pts.length - 1][0] : 0;
+  var p = pts.filter(function (q) { return q[0] >= dernier - 1440 && q.length > 5 && q[4] !== null; });
+  if (p.length < 2 || p[p.length - 1][0] - p[0][0] < 180) return null;
+  var ev = 0, ee = 0;
+  for (var i = 1; i < p.length; i++) {
+    var dv = p[i][4] - p[i - 1][4], de = p[i][5] - p[i - 1][5];
+    ev += dv >= 0 ? dv : p[i][4];
+    ee += de >= 0 ? de : p[i][5];
+  }
+  var jours = (p[p.length - 1][0] - p[0][0]) / 1440;
+  return { eveil: ev / 10 / jours, ecran: ee / 10 / jours };
+}
+function enMinSec(s) { s = Math.round(s); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + ('0' + s % 60).slice(-2) + ' s'; }
 // Pourcentage d'un point de l'historique : celui de la jauge de la carte quand il existe (3e valeur, en
 // dixiemes), sinon deduit de la tension (anciennes mesures, ou carte sans jauge)
 function pctPoint(q) {
@@ -1755,6 +1791,9 @@ function dessinerBatterie(jours) {
       texte.push(nom + 'environ ' + (-e.pente).toFixed(1).replace('.', ',') + ' % par jour : il reste à peu près ' +
         (restant < 2 ? Math.round(restant * 24) + ' heures' : Math.round(restant) + ' jours') + ' (' + e.actuel + ' %).');
     }
+    // Temps passe hors veille : le meilleur indicateur de consommation sans multimetre
+    var ev = eveilParJour(h.pts);
+    if (ev) texte.push(nom + 'éveillé ' + enMinSec(ev.eveil) + ' par jour, dont ' + enMinSec(ev.ecran) + " d'écran (dernières 24 h).");
   });
   $('resumeBatterie').textContent = texte.join('\n') + (histoBat.length > 1 ? '\nTrait plein : écran 1, pointillés : écran 2.' : '');
   $('resumeBatterie').style.whiteSpace = 'pre-line';

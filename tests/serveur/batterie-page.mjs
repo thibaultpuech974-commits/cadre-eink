@@ -8,8 +8,8 @@ const extrait = nom => {
     if (page[k] === '}' && --n === 0) return page.slice(i, k + 1);
   }
 };
-const { periodesCharge, estimation } = new Function(['pourcentage', 'pctPoint', 'periodesCharge', 'estimation'].map(extrait).join('\n') +
-  '\nreturn { pourcentage, periodesCharge, estimation };')();
+const { periodesCharge, estimation, eveilParJour, enMinSec } = new Function(['pourcentage', 'pctPoint', 'periodesCharge', 'estimation', 'eveilParJour', 'enMinSec'].map(extrait).join('\n') +
+  '\nreturn { pourcentage, periodesCharge, estimation, eveilParJour, enMinSec };')();
 const min = iso => Math.floor(Date.parse(iso) / 60000);
 // Heure d'hiver de Paris (UTC+1), sans dépendre des données de langue de la machine qui lance les tests
 const heure = m => { const d = new Date((m + 60) * 60000), p = n => String(n).padStart(2, '0');
@@ -62,3 +62,10 @@ console.log('jauge : charge', charges(jauge), '| autonomie', autonomie(jauge));
 const pleine = [];
 for (let k = 0; k < 6; k++) pleine.push([min('2026-10-28T08:00+01:00') + k * 60, 4150 + bruit(3), 960, k >= 3 ? 25 : 0]);
 console.log('presque pleine :', charges(pleine));
+
+// 7. Temps d'éveil : compteurs cumulés (dixièmes de s) ; 5 s d'éveil dont 2 s d'écran par heure.
+//    La carte redémarre au milieu (compteurs remis à zéro) : le calcul ne devient pas négatif
+const eveil = [];
+for (let k = 0; k < 24; k++) eveil.push([min('2026-11-08T00:00+01:00') + k * 60, 4050, 800, 0, k < 12 ? 50 * k : 30 + 50 * (k - 12), k < 12 ? 20 * k : 10 + 20 * (k - 12)]);
+const e7 = eveilParJour(eveil);
+console.log('éveil :', enMinSec(e7.eveil), 'par jour, dont', enMinSec(e7.ecran), "d'écran | sans compteurs :", eveilParJour(jauge));
