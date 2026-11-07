@@ -1,6 +1,5 @@
 tests/rendu/libs/
 tests/rendu/rendu
-tests/rendu/ino_arduino.cpp
 tests/rendu/r3_*
 tests/serveur/node_modules/
 *.bin
