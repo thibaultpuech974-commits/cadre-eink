@@ -35,7 +35,7 @@ const ATTENDU = {
     /session jeton : \{"access":true,"email":""\}/, /pochette par jeton : 200 So What/, /secours sans cle : 401/,
     /secours avec cle : 200/, /session secours : \{"access":false\}/, /rien de configure : 500/],
   'batterie.mjs': [/288 réveils : 48 écritures, 48 points, de 4100 à 3904 mV/, /après 40 jours : 1 point/, /sans mesure : rien enregistré/,
-    /jauge : état 85\.3 12\.5 \| point \[4050,853,125\]/, /fin de charge enregistrée : 0$/m, /valeurs bornées : 110 -200/],
+    /jauge : état 85\.3 12\.5 \| point \[4050,853,125\]/, /fin de charge enregistrée : 0$/m, /valeurs bornées : 110 -200/, /seuil hésitant, 20 réveils en 10 min : 1 écriture\(s\)/],
   'agenda-recurrences.mjs': [
     /mensuel : Mar 10 18:00 2e mardi \| Ven 27 19:00 Dernier vendredi \| Lun 30 09:00 Fin de mois \| Mar 1 07:00 1er jour ouvré \| Mar 8 18:00 2e mardi \| Ven 25 19:00 Dernier vendredi \| Jeu 31 09:00 Fin de mois \| Ven 1 07:00 1er jour ouvré$/m,
     /divers : Aujourd'hui 18:00 Footing \| Aujourd'hui 20:00 Projet \| Demain 18:00 Footing \| Demain 20:00 Projet \| Lun 9 20:00 Projet \| Jeu 12 14:00 Code de la route \| Sam 14 18:00 Footing \| Dim 15 18:00 Footing \| Mer 18 17:00 Club \| Jeu 19 14:00 Code de la route$/m,

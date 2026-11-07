@@ -38,3 +38,12 @@ kv.delete('statut');
 await req('/api/etat?bat=4.05&pct=900&crate=-9999');
 st = JSON.parse(kv.get('statut').v);
 console.log('valeurs bornées :', st.pct, st.crate);
+// Mode développement (réveil toutes les 30 s), fin de charge : une vitesse qui hésite autour du seuil
+// (+1,9 / +2,1 % par heure) ne réécrit pas l'état à chaque réveil
+let ecrituresStatut = 0; const set1 = kv.set.bind(kv);
+kv.set = (k, v) => { if (k === 'statut') ecrituresStatut++; return set1(k, v); };
+for (let i = 0; i < 20; i++) {
+  horloge(new Date(t0 + 43 * 86400e3 + i * 30e3).toISOString());
+  await req('/api/etat?bat=4.18&pct=99&crate=' + (i % 2 ? '1.9' : '2.1'));
+}
+console.log('seuil hésitant, 20 réveils en 10 min :', ecrituresStatut, 'écriture(s)');

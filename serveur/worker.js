@@ -394,7 +394,9 @@ async function routeEtat(url, env) {
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
-      (crate !== null && (ancien.crate >= 2) !== (crate >= 2));          // debut ou fin de charge : la page le montre tout de suite
+      // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
+      // qu'une vitesse qui hesite autour du seuil en fin de charge n'ecrive pas a chaque reveil)
+      (crate !== null && (ancien.crate >= 2) !== (crate >= 2) && Math.abs(crate - (ancien.crate || 0)) >= 1);
     if (aEcrire) {
       try { await env.CADRE.put(cleStatut, JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
     }
