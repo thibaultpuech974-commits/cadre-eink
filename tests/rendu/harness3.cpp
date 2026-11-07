@@ -23,5 +23,9 @@ int main() {
   sauver("r3_pochette_portrait", 1);
   canvas.setRotation(3);
   dessinerMessage("Batterie vide", "Rechargez le cadre"); sauver("r3_message_portrait3", 3);
+  canvas.setRotation(0);
+  dessinerHorsLigne("Serveur injoignable", "sam. 7 novembre à 14:05"); sauver("r3_hors_ligne", 0);
+  canvas.setRotation(1);
+  dessinerHorsLigne("Wi-Fi introuvable", ""); sauver("r3_hors_ligne_portrait", 1);
   return 0;
 }

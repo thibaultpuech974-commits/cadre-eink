@@ -28,5 +28,19 @@ console.log('carte plus récente            -> fw proposé :', await etat('20261
 console.log('carte sans version            -> fw proposé :', await etat(''));
 const b = await req('/api/firmware.bin?cle=secret', { headers: {} }); console.log('téléchargement :', b.status, (await b.arrayBuffer()).byteLength);
 console.log('statut fw :', JSON.parse(kv.get('statut').v).fw);
+// Programme refusé par la carte (retour arrière) : plus proposé ; 3 téléchargements sans succès : plus proposé
+console.log('programme refusé par la carte -> fw proposé :', await etat('20261001-120000&fwko=' + v));
+console.log('refus enregistré :', JSON.parse(kv.get('statut').v).fwko === v);
+await req('/api/firmware.bin'); await req('/api/firmware.bin');
+console.log('après 3 téléchargements -> fw proposé :', await etat('20261001-120000'));
+await req('/api/firmware?v=' + v + '&nom=cadre_eink.ino.bin', { method: 'POST', body: bin });
+console.log('renvoyé -> fw proposé :', await etat('20261001-120000'));
+// Redémarrages anormaux signalés par la carte, et date de la réponse (écran "Hors ligne")
+const r1 = await (await req('/api/etat?fw=' + v + '&pa=2&ra=W')).json();
+const st = JSON.parse(kv.get('statut').v);
+console.log('plantages :', st.pa, st.ra, typeof st.pat === 'number', '| quand :', /^(lun|mar|mer|jeu|ven|sam|dim)\. \d{1,2} [a-zéû]+ à \d\d:\d\d$/.test(r1.quand));
+const pat = st.pat;
+await req('/api/etat?fw=' + v + '&pa=2&ra=W');
+console.log('même compteur : date gardée', JSON.parse(kv.get('statut').v).pat === pat, '| cause :', JSON.parse(kv.get('statut').v).ra);
 await req('/api/firmware', { method: 'DELETE' });
 console.log('après retrait -> fw proposé :', await etat('20261001-120000'), '| binaire :', (await req('/api/firmware.bin')).status);

@@ -33,7 +33,7 @@ import INTERFACE from './interface.html';
 // Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
 import APERCU_WASM from './apercu.wasm';
 import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.js';
-import { dateDuJour, deux, mural } from './temps.js';
+import { JOURS_COURTS, MOIS, dateDuJour, deux, mural } from './temps.js';
 import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
 import { ROTATIONS } from './disposition.js';
 import { reveilNuit } from './scenes.js';
@@ -90,7 +90,7 @@ export default {
       if (chemin === '/api/bus-index' && m === 'POST') return await routeIndexBus(req, env);
       if (chemin === '/api/firmware' && m === 'POST') return await routeEnvoyerFirmware(req, url, env);
       if (chemin === '/api/firmware' && m === 'DELETE') return await routeRetirerFirmware(env);
-      if (chemin === '/api/firmware.bin' && m === 'GET') return await routeBinaire(env, 'firmware', 'application/octet-stream');
+      if (chemin === '/api/firmware.bin' && m === 'GET') return await routeTelechargerFirmware(env);
       if (chemin === '/api/bus-test' && m === 'GET') return json(await prochainsBus((await lireConfig(env)).bus, Date.now(), env, true));
       return texte('Route inconnue', 404);
     } catch (e) {
@@ -162,9 +162,15 @@ async function routeEtat(url, env) {
   // Mise a jour par Wi-Fi : proposee seulement si le programme envoye est plus recent que celui de la carte
   // (versions "AAAAMMJJ-hhmmss" : date de compilation)
   const fwCarte = VERSION_FW.test(url.searchParams.get('fw') || '') ? url.searchParams.get('fw') : null;
-  if (cfg.firmware && fwCarte && cfg.firmware.version > fwCarte) etat.fw = cfg.firmware.version;
+  // Programme que la carte a essaye sans succes (elle est revenue au precedent) : plus propose. Et apres
+  // 3 telechargements sans changement de version, on arrete aussi (ancien programme sans retour arriere).
+  const fwko = VERSION_FW.test(url.searchParams.get('fwko') || '') ? url.searchParams.get('fwko') : null;
+  if (cfg.firmware && fwCarte && cfg.firmware.version > fwCarte && cfg.firmware.version !== fwko &&
+      (cfg.firmware.telech || 0) < 3) etat.fw = cfg.firmware.version;
   const w = mural(maintenant);
   etat.maj = deux(w.hh) + ':' + deux(w.mi);
+  // Date de cette reponse, que la carte affiche si elle perd ensuite le contact ("Hors ligne")
+  etat.quand = JOURS_COURTS[w.js].toLowerCase() + '. ' + w.d + ' ' + MOIS[w.m - 1] + ' à ' + etat.maj;
   // Ecart maximal entre deux rafraichissements complets (s) : la carte redessine au plus tard a ce moment,
   // meme sans changement, pour que le serveur puisse commander le rafraichissement complet du jour
   etat.cp = ((cfg.rafraich && cfg.rafraich.completH) || 24) * 3600;
@@ -180,6 +186,8 @@ async function routeEtat(url, env) {
     // secondes d'eveil par jour, sans ecriture de plus (ils voyagent avec l'etat et l'historique)
     const entier = nom => { const x = parseInt(url.searchParams.get(nom), 10); return isNaN(x) || x < 0 ? null : Math.min(x, 4294967295); };
     const ev = entier('ev'), ee = entier('ee');
+    // Redemarrages anormaux de la carte depuis sa mise sous tension, et cause du dernier
+    const pa = entier('pa'), ra = /^[PWBL]$/.test(url.searchParams.get('ra') || '') ? url.searchParams.get('ra') : null;
     const cleStatut = ecran ? 'statut' + ecran : 'statut';
     const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
@@ -187,6 +195,12 @@ async function routeEtat(url, env) {
     if (pct !== null) nouveau.pct = pct;
     if (crate !== null) nouveau.crate = crate;
     if (ev !== null) { nouveau.ev = ev; nouveau.ee = ee || 0; }
+    // Plantages : date du dernier (quand le compteur de la carte augmente), pour la page
+    if (pa) { nouveau.pa = pa; nouveau.ra = ra; }
+    nouveau.pat = (ancien && ancien.pat) || null;
+    if (pa && (!ancien || pa > (ancien.pa || 0) || ra !== ancien.ra)) nouveau.pat = maintenant;
+    if (!nouveau.pat) delete nouveau.pat;
+    if (fwko) nouveau.fwko = fwko;
     // Historique de la batterie : un point par heure, 30 jours (24 ecritures par jour au plus)
     let historique = false;
     if (nouveau.bat > 2.5 && maintenant - nouveau.hb >= 55 * 60000) {
@@ -206,7 +220,8 @@ async function routeEtat(url, env) {
       } catch (e) { /* limite d'ecriture */ }
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
-      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
+      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
+      ancien.fwko !== nouveau.fwko || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
       // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
       // qu'une vitesse qui hesite autour du seuil en fin de charge n'ecrive pas a chaque reveil)
       (crate !== null && (ancien.crate >= 2) !== (crate >= 2) && Math.abs(crate - (ancien.crate || 0)) >= 1);
@@ -373,6 +388,18 @@ async function routeBinaire(env, cle, type) {
 }
 // --- Programme de la carte (mise a jour par Wi-Fi) ---
 const VERSION_FW = /^\d{8}-\d{6}$/;
+// Telechargement par la carte : compte, pour ne plus proposer un programme qu'elle n'arrive pas a garder
+async function routeTelechargerFirmware(env) {
+  const rep = await routeBinaire(env, 'firmware', 'application/octet-stream');
+  if (rep.status === 200) {
+    const cfg = await lireConfig(env);
+    if (cfg.firmware) {
+      cfg.firmware.telech = (cfg.firmware.telech || 0) + 1;
+      try { await ecrireConfig(env, cfg); } catch (e) { /* limite d'ecriture : sans gravite */ }
+    }
+  }
+  return rep;
+}
 async function routeEnvoyerFirmware(req, url, env) {
   const version = url.searchParams.get('v') || '';
   if (!VERSION_FW.test(version)) return texte('Version du programme manquante', 400);

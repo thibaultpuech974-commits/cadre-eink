@@ -41,6 +41,10 @@ const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 #include <driver/gpio.h>
 #include <esp_sleep.h>
 #include <esp_heap_caps.h>
+#include <esp_ota_ops.h>
+#include <esp_timer.h>
+#include <esp_system.h>
+#include <Preferences.h>
 
 // --- Broches (Feather ESP32-S3) ---
 // Ecran : DIN -> MO, CLK -> SCK, VCC -> 3V, GND -> GND
@@ -89,6 +93,27 @@ RTC_DATA_ATTR uint32_t partielsDepuisComplet = 0;   // mises a jour partielles d
 RTC_DATA_ATTR uint32_t eveilTotalMs = 0;            // temps passe hors veille, cumule
 RTC_DATA_ATTR uint32_t ecranTotalMs = 0;            // dont temps de rafraichissement de l'ecran
 RTC_DATA_ATTR char     versionRtc[16] = "";         // programme qui a ecrit ces valeurs
+// Garde-fou contre les plantages (voir setup). Les variables RTC_DATA_ATTR reprennent leur valeur de
+// depart a chaque redemarrage (sauf au reveil de veille) : ces compteurs sont donc dans la memoire RTC
+// "non initialisee", qui survit a un plantage. Au branchement de la batterie elle contient n'importe quoi :
+// 'magie' et 'version' disent si son contenu est valable.
+struct GardeFou {
+  uint32_t magie;
+  char     version[16];   // programme qui a ecrit ces valeurs
+  uint8_t  dAffilee;      // redemarrages anormaux sans cycle termine entre eux
+  uint16_t total;         // depuis la mise sous tension (envoye au serveur)
+  char     dernier;       // 'P' plantage, 'W' chien de garde, 'B' tension trop basse, 'L' cycle trop long
+  bool     tropLong;      // le dernier redemarrage vient du garde-fou de duree
+};
+RTC_NOINIT_ATTR GardeFou gf;
+const uint32_t MAGIE_GF = 0x6A4D0F11;
+// Hors ligne : temps passe sans reponse du serveur, et ecran "Hors ligne" (voir echecContact)
+RTC_DATA_ATTR uint32_t secondesSansContact = 0;     // depuis la derniere reponse du serveur
+RTC_DATA_ATTR uint8_t  echecsDAffilee = 0;
+RTC_DATA_ATTR bool     horsLigneAffiche = false;
+RTC_DATA_ATTR char     dernieresNouvelles[40] = ""; // date de la derniere reponse (ecrite par le serveur)
+RTC_DATA_ATTR int8_t   rotationEcran = 0;           // orientation de la derniere image
+RTC_DATA_ATTR char     dernierMode = 0;             // 't' tableau, 'p' photo, 'c' pochette, 'b' blanc (0 : inconnu)
 
 // Jauge de batterie MAX17048 de la Feather. On lit ses registres directement, sans
 // bibliotheque : la puce reste alimentee par la batterie pendant la veille et suit la
@@ -210,11 +235,72 @@ String encoderURL(const char* s) {
   return r;
 }
 
+// ---------------------------------------------------------------------
+//  Retour arriere apres une mise a jour par Wi-Fi
+//
+//  Un nouveau programme demarre "a l'essai" : il n'est garde qu'une fois qu'il a joint le serveur (il
+//  pourra donc recevoir un correctif par Wi-Fi). S'il plante avant, ou n'arrive pas a joindre le serveur,
+//  la carte revient toute seule au programme precedent, qui ne l'installera plus (version refusee,
+//  signalee a la page web). La version a l'essai et la version refusee sont gardees en memoire flash
+//  (Preferences) : elles doivent survivre au changement de programme.
+// ---------------------------------------------------------------------
+// Sans cette fonction, le coeur Arduino validerait le nouveau programme des son demarrage
+bool verifyRollbackLater() { return true; }
+
+bool enEssai = false;            // ce programme vient d'etre installe et n'a pas encore fait ses preuves
+char versionRefusee[16] = "";    // programme essaye qui n'a pas fonctionne (a ne plus installer)
+
+void verifierProgramme() {
+  Preferences p;
+  p.begin("cadre", false);
+  String essai = p.getString("essai", "");
+  if (essai.length() && essai != versionCarte) {
+    // Le programme a l'essai n'a pas tenu : la carte est revenue a celui-ci
+    Serial.printf("Le programme %s n'a pas fonctionne : retour au programme %s\n", essai.c_str(), versionCarte);
+    p.putString("refuse", essai);
+    p.remove("essai");
+    essai = "";
+  }
+  String refuse = p.getString("refuse", "");
+  p.end();
+  strncpy(versionRefusee, refuse.c_str(), sizeof versionRefusee - 1);
+  esp_ota_img_states_t etatImage;
+  bool aVerifier = esp_ota_get_state_partition(esp_ota_get_running_partition(), &etatImage) == ESP_OK &&
+                   etatImage == ESP_OTA_IMG_PENDING_VERIFY;
+  enEssai = aVerifier || essai == versionCarte;
+  if (enEssai) Serial.println("Nouveau programme a l'essai : il sera garde quand il aura joint le serveur");
+}
+
+// Le serveur a repondu : le programme fonctionne, on le garde
+void validerProgramme() {
+  if (!enEssai) return;
+  esp_ota_mark_app_valid_cancel_rollback();
+  Preferences p;
+  p.begin("cadre", false);
+  p.remove("essai");
+  p.end();
+  enEssai = false;
+  Serial.println("Nouveau programme confirme");
+}
+
+// Retour au programme precedent (redemarre la carte ; ne revient que si c'est impossible)
+void revenirAuPrecedent(const char* pourquoi) {
+  Serial.printf("Nouveau programme en echec (%s) : retour au programme precedent\n", pourquoi);
+  Serial.flush();
+  esp_ota_mark_app_invalid_rollback_and_reboot();
+  Serial.println("Retour impossible : pas d'autre programme valide");
+  enEssai = false;
+}
+
 // Mise a jour du programme par Wi-Fi. Un echec est retente au plus 3 fois par version.
 RTC_DATA_ATTR char versionEchouee[16] = "";
 RTC_DATA_ATTR uint8_t echecsMaj = 0;
 void mettreAJourProgramme(const char* version) {
   if (strcmp(version, versionEchouee) == 0 && echecsMaj >= 3) return;
+  if (strcmp(version, versionRefusee) == 0) {
+    Serial.printf("Programme %s deja essaye sans succes : ignore\n", version);
+    return;
+  }
   Serial.printf("Mise a jour du programme : %s -> %s\n", versionCarte, version);
   WiFiClientSecure client;
   client.setInsecure();
@@ -225,6 +311,10 @@ void mettreAJourProgramme(const char* version) {
   t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin?cle=" + encoderURL(CLE), "",
                                             [](HTTPClient* h) { identifier(h); });
   if (r == HTTP_UPDATE_OK) {
+    Preferences p;               // le nouveau programme demarre a l'essai
+    p.begin("cadre", false);
+    p.putString("essai", version);
+    p.end();
     Serial.println("Mise a jour terminee : redemarrage");
     Serial.flush();
     derniereSig[0] = 0;          // redessiner apres le redemarrage
@@ -255,16 +345,22 @@ static int lireCorps(HTTPClient& http, uint8_t** dest, int max) {
   return lu == taille ? taille : 0;
 }
 
+// Cause du dernier echec de telecharger() : 'S' serveur injoignable ou en erreur, 'A' acces refuse,
+// 'C' certificat du serveur refuse
+char causeEchec = 'S';
+
 int telecharger(const String& chemin, uint8_t** dest, int max) {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
+  causeEchec = 'S';
   if (!http.begin(client, String(SERVEUR) + chemin)) return 0;
   identifier(&http);
   http.setTimeout(20000);
   int code = http.GET();
   if (code != 200) {
     Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code);
+    if (code == 401 || code == 403) causeEchec = 'A';
     if (code < 0) {   // pas de reponse du serveur : on detaille la cause
       Serial.printf("  erreur : %s\n", http.errorToString(code).c_str());
       Serial.printf("  Wi-Fi : IP %s, passerelle %s, DNS %s, signal %d dBm\n",
@@ -280,6 +376,7 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
       char e[120] = "";
       int n = client.lastError(e, sizeof e);
       Serial.printf("  connexion securisee : %d %s\n", n, e);
+      if (strstr(e, "X509") || strstr(e, "erif")) causeEchec = 'C';
     }
     http.end();
     return 0;
@@ -424,8 +521,80 @@ void mettreEcranAJour(char type, const uint8_t* plan, int taille) {
   ecranEnAttente = false;
 }
 
+// ---------------------------------------------------------------------
+//  Garde-fou : un cycle qui dure plus de 4 min (programme bloque) relance la carte. Les redemarrages
+//  anormaux sont comptes (voir setup) : apres 3 d'affilee, la carte se repose une heure.
+// ---------------------------------------------------------------------
+const uint32_t DUREE_MAX_CYCLE_S = 240;   // une mise a jour par Wi-Fi prend jusqu'a ~1 min
+esp_timer_handle_t minuterieCycle = nullptr;
+
+void cycleBloque(void*) {
+  gf.tropLong = true;
+  esp_restart();
+}
+void armerGardeFou() {
+  if (!minuterieCycle) {
+    esp_timer_create_args_t a = {};
+    a.callback = cycleBloque;
+    a.name = "garde-fou";
+    if (esp_timer_create(&a, &minuterieCycle) != ESP_OK) return;
+  }
+  esp_timer_stop(minuterieCycle);
+  esp_timer_start_once(minuterieCycle, (uint64_t)DUREE_MAX_CYCLE_S * 1000000ULL);
+}
+void desarmerGardeFou() {
+  if (minuterieCycle) esp_timer_stop(minuterieCycle);
+}
+
+// Raison du demarrage, si elle est anormale : 'P' plantage, 'W' chien de garde, 'B' tension trop basse,
+// 'L' cycle trop long (garde-fou ci-dessus). 0 : demarrage normal (reveil, mise sous tension, RESET...).
+char demarrageAnormal() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_PANIC: return 'P';
+    case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: case ESP_RST_WDT: return 'W';
+    case ESP_RST_BROWNOUT: return 'B';
+    case ESP_RST_SW: return gf.tropLong ? 'L' : 0;
+    default: return 0;
+  }
+}
+
+// ---------------------------------------------------------------------
+//  Hors ligne : sans reponse du serveur depuis plus de 3 h (et 2 echecs d'affilee), le tableau de bord
+//  affiche est perime : la carte le remplace par un ecran "Hors ligne" (une seule fois ; pas sur une
+//  photo ni sur l'ecran blanc), et espace ses essais (30 min) pour menager la batterie. Au retour du
+//  serveur, l'affichage normal revient.
+// ---------------------------------------------------------------------
+const uint32_t HORS_LIGNE_S = 3 * 3600;
+bool contactOk = false;       // le serveur a repondu pendant ce cycle
+bool contactTente = false;    // ce cycle a essaye de le joindre
+
+// Renvoie le nombre de secondes avant le prochain essai
+uint32_t echecContact(char cause) {
+  echecsDAffilee++;
+  bool longtemps = echecsDAffilee >= 2 && secondesSansContact >= HORS_LIGNE_S;
+  if (longtemps && !horsLigneAffiche && dernierMode != 'p' && dernierMode != 'b') {
+    const char* raison = cause == 'W' ? "Wi-Fi introuvable" : cause == 'A' ? "Accès refusé par le serveur" :
+                         cause == 'C' ? "Certificat du serveur refusé" : cause == 'R' ? "Réponse du serveur illisible" :
+                         "Serveur injoignable";
+    Serial.printf("Hors ligne depuis %u min : %s\n", secondesSansContact / 60, raison);
+    canvas.setRotation(rotationEcran);
+    dessinerHorsLigne(raison, dernieresNouvelles);
+    afficherComplet(false);
+    // le serveur n'a pas cette image : la prochaine mise a jour sera complete
+    empreinteAffichee = empreinteImage(canvas.getBuffer(), OCTETS);
+    secondesDepuisComplet = 0;
+    partielsDepuisComplet = 0;
+    derniereSig[0] = 0;
+    horsLigneAffiche = true;
+  }
+  // Un echec est vite retente (meme la nuit), puis toutes les 30 min quand la panne dure
+  return longtemps ? 1800 : min(reveilSecondes, (uint32_t)600);
+}
+
 // Un cycle complet. Renvoie le nombre de secondes avant le suivant.
 uint32_t cycle() {
+  contactOk = false;
+  contactTente = false;
   float vBat = lireBatterie();
   Serial.printf("Batterie : %.2f V", vBat);
   if (pctJauge >= 0) Serial.printf(", jauge %.1f %%", pctJauge);
@@ -451,27 +620,41 @@ uint32_t cycle() {
   }
   alerteBatterieAffichee = false;
 
-  if (!connecterWifi()) return reveilSecondes;
+  contactTente = true;
+  if (!connecterWifi()) return echecContact('W');
 
   // 1. Que faut-il afficher ?
   uint8_t* brut = nullptr;
-  char chemin[128];
+  char chemin[200];
   int lg = snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
   if (pctJauge >= 0) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pct=%.1f", pctJauge);
   if (vitesseLue) lg += snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
-  snprintf(chemin + lg, sizeof chemin - lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);
+  lg += snprintf(chemin + lg, sizeof chemin - lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);
+  // Redemarrages anormaux depuis la mise sous tension, et programme refuse (retour arriere)
+  if (gf.total) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pa=%u&ra=%c", gf.total, gf.dernier ? gf.dernier : 'P');
+  if (versionRefusee[0]) snprintf(chemin + lg, sizeof chemin - lg, "&fwko=%s", versionRefusee);
   int n = telecharger(chemin, &brut, 32768);
-  if (!n) { free(brut); return reveilSecondes; }
+  if (!n) { free(brut); return echecContact(causeEchec); }
   JsonDocument etat;
   DeserializationError err = deserializeJson(etat, (const char*)brut, n);
   free(brut);
-  if (err) { Serial.println("Reponse illisible"); return reveilSecondes; }
+  if (err) { Serial.println("Reponse illisible"); return echecContact('R'); }
 
-  reveilSecondes = etat["reveil"] | 600;
+  // Le serveur a repondu
+  contactOk = true;
+  echecsDAffilee = 0;
+  if (horsLigneAffiche) { horsLigneAffiche = false; derniereSig[0] = 0; }   // redessiner le tableau de bord
+  validerProgramme();
+  strncpy(dernieresNouvelles, etat["quand"] | "", sizeof dernieresNouvelles - 1);
+
   modeDev = (etat["dev"] | 0) == 1;
+  // Intervalle borne : 1 min a 24 h (10 s au moins en mode developpement), quoi que dise le serveur
+  reveilSecondes = constrain((uint32_t)(etat["reveil"] | 600), modeDev ? (uint32_t)10 : (uint32_t)60, (uint32_t)86400);
   const char* sig = etat["sig"] | "";
   const char* mode = etat["mode"] | "tableau";
   int rotation = etat["rotation"] | 0;      // 0 = paysage, 1 ou 3 = portrait
+  dernierMode = strcmp(mode, "photo") == 0 ? 'p' : strcmp(mode, "pochette") == 0 ? 'c' : strcmp(mode, "blanc") == 0 ? 'b' : 't';
+  rotationEcran = dernierMode == 'p' ? 0 : rotation;
   Serial.printf("Mode %s, signature %s%s\n", mode, sig, modeDev ? " (developpement)" : "");
 
   // Nouveau programme disponible ? (seulement si la batterie est assez chargee :
@@ -537,15 +720,56 @@ void setup() {
   // mise a jour, leur place en memoire a pu changer). L'ecran sera alors nettoye au prochain affichage.
   if (strncmp(versionRtc, versionCarte, sizeof versionRtc) != 0) {
     empreinteAffichee = 0; secondesDepuisComplet = 0; partielsDepuisComplet = 0; eveilTotalMs = 0; ecranTotalMs = 0;
+    secondesSansContact = 0; echecsDAffilee = 0; horsLigneAffiche = false; dernieresNouvelles[0] = 0;
+    rotationEcran = 0; dernierMode = 0;
     strncpy(versionRtc, versionCarte, sizeof versionRtc - 1);
     versionRtc[sizeof versionRtc - 1] = 0;
   }
+  verifierProgramme();
   preparerDessin();
+
+  // Garde-fou : redemarrage anormal (plantage, blocage, tension trop basse) ?
+  if (gf.magie != MAGIE_GF || strncmp(gf.version, versionCarte, sizeof gf.version) != 0) {
+    memset(&gf, 0, sizeof gf);            // batterie branchee, ou autre programme
+    gf.magie = MAGIE_GF;
+    strncpy(gf.version, versionCarte, sizeof gf.version - 1);
+  }
+  char anormal = demarrageAnormal();
+  gf.tropLong = false;
+  if (anormal) {
+    gf.dAffilee++;
+    gf.total++;
+    gf.dernier = anormal;
+    Serial.printf("Redemarrage anormal (%c), %u d'affilee\n", anormal, gf.dAffilee);
+    // Nouveau programme qui plante : retour au precedent tout de suite
+    if (enEssai) revenirAuPrecedent("plantage");
+    // 3 d'affilee : on n'insiste pas, une heure de repos (puis nouvel essai)
+    if (gf.dAffilee >= 3) {
+      Serial.println("Garde-fou : 3 redemarrages anormaux d'affilee, pause d'une heure");
+      dormir(3600);
+    }
+  }
+
   unsigned long compte = 0;      // part de millis() deja comptee dans le temps d'eveil
+  uint8_t essaisSansContact = 0;
   while (true) {
+    armerGardeFou();
     uint32_t s = cycle();
+    desarmerGardeFou();
+    gf.dAffilee = 0;                     // cycle termine sans plantage
     eveilTotalMs += millis() - compte;   // envoye au serveur au reveil suivant
     compte = millis();
+    // temps depuis la derniere reponse du serveur (la veille qui suit compte deja)
+    if (contactOk) secondesSansContact = s;
+    else if (contactTente) secondesSansContact += s;
+    // Nouveau programme qui n'a pas encore joint le serveur : pas de veille (au reveil, la carte reviendrait
+    // a l'ancien programme), mais 3 essais a 30 s d'intervalle, puis retour au programme precedent
+    if (enEssai && !contactOk) {
+      if (++essaisSansContact >= 3) revenirAuPrecedent("serveur injoignable");
+      Serial.println("Nouveau programme a l'essai : nouvel essai dans 30 s");
+      delay(30000);
+      continue;
+    }
     secondesDepuisComplet += s;
     if (!modeDev) dormir(s);   // fonctionnement normal : veille profonde
     // Mode developpement : la carte reste allumee (le televersement marche sans le bouton BOOT)

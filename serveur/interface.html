@@ -1232,6 +1232,15 @@ function dessinerStatut() {
     ajouter(prochain > 60000 ? 'Réveil dans ' + Math.round(prochain / 60000) + ' min' : 'Réveil imminent');
   }
   if (config.mode === 'tableau' && s && s.sc) ajouter('Scène : ' + s.sc);
+  // Redemarrage anormal de la carte dans les 7 derniers jours (garde-fou)
+  if (s && s.pat && maintenant - s.pat < 7 * 86400e3) {
+    var causes = { P: 'le programme a planté', W: 'le programme était bloqué (chien de garde)', B: 'tension trop basse (batterie faible ou pic de consommation)',
+      L: 'un cycle a duré plus de 4 minutes' };
+    var dp = new Date(s.pat);
+    ajouter('Redémarrage anormal le ' + dp.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + dp.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), 'alerte',
+      'La carte a redémarré toute seule : ' + (causes[s.ra] || 'cause inconnue') + '.\n' + s.pa + ' redémarrage(s) anormal(aux) depuis sa mise sous tension.' +
+      '\nAprès 3 d\'affilée, elle se met en pause une heure avant de réessayer.');
+  }
   if (config.dev) ajouter('Mode développement', 'alerte', "La carte ne se met pas en veille : à désactiver sur batterie (menu Réveil du cadre).");
   if (config.ecrans && config.ecrans.nb === 2) connexion(s1, 'Écran 2 : ');
   if (dateApercu) {
@@ -1582,6 +1591,8 @@ function afficherFirmware(s) {
     t += ' Programme envoyé : compilé le ' + texteVersion(f.version) + ' (' + Math.round(f.taille / 1024) + ' Ko), ';
     if (inst === f.version) t += 'installé.';
     else if (inst && inst > f.version) t += 'plus ancien que celui de la carte : ignoré.';
+    else if (s && s.fwko === f.version) t += 'essayé par la carte, mais il plantait ou ne joignait pas le serveur : elle est revenue à son programme précédent. Envoie une version corrigée.';
+    else if ((f.telech || 0) >= 3) t += 'téléchargé 3 fois sans être gardé par la carte : plus proposé. Renvoie-le pour réessayer.';
     else t += 'en attente du prochain réveil.';
   }
   $('fwInfo').textContent = t;
