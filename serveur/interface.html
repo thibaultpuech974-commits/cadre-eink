@@ -1207,14 +1207,17 @@ function dessinerStatut() {
     if (titre) e.title = titre;
     z.appendChild(e);
   };
+  // Dernier contact du cadre : l'etat n'est enregistre que toutes les 10 min (limite d'ecritures), mais
+  // chaque image envoyee est datee : la plus recente des deux dates compte
+  var vuCadre = function (st, nom) { return Math.max(st.vu || 0, !nom && dateApercu ? dateApercu : 0); };
   var connexion = function (st, nom) {
     var maj = function (t) { return nom ? nom + t : t.charAt(0).toUpperCase() + t.slice(1); };
     if (!st) { ajouter(maj('jamais connecté'), 'doux'); return; }
     var attendu = (st.r ? st.r * 1000 : config.reveilMin * 60000);
-    var age = maintenant - st.vu;
+    var age = maintenant - vuCadre(st, nom);
     if (age > attendu * 2 + 5 * 60000) ajouter(maj('sans nouvelles depuis ') + duree(age).replace('il y a ', ''), 'alerte',
       "Le cadre aurait dû se connecter depuis longtemps : batterie vide, Wi-Fi perdu ou carte bloquée ?");
-    else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(st.vu).toLocaleString('fr-FR'));
+    else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(maintenant - age).toLocaleString('fr-FR'));
     if (st.bat && st.bat > 2.5) {
       // Pourcentage de la jauge de la carte s'il est connu, sinon deduit de la tension
       var jauge = typeof st.pct === 'number', pc = jauge ? Math.round(Math.min(100, st.pct)) : pourcentage(st.bat);
@@ -1228,7 +1231,7 @@ function dessinerStatut() {
   };
   var vivant = connexion(s, '');
   if (s && vivant) {
-    var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
+    var prochain = vuCadre(s, '') + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
     ajouter(prochain > 60000 ? 'Réveil dans ' + Math.round(prochain / 60000) + ' min' : 'Réveil imminent');
   }
   if (config.mode === 'tableau' && s && s.sc) ajouter('Scène : ' + s.sc);
