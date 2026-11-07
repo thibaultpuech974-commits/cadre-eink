@@ -68,6 +68,8 @@ struct Boite { int x, y, w, h; };
 struct Style { float e; int f; };
 // Place prise par le texte du bloc F1 (definie ici pour la meme raison que Boite)
 struct MesureF1 { int aT, aP, aQ, ligneS, lJ, lH, h; bool tient; };
+// Zone d'une mise a jour partielle envoyee par le serveur : rectangle et ancien contenu (meme raison)
+struct ZonePlan { int x, y, w, h; const uint8_t* ancien; };
 
 GFXcanvas1 canvas(LARGEUR, HAUTEUR);      // l'image est d'abord dessinee ici
 U8G2_FOR_ADAFRUIT_GFX u8g2;
@@ -1013,6 +1015,36 @@ void preparerDessin() {
 }
 
 // =====================================================================
+//  RAFRAICHISSEMENT COMMANDE PAR LE SERVEUR (voir planRafraichissement dans serveur/worker.js)
+// =====================================================================
+// Empreinte d'une image (FNV-1a 32 bits, comme le serveur). 0 est reserve a "image affichee inconnue".
+uint32_t empreinteImage(const uint8_t* p, size_t n) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 16777619u; }
+  return h ? h : 1;
+}
+
+// Lit les zones d'un plan "P" (verifie tout : taille, bornes, x et largeur multiples de 8).
+// Renvoie le nombre de zones, ou -1 si le plan est illisible.
+int zonesDuPlan(const uint8_t* plan, int taille, ZonePlan* zones, int max) {
+  if (taille < 2 || plan[0] != 'P' || plan[1] < 1 || plan[1] > max) return -1;
+  int n = plan[1], pos = 2;
+  for (int k = 0; k < n; k++) {
+    if (pos + 8 > taille) return -1;
+    ZonePlan& z = zones[k];
+    z.x = plan[pos] | (plan[pos + 1] << 8);     z.y = plan[pos + 2] | (plan[pos + 3] << 8);
+    z.w = plan[pos + 4] | (plan[pos + 5] << 8); z.h = plan[pos + 6] | (plan[pos + 7] << 8);
+    pos += 8;
+    if (z.w <= 0 || z.h <= 0 || z.x % 8 || z.w % 8 || z.x + z.w > LARGEUR || z.y + z.h > HAUTEUR) return -1;
+    int octets = z.w / 8 * z.h;
+    if (pos + octets > taille) return -1;
+    z.ancien = plan + pos;
+    pos += octets;
+  }
+  return pos == taille ? n : -1;
+}
+
+// =====================================================================
 //  PARTIE CARTE ESP32 (reseau, ecran, veille)
 // =====================================================================
 #ifndef HOTE
@@ -1038,9 +1070,14 @@ void calculerVersion() {
 
 // Conserve pendant la veille profonde
 RTC_DATA_ATTR char     derniereSig[16] = "";
-RTC_DATA_ATTR uint32_t secondesDepuisAffichage = 0;
 RTC_DATA_ATTR uint32_t reveilSecondes = 600;
 RTC_DATA_ATTR bool     alerteBatterieAffichee = false;
+// Rafraichissement commande par le serveur et temps d'eveil (envoyes au serveur a chaque reveil)
+RTC_DATA_ATTR uint32_t empreinteAffichee = 0;       // image vraiment a l'ecran (0 = inconnue)
+RTC_DATA_ATTR uint32_t secondesDepuisComplet = 0;   // depuis le dernier rafraichissement complet
+RTC_DATA_ATTR uint32_t eveilTotalMs = 0;            // temps passe hors veille, cumule
+RTC_DATA_ATTR uint32_t ecranTotalMs = 0;            // dont temps de rafraichissement de l'ecran
+RTC_DATA_ATTR char     versionRtc[16] = "";         // programme qui a ecrit ces valeurs
 
 // Jauge de batterie MAX17048 de la Feather. On lit ses registres directement, sans
 // bibliotheque : la puce reste alimentee par la batterie pendant la veille et suit la
@@ -1189,6 +1226,24 @@ void mettreAJourProgramme(const char* version) {
 
 // Telecharge une ressource du serveur. Renvoie la taille lue (0 si erreur).
 // Si 'dest' est fourni, on y ecrit au plus 'max' octets ; sinon on alloue en PSRAM.
+// Lit le corps d'une reponse (sa taille doit etre annoncee). Renvoie la taille lue (0 si erreur).
+// Si 'dest' est fourni, on y ecrit au plus 'max' octets ; sinon on alloue en PSRAM.
+static int lireCorps(HTTPClient& http, uint8_t** dest, int max) {
+  int taille = http.getSize();
+  if (taille <= 0 || taille > max) { Serial.println("Taille inattendue"); return 0; }
+  if (!*dest) *dest = (uint8_t*)ps_malloc(taille);
+  if (!*dest) { Serial.println("Pas assez de memoire (PSRAM activee ?)"); return 0; }
+  WiFiClient* flux = http.getStreamPtr();
+  int lu = 0;
+  unsigned long debut = millis();
+  while (lu < taille && millis() - debut < 20000) {
+    int dispo = flux->available();
+    if (dispo > 0) lu += flux->readBytes(*dest + lu, min(dispo, taille - lu));
+    else delay(5);
+  }
+  return lu == taille ? taille : 0;
+}
+
 int telecharger(const String& chemin, uint8_t** dest, int max) {
   WiFiClientSecure client;
   client.setInsecure();
@@ -1218,53 +1273,87 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
     http.end();
     return 0;
   }
-  int taille = http.getSize();
-  if (taille <= 0 || taille > max) { Serial.println("Taille inattendue"); http.end(); return 0; }
-  if (!*dest) *dest = (uint8_t*)ps_malloc(taille);
-  if (!*dest) { Serial.println("Pas assez de memoire (PSRAM activee ?)"); http.end(); return 0; }
-  WiFiClient* flux = http.getStreamPtr();
-  int lu = 0;
-  unsigned long debut = millis();
-  while (lu < taille && millis() - debut < 20000) {
-    int dispo = flux->available();
-    if (dispo > 0) lu += flux->readBytes(*dest + lu, min(dispo, taille - lu));
-    else delay(5);
-  }
+  int lu = lireCorps(http, dest, max);
   http.end();
-  return lu == taille ? taille : 0;
+  return lu;
 }
 
-void envoyerApercu(int rotation) {
+// Envoie l'image dessinee (apercu de la page web) et recoit du serveur comment rafraichir l'ecran :
+// 'R' rien (image identique), 'P' partiel (zones dans *plan), 'C' complet, 'N' complet avec nettoyage.
+// Sans reponse lisible (serveur ancien, erreur) : 'C', sans risque.
+static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
+  *plan = nullptr;
+  *taillePlan = 0;
+  char chemin[160];
+  snprintf(chemin, sizeof chemin, "/api/apercu?r=%d&plan=1&crc=%08lx&dc=%lu&pr=%lu", rotation, (unsigned long)empreinteAffichee,
+           (unsigned long)secondesDepuisComplet, (unsigned long)reveilSecondes);
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  if (!http.begin(client, String(SERVEUR) + "/api/apercu?r=" + String(rotation))) return;
+  if (!http.begin(client, String(SERVEUR) + chemin)) return 'C';
   identifier(&http);
+  http.setTimeout(20000);
   http.addHeader("Content-Type", "application/octet-stream");
   int code = http.POST(canvas.getBuffer(), OCTETS);
-  Serial.printf("Apercu envoye : HTTP %d\n", code);
+  char type = 'C';
+  if (code == 200) {
+    int t = lireCorps(http, plan, 60000);
+    if (t >= 1 && (*plan)[0] && strchr("RPCN", (*plan)[0])) { type = (char)(*plan)[0]; *taillePlan = t; }
+  }
   http.end();
+  if (type != 'P') { free(*plan); *plan = nullptr; *taillePlan = 0; }
+  Serial.printf("Apercu envoye : HTTP %d, plan %c (%d octets)\n", code, type, *taillePlan);
+  return type;
 }
 
-void afficherSurEcran() {
-#if ECRAN_PRESENT
+void allumerEcran(bool nettoyage) {
   gpio_hold_dis((gpio_num_t)EPD_PWR);
   pinMode(EPD_PWR, OUTPUT);
   digitalWrite(EPD_PWR, HIGH);
   delay(100);
-  display.init(115200, true, 2, false);
+  // 2e argument ("initial") a true : la bibliotheque passe d'abord tout l'ecran au blanc, avec un
+  // rafraichissement complet de plus (nettoyage). A false : un seul rafraichissement.
+  display.init(115200, nettoyage, 2, false);
   display.setRotation(0);
+}
+
+void eteindreEcran() {
+  display.hibernate();
+  digitalWrite(EPD_PWR, LOW);
+  gpio_hold_en((gpio_num_t)EPD_PWR);
+  gpio_deep_sleep_hold_en();
+}
+
+// Rafraichissement complet (~4,5 s ; ~9 s avec nettoyage)
+void afficherComplet(bool nettoyage) {
+#if ECRAN_PRESENT
+  allumerEcran(nettoyage);
   display.setFullWindow();
   display.firstPage();          // un quart d'image a la fois, puis rafraichissement complet
   do {
     display.fillScreen(GxEPD_WHITE);
     display.drawBitmap(0, 0, canvas.getBuffer(), LARGEUR, HAUTEUR, GxEPD_BLACK);
   } while (display.nextPage());
-  display.hibernate();
-  digitalWrite(EPD_PWR, LOW);
-  gpio_hold_en((gpio_num_t)EPD_PWR);
-  gpio_deep_sleep_hold_en();
+  eteindreEcran();
 #endif
+}
+
+// Mise a jour partielle (~0,6 s, sans clignotement). Le controleur fait bouger les pixels qui different
+// entre sa memoire "precedente" (l'image a l'ecran) et sa memoire "courante" (la nouvelle). Ces memoires
+// sont perdues pendant la veille : on met la nouvelle image dans les deux, puis l'ancien contenu des zones
+// changees (envoye par le serveur) dans la "precedente". Le canvas a 1 = noir, l'ecran 1 = blanc : on inverse.
+bool afficherZones(const uint8_t* plan, int taille) {
+  ZonePlan zones[16];
+  int n = zonesDuPlan(plan, taille, zones, 16);
+  if (n < 0) { Serial.println("Plan partiel illisible : rafraichissement complet"); return false; }
+#if ECRAN_PRESENT
+  allumerEcran(false);
+  display.epd2.writeImageAgain(canvas.getBuffer(), 0, 0, LARGEUR, HAUTEUR, true);
+  for (int k = 0; k < n; k++) display.epd2.writeImageToPrevious(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
+  display.epd2.refresh(true);   // partiel sur tout l'ecran : seuls les pixels differents bougent
+  eteindreEcran();
+#endif
+  return true;
 }
 
 bool modeDev = false;                 // envoye par le serveur (menu Reveil de la page web)
@@ -1272,8 +1361,7 @@ unsigned long dernierAffichageMs = 0;  // pour respecter 3 min entre deux rafrai
 bool ecranEnAttente = false;
 
 void dormir(uint32_t secondes) {
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  if (WiFi.getMode() != WIFI_OFF) { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
   Serial.printf("Veille profonde pendant %u s\n", secondes);
   Serial.flush();
   memoWifi.age += secondes;
@@ -1281,15 +1369,25 @@ void dormir(uint32_t secondes) {
   esp_deep_sleep_start();
 }
 
-// L'ecran demande au moins 3 minutes entre deux rafraichissements :
-// en mode developpement, l'apercu web est mis a jour tout de suite,
-// mais l'ecran attend si besoin le cycle suivant.
-void mettreEcranAJour() {
+// Rafraichit l'ecran selon le plan du serveur ('R', 'P', 'C' ou 'N').
+// L'ecran demande au moins 3 minutes entre deux rafraichissements : en mode developpement, l'apercu web
+// est a jour tout de suite, mais l'ecran attend si besoin le cycle suivant (rafraichissement complet alors).
+void mettreEcranAJour(char type, const uint8_t* plan, int taille) {
+  if (empreinteAffichee == 0) type = 'N';       // image a l'ecran inconnue (demarrage) : nettoyage
+  if (type == 'R') { ecranEnAttente = false; Serial.println("Ecran : image identique, rien a rafraichir"); return; }
   if (dernierAffichageMs && millis() - dernierAffichageMs < 180000UL) {
     Serial.println("Ecran : rafraichissement reporte (3 min minimum entre deux)");
+    ecranEnAttente = true;
     return;
   }
-  afficherSurEcran();
+  unsigned long t0 = millis();
+  bool partiel = type == 'P' && afficherZones(plan, taille);
+  if (!partiel) afficherComplet(type == 'N');
+  unsigned long duree = millis() - t0;
+  ecranTotalMs += duree;
+  Serial.printf("Ecran : %s en %lu ms\n", partiel ? "mise a jour partielle" : type == 'N' ? "complet avec nettoyage" : "complet", duree);
+  empreinteAffichee = empreinteImage(canvas.getBuffer(), OCTETS);
+  if (!partiel) secondesDepuisComplet = 0;
   dernierAffichageMs = millis();
   ecranEnAttente = false;
 }
@@ -1309,7 +1407,10 @@ uint32_t cycle() {
   if (vBat > 2.5 && vBat < 3.4) {
     if (!alerteBatterieAffichee) {
       dessinerMessage("Batterie vide", "Rechargez le cadre");
-      afficherSurEcran();
+      afficherComplet(false);
+      // le serveur n'a pas cette image : la prochaine mise a jour sera complete
+      empreinteAffichee = empreinteImage(canvas.getBuffer(), OCTETS);
+      secondesDepuisComplet = 0;
       alerteBatterieAffichee = true;
       derniereSig[0] = 0;
     }
@@ -1324,7 +1425,8 @@ uint32_t cycle() {
   char chemin[128];
   int lg = snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
   if (pctJauge >= 0) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pct=%.1f", pctJauge);
-  if (vitesseLue) snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
+  if (vitesseLue) lg += snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
+  snprintf(chemin + lg, sizeof chemin - lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);
   int n = telecharger(chemin, &brut, 32768);
   if (!n) { free(brut); return reveilSecondes; }
   JsonDocument etat;
@@ -1344,12 +1446,14 @@ uint32_t cycle() {
   const char* fw = etat["fw"] | "";
   if (fw[0] && (vBat > 3.6 || vBat < 2.5)) mettreAJourProgramme(fw);
 
-  // 2. Rien de nouveau ? (on rafraichit quand meme au moins 1 fois par jour)
+  // 2. Rien de nouveau ? On redessine quand meme avant que le dernier rafraichissement complet ait
+  //    plus de 'cp' secondes (24 h par defaut) : le serveur commande alors le rafraichissement complet
+  //    du jour, conseille par le fabricant
+  uint32_t cp = etat["cp"] | 86400;
   bool nouveau = strcmp(sig, derniereSig) != 0;
-  bool rafraichirQuandMeme = secondesDepuisAffichage + reveilSecondes > 24 * 3600 && strcmp(mode, "blanc") != 0;
+  bool rafraichirQuandMeme = secondesDepuisComplet + reveilSecondes > cp && strcmp(mode, "blanc") != 0;
   if (!nouveau && !rafraichirQuandMeme) {
-    secondesDepuisAffichage += reveilSecondes;
-    if (ecranEnAttente) mettreEcranAJour();
+    if (ecranEnAttente) mettreEcranAJour('C', nullptr, 0);
     return reveilSecondes;
   }
 
@@ -1371,12 +1475,15 @@ uint32_t cycle() {
   }
   if (!ok) { Serial.println("Echec du telechargement / decodage"); return reveilSecondes; }
 
-  // 4. Apercu web puis ecran
-  envoyerApercu(rotation);
+  // 4. Apercu web, plan du serveur, puis ecran
+  uint8_t* plan = nullptr;
+  int taillePlan = 0;
+  char type = envoyerApercu(rotation, &plan, &taillePlan);
   strncpy(derniereSig, sig, sizeof derniereSig - 1);
-  secondesDepuisAffichage = 0;
-  ecranEnAttente = true;
-  mettreEcranAJour();
+  // Le Wi-Fi ne sert plus : coupe pendant le rafraichissement (sauf en mode developpement)
+  if (!modeDev) { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
+  mettreEcranAJour(type, plan, taillePlan);
+  free(plan);
   return reveilSecondes;
 }
 
@@ -1393,9 +1500,20 @@ void setup() {
   }
   calculerVersion();
   Serial.printf("Cadre e-ink, programme du %s\n", versionCarte);
+  // Valeurs gardees pendant la veille : remises a zero si elles viennent d'un autre programme (apres une
+  // mise a jour, leur place en memoire a pu changer). L'ecran sera alors nettoye au prochain affichage.
+  if (strncmp(versionRtc, versionCarte, sizeof versionRtc) != 0) {
+    empreinteAffichee = 0; secondesDepuisComplet = 0; eveilTotalMs = 0; ecranTotalMs = 0;
+    strncpy(versionRtc, versionCarte, sizeof versionRtc - 1);
+    versionRtc[sizeof versionRtc - 1] = 0;
+  }
   preparerDessin();
+  unsigned long compte = 0;      // part de millis() deja comptee dans le temps d'eveil
   while (true) {
     uint32_t s = cycle();
+    eveilTotalMs += millis() - compte;   // envoye au serveur au reveil suivant
+    compte = millis();
+    secondesDepuisComplet += s;
     if (!modeDev) dormir(s);   // fonctionnement normal : veille profonde
     // Mode developpement : la carte reste allumee (le televersement marche sans le bouton BOOT)
     Serial.printf("Mode developpement : prochain cycle dans %u s\n", s);
