@@ -34,8 +34,10 @@ const CONFIG_DEFAUT = {
   nuit: { actif: false, debut: '23:00', fin: '07:00', intervalleMin: 60 },
   // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
   // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
-  // plus de 'seuil' % de l'ecran change
-  rafraich: { partiel: true, completH: 24, seuil: 40 },
+  // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double (deux passes, pixels plus
+  // francs) ou inversion (chaque zone passe en negatif puis revient : moins de traces, petit clignotement).
+  // maxPartiels : rafraichissement complet apres ce nombre de mises a jour partielles (0 = pas de limite)
+  rafraich: { partiel: true, completH: 24, seuil: 40, methode: 'simple', maxPartiels: 0 },
   meteo: {
     ville: 'Nîmes', lat: 43.84, lon: 4.36,
     vent: true, details: true, soleil: true,
@@ -456,6 +458,8 @@ function preparerModif(modif, cfg) {
       partiel: r.partiel === undefined ? actuel.partiel : !!r.partiel,
       completH: [6, 12, 24].includes(+r.completH) ? +r.completH : actuel.completH,
       seuil: [20, 40, 60].includes(+r.seuil) ? +r.seuil : actuel.seuil,
+      methode: METHODES_PARTIEL[r.methode] ? r.methode : (actuel.methode || 'simple'),
+      maxPartiels: [0, 3, 6, 12].includes(+r.maxPartiels) ? +r.maxPartiels : (actuel.maxPartiels || 0),
     };
   }
   if (modif.agenda && Array.isArray(modif.agenda.urls)) {
@@ -671,8 +675,9 @@ async function routeEnvoyerApercu(req, url, env) {
     const prec = precedent.value ? new Uint8Array(precedent.value) : null;
     const p = url.searchParams;
     const plan = planRafraichissement(prec, precedent.metadata, nouv,
-      { crc: p.get('crc') || '', dc: Number(p.get('dc')) || 0, pr: Number(p.get('pr')) || 0, r }, cfg);
+      { crc: p.get('crc') || '', dc: Number(p.get('dc')) || 0, pr: Number(p.get('pr')) || 0, np: Number(p.get('np')) || 0, r }, cfg);
     metadata.p = resumePlan(plan);
+    metadata.m = METHODES_PARTIEL[(cfg.rafraich && cfg.rafraich.methode) || 'simple'] || 'P';
     reponse = new Response(encoderPlan(plan, prec), { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' } });
   }
   await env.CADRE.put(cle, donnees, { metadata });
@@ -698,6 +703,8 @@ const OCTETS_LIGNE = LARGEUR / 8;            // 120 octets par ligne (1 bit par 
 const CASE_L = 8, CASE_H = 40;               // cases de 64 x 40 pixels pour regrouper les differences
 const NCX = OCTETS_LIGNE / CASE_L, NCY = HAUTEUR / CASE_H;   // 15 x 17 cases
 const ZONES_MAX = 8;
+// Methodes de mise a jour partielle et lettre du plan correspondant (la carte fait le reste)
+const METHODES_PARTIEL = { simple: 'P', double: 'D', inversion: 'I' };
 
 // Empreinte d'une image (FNV-1a 32 bits, calculee de la meme facon par la carte ; 0 = "inconnue")
 function empreinteImage(octets) {
@@ -769,13 +776,17 @@ function zonesModifiees(a, b) {
 }
 
 // Comment rafraichir l'ecran. p : crc (empreinte de l'image affichee selon la carte), dc (secondes depuis
-// le dernier rafraichissement complet), pr (secondes avant le prochain reveil), r (orientation).
+// le dernier rafraichissement complet), pr (secondes avant le prochain reveil), np (mises a jour partielles
+// depuis le dernier complet), r (orientation).
 function planRafraichissement(prec, metaPrec, nouv, p, cfg) {
   const R = Object.assign({}, CONFIG_DEFAUT.rafraich, cfg.rafraich || {});
   const crc = String(p.crc).toLowerCase();
   if (!/^[0-9a-f]{8}$/.test(crc) || crc === '00000000') return { type: 'N', raison: 'demarrage' };
   if (p.dc + p.pr > R.completH * 3600) return { type: 'N', raison: 'quotidien' };
   if (!R.partiel) return { type: 'C', raison: 'desactive' };
+  const lettre = METHODES_PARTIEL[R.methode] || 'P';
+  // Methode changee depuis la derniere image : on repart d'un ecran propre pour pouvoir comparer
+  if (metaPrec && metaPrec.m && metaPrec.m !== lettre) return { type: 'N', raison: 'methode' };
   if (cfg.mode !== 'tableau') return { type: 'C', raison: 'mode' };      // photo, pochette : images tramees
   if (!prec || ((metaPrec && metaPrec.h) || empreinteImage(prec)) !== crc) return { type: 'C', raison: 'inconnue' };
   if (metaPrec && metaPrec.r !== undefined && metaPrec.r !== p.r) return { type: 'C', raison: 'orientation' };
@@ -783,16 +794,18 @@ function planRafraichissement(prec, metaPrec, nouv, p, cfg) {
   if (!zones.length) return { type: 'R' };
   const part = zones.reduce((s, z) => s + z.w * z.h, 0) / (LARGEUR * HAUTEUR) * 100;
   if (part > R.seuil) return { type: 'C', raison: 'seuil', part };
-  return { type: 'P', zones, part };
+  if (R.maxPartiels && p.np >= R.maxPartiels) return { type: 'C', raison: 'serie' };
+  return { type: lettre, zones, part };
 }
-// Reponse binaire lue par la carte : 1 octet (R, C, N), ou "P", nombre de zones, puis pour chaque zone
-// x, y, largeur, hauteur (2 octets chacun, petit-boutiste) et l'ancien contenu de la zone, ligne par ligne
+// Reponse binaire lue par la carte : 1 octet (R, C, N), ou la lettre de la methode partielle (P, D, I),
+// le nombre de zones, puis pour chaque zone x, y, largeur, hauteur (2 octets chacun, petit-boutiste) et
+// l'ancien contenu de la zone, ligne par ligne
 function encoderPlan(plan, prec) {
-  if (plan.type !== 'P') return new Uint8Array([plan.type.charCodeAt(0)]);
+  if (!plan.zones) return new Uint8Array([plan.type.charCodeAt(0)]);
   let taille = 2;
   for (const z of plan.zones) taille += 8 + (z.w / 8) * z.h;
   const o = new Uint8Array(taille), v = new DataView(o.buffer);
-  o[0] = 0x50; o[1] = plan.zones.length;
+  o[0] = plan.type.charCodeAt(0); o[1] = plan.zones.length;
   let i = 2;
   for (const z of plan.zones) {
     v.setUint16(i, z.x, true); v.setUint16(i + 2, z.y, true); v.setUint16(i + 4, z.w, true); v.setUint16(i + 6, z.h, true);
@@ -802,9 +815,10 @@ function encoderPlan(plan, prec) {
   }
   return o;
 }
-// Resume pour la page web (en-tete x-plan de l'apercu) : "P;2;3" (2 zones, 3 % de l'ecran), "C;seuil", "N;quotidien", "R"
+// Resume pour la page web (en-tete x-plan de l'apercu) : "P;2;3" (partiel simple, 2 zones, 3 % de l'ecran ;
+// D double, I inversion), "C;seuil", "N;quotidien", "R"
 function resumePlan(plan) {
-  if (plan.type === 'P') return 'P;' + plan.zones.length + ';' + Math.max(1, Math.round(plan.part));
+  if (plan.zones) return plan.type + ';' + plan.zones.length + ';' + Math.max(1, Math.round(plan.part));
   return plan.type + (plan.raison ? ';' + plan.raison : '');
 }
 

@@ -11,7 +11,7 @@ const avec = (img, x0, y0, l, h, v) => { const o = img.slice(); for (let y = y0;
 let affichee = null;   // image a l'ecran, selon la carte
 const envoyer = async (img, opts = {}) => {
   const q = new URLSearchParams({ plan: '1', r: String(opts.r ?? 0), crc: opts.crc ?? (affichee ? empreinte(affichee) : '00000000'),
-    dc: String(opts.dc ?? 3600), pr: String(opts.pr ?? 3600) });
+    dc: String(opts.dc ?? 3600), pr: String(opts.pr ?? 3600), np: String(opts.np ?? 0) });
   const rep = await req('/api/apercu?' + q, { method: 'POST', body: img });
   return new Uint8Array(await rep.arrayBuffer());
 };
@@ -29,8 +29,14 @@ const appliquer = (plan, nouv, ecran) => {
   }
   if (i !== plan.length) throw new Error('plan mal forme');
   // mise a jour differentielle : seuls les pixels ou "precedente" et "courante" different bougent
+  const passe = (e, pr, co) => { for (let k = 0; k < OCTETS; k++) { const d = pr[k] ^ co[k]; e[k] = (e[k] & ~d) | (co[k] & d); } };
   const e = ecran.slice();
-  for (let k = 0; k < OCTETS; k++) { const d = prec[k] ^ nouv[k]; e[k] = (e[k] & ~d) | (nouv[k] & d); }
+  if (t === 'I') {          // zones en negatif, puis retour : tous les pixels des zones bougent deux fois
+    const neg = nouv.slice();
+    for (const z of zones) { const [x, y, w, h] = z.split(/[ ,x]/).map(Number);
+      for (let r = 0; r < h; r++) for (let c = 0; c < w / 8; c++) { const k = (y + r) * L + x / 8 + c; neg[k] = ~nouv[k] & 0xFF; } }
+    passe(e, nouv, neg); passe(e, neg, nouv);
+  } else { passe(e, prec, nouv); if (t === 'D') passe(e, prec, nouv); }
   return { t, ecran: e, zones, octets: plan.length };
 };
 const etape = async (nom, img, opts) => {
@@ -59,6 +65,16 @@ await etape('partiel désactivé', avec(affichee, 80, 80, 2, 2, 0x42));
 await post({ rafraich: { partiel: true }, mode: 'photo' });
 await etape('mode photo', avec(affichee, 90, 90, 2, 2, 0x99));
 await post({ mode: 'tableau' });
+// Méthodes : changer de méthode nettoie l'écran (N), puis les mises à jour partielles portent sa lettre
+await etape('mise en route', avec(affichee, 100, 100, 2, 2, 0x5A));
+await post({ rafraich: { methode: 'inversion' } });
+await etape('méthode changée', avec(affichee, 12, 200, 8, 40, 0x3C));
+await etape('inversion', avec(affichee, 12, 200, 8, 40, 0xC3));
+await post({ rafraich: { methode: 'double', maxPartiels: 3 } });
+await etape('méthode double', avec(affichee, 20, 300, 2, 2, 0x11));
+await etape('double', avec(affichee, 20, 300, 2, 2, 0x22));
+await etape('après 3 partielles', avec(affichee, 20, 300, 2, 2, 0x44), { np: 3 });
+await post({ rafraich: { methode: 'simple', maxPartiels: 0 } });
 // Ancienne carte (sans ?plan=1) : réponse texte inchangée
 console.log('ancienne carte :', await (await req('/api/apercu?r=0', { method: 'POST', body: base })).text());
 // Type de la dernière mise à jour, pour la page
