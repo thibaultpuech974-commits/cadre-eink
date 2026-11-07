@@ -1207,14 +1207,17 @@ function dessinerStatut() {
     if (titre) e.title = titre;
     z.appendChild(e);
   };
+  // Dernier contact du cadre : l'etat n'est enregistre que toutes les 10 min (limite d'ecritures), mais
+  // chaque image envoyee est datee : la plus recente des deux dates compte
+  var vuCadre = function (st, nom) { return Math.max(st.vu || 0, !nom && dateApercu ? dateApercu : 0); };
   var connexion = function (st, nom) {
     var maj = function (t) { return nom ? nom + t : t.charAt(0).toUpperCase() + t.slice(1); };
     if (!st) { ajouter(maj('jamais connecté'), 'doux'); return; }
     var attendu = (st.r ? st.r * 1000 : config.reveilMin * 60000);
-    var age = maintenant - st.vu;
+    var age = maintenant - vuCadre(st, nom);
     if (age > attendu * 2 + 5 * 60000) ajouter(maj('sans nouvelles depuis ') + duree(age).replace('il y a ', ''), 'alerte',
       "Le cadre aurait dû se connecter depuis longtemps : batterie vide, Wi-Fi perdu ou carte bloquée ?");
-    else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(st.vu).toLocaleString('fr-FR'));
+    else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(maintenant - age).toLocaleString('fr-FR'));
     if (st.bat && st.bat > 2.5) {
       // Pourcentage de la jauge de la carte s'il est connu, sinon deduit de la tension
       var jauge = typeof st.pct === 'number', pc = jauge ? Math.round(Math.min(100, st.pct)) : pourcentage(st.bat);
@@ -1228,10 +1231,19 @@ function dessinerStatut() {
   };
   var vivant = connexion(s, '');
   if (s && vivant) {
-    var prochain = s.vu + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
+    var prochain = vuCadre(s, '') + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
     ajouter(prochain > 60000 ? 'Réveil dans ' + Math.round(prochain / 60000) + ' min' : 'Réveil imminent');
   }
   if (config.mode === 'tableau' && s && s.sc) ajouter('Scène : ' + s.sc);
+  // Redemarrage anormal de la carte dans les 7 derniers jours (garde-fou)
+  if (s && s.pat && maintenant - s.pat < 7 * 86400e3) {
+    var causes = { P: 'le programme a planté', W: 'le programme était bloqué (chien de garde)', B: 'tension trop basse (batterie faible ou pic de consommation)',
+      L: 'un cycle a duré plus de 4 minutes' };
+    var dp = new Date(s.pat);
+    ajouter('Redémarrage anormal le ' + dp.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + dp.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), 'alerte',
+      'La carte a redémarré toute seule : ' + (causes[s.ra] || 'cause inconnue') + '.\n' + s.pa + ' redémarrage(s) anormal(aux) depuis sa mise sous tension.' +
+      '\nAprès 3 d\'affilée, elle se met en pause une heure avant de réessayer.');
+  }
   if (config.dev) ajouter('Mode développement', 'alerte', "La carte ne se met pas en veille : à désactiver sur batterie (menu Réveil du cadre).");
   if (config.ecrans && config.ecrans.nb === 2) connexion(s1, 'Écran 2 : ');
   if (dateApercu) {
@@ -1582,6 +1594,8 @@ function afficherFirmware(s) {
     t += ' Programme envoyé : compilé le ' + texteVersion(f.version) + ' (' + Math.round(f.taille / 1024) + ' Ko), ';
     if (inst === f.version) t += 'installé.';
     else if (inst && inst > f.version) t += 'plus ancien que celui de la carte : ignoré.';
+    else if (s && s.fwko === f.version) t += 'essayé par la carte, mais il plantait ou ne joignait pas le serveur : elle est revenue à son programme précédent. Envoie une version corrigée.';
+    else if ((f.telech || 0) >= 3) t += 'téléchargé 3 fois sans être gardé par la carte : plus proposé. Renvoie-le pour réessayer.';
     else t += 'en attente du prochain réveil.';
   }
   $('fwInfo').textContent = t;

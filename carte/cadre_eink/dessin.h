@@ -83,6 +83,7 @@ int rappelJPEG(JPEGDRAW* d);
 bool tramer(const uint8_t* g, int gl, int gh, int x0, int y0, int w, int h, float contraste);
 bool dessinerPochette(uint8_t* jpg, int taille, const char* titre, const char* artiste, const char* album);
 void dessinerMessage(const char* titre, const char* detail);
+void dessinerHorsLigne(const char* raison, const char* dernieres);
 void preparerDessin();
 uint32_t empreinteImage(const uint8_t* p, size_t n);
 int zonesDuPlan(const uint8_t* plan, int taille, ZonePlan* zones, int max);
@@ -1017,6 +1018,24 @@ void dessinerMessage(const char* titre, const char* detail) {
   texteCentre(canvas.width() / 2, canvas.height() / 2 - 10, titre);
   police(u8g2_font_fur20_tf);
   texteCentre(canvas.width() / 2, canvas.height() / 2 + 40, detail);
+}
+
+// Ecran "hors ligne" : le cadre n'arrive plus a joindre le serveur depuis longtemps, ce qu'il affichait
+// (date, meteo...) est perime. 'raison' : ce qui coince ; 'dernieres' : date de la derniere reponse du
+// serveur ("sam. 7 novembre a 14:05", ecrite par le serveur), vide si inconnue.
+void dessinerHorsLigne(const char* raison, const char* dernieres) {
+  canvas.fillScreen(BLANC);
+  int cx = canvas.width() / 2, cy = canvas.height() / 2;
+  police(u8g2_font_fub30_tf);
+  texteCentre(cx, cy - 50, "Hors ligne");
+  police(u8g2_font_fur20_tf);
+  texteCentre(cx, cy + 5, raison);
+  char t[96];
+  if (dernieres && dernieres[0]) snprintf(t, sizeof t, "Dernières nouvelles le %s", dernieres);
+  else snprintf(t, sizeof t, "Aucune nouvelle depuis le démarrage du cadre");
+  texteCentre(cx, cy + 45, t);
+  police(u8g2_font_fur11_tf);
+  texteCentre(cx, cy + 100, "Le cadre réessaie toutes les 30 minutes.");
 }
 
 void preparerDessin() {
