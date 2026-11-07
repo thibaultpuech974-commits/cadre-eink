@@ -1056,10 +1056,10 @@ uint32_t empreinteImage(const uint8_t* p, size_t n) {
   return h ? h : 1;
 }
 
-// Lit les zones d'un plan partiel (P simple, D double, I inversion ; verifie tout : taille, bornes,
+// Lit les zones d'un plan partiel (P simple, D/T/Q 2 a 4 passes, I inversion ; verifie tout : taille, bornes,
 // x et largeur multiples de 8). Renvoie le nombre de zones, ou -1 si le plan est illisible.
 int zonesDuPlan(const uint8_t* plan, int taille, ZonePlan* zones, int max) {
-  if (taille < 2 || !strchr("PDI", plan[0]) || !plan[0] || plan[1] < 1 || plan[1] > max) return -1;
+  if (taille < 2 || !strchr("PDTQI", plan[0]) || !plan[0] || plan[1] < 1 || plan[1] > max) return -1;
   int n = plan[1], pos = 2;
   for (int k = 0; k < n; k++) {
     if (pos + 8 > taille) return -1;

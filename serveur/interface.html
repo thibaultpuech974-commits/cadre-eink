@@ -319,11 +319,12 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <p class="aide repliable">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
   <label style="margin-top:12px"><input type="checkbox" id="partiel"> Mises à jour partielles de l'écran</label>
   <label>Méthode <select id="methodePartiel" style="width:auto"><option value="simple">simple (sans clignotement)</option>
-    <option value="double">double passe</option><option value="inversion">inversion des zones (petit clignotement, moins de traces)</option></select></label>
+    <option value="double">double passe</option><option value="triple">triple passe</option><option value="quadruple">quadruple passe</option>
+    <option value="inversion">inversion des zones (petit clignotement, moins de traces)</option></select></label>
   <label>Complet après <select id="maxPartiels" style="width:auto"><option value="0">aucune limite de</option><option>3</option><option>6</option><option>12</option></select> mises à jour partielles</label>
   <label>Rafraîchissement complet au moins toutes les <select id="completH" style="width:auto"><option>6</option><option>12</option><option>24</option></select> h</label>
   <label>Complet dès que plus de <select id="seuilPartiel" style="width:auto"><option>20</option><option>40</option><option>60</option></select> % de l'écran change</label>
-  <p class="aide repliable">Quand peu de choses changent (température, heure d'un bus), seules ces zones sont redessinées : environ 0,6 s sans clignotement, au lieu de 4,5 s pour un rafraîchissement complet. Le cadre repasse en complet quand une grande partie de l'écran change, pour une photo ou une pochette, et avec un nettoyage (l'écran passe d'abord au blanc) à son démarrage et au moins une fois par période choisie, comme le conseille le fabricant de l'écran. Si des traces d'anciennes images apparaissent, essaie une autre méthode (« double passe » insiste sur les pixels qui changent, « inversion » fait passer chaque zone en négatif puis la redessine), limite le nombre de mises à jour partielles entre deux complets, ou décoche-les. Changer de méthode nettoie l'écran au prochain affichage, pour comparer sur un écran propre.</p>
+  <p class="aide repliable">Quand peu de choses changent (température, heure d'un bus), seules ces zones sont redessinées : environ 0,6 s sans clignotement, au lieu de 4,5 s pour un rafraîchissement complet. Le cadre repasse en complet quand une grande partie de l'écran change, pour une photo ou une pochette, et avec un nettoyage (l'écran passe d'abord au blanc) à son démarrage et au moins une fois par période choisie, comme le conseille le fabricant de l'écran. Si des traces d'anciennes images apparaissent, essaie une autre méthode (« double », « triple » ou « quadruple passe » insistent sur les pixels qui changent avec 2 à 4 impulsions, environ 0,5 s chacune, « inversion » fait passer chaque zone en négatif puis la redessine), limite le nombre de mises à jour partielles entre deux complets, ou décoche-les. Changer de méthode nettoie l'écran au prochain affichage, pour comparer sur un écran propre.</p>
   <div class="msg" id="msgReveil"></div>
 </details>
 
@@ -1196,7 +1197,7 @@ function afficherStatut(s, maintenant, s1) {
 // Comment l'ecran a ete rafraichi pour la derniere image (plan du serveur : "P;2;3", "C;seuil", "N;quotidien", "R")
 function decrirePlan(p) {
   var m = String(p || '').split(';');
-  var methodes = { P: '', D: ', double passe', I: ', inversion des zones' };
+  var methodes = { P: '', D: ', double passe', T: ', triple passe', Q: ', quadruple passe', I: ', inversion des zones' };
   if (m[0] in methodes) return { court: 'partielle', long: 'mise à jour partielle' + methodes[m[0]] + ', ' + m[1] + (m[1] === '1' ? ' zone' : ' zones') + ' (' + m[2] + ' % de l\'écran)' };
   if (m[0] === 'R') return { court: 'identique', long: 'image identique, écran non rafraîchi' };
   var raisons = { seuil: 'trop de changements', inconnue: 'image à l\'écran inconnue', desactive: 'mises à jour partielles désactivées',
