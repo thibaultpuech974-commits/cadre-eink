@@ -8,7 +8,7 @@ const extrait = nom => {
     if (page[k] === '}' && --n === 0) return page.slice(i, k + 1);
   }
 };
-const { periodesCharge, estimation } = new Function(['pourcentage', 'periodesCharge', 'estimation'].map(extrait).join('\n') +
+const { periodesCharge, estimation } = new Function(['pourcentage', 'pctPoint', 'periodesCharge', 'estimation'].map(extrait).join('\n') +
   '\nreturn { pourcentage, periodesCharge, estimation };')();
 const min = iso => Math.floor(Date.parse(iso) / 60000);
 // Heure d'hiver de Paris (UTC+1), sans dépendre des données de langue de la machine qui lance les tests
@@ -50,3 +50,15 @@ const trou = [];
 for (let k = 0; k < 24; k++) trou.push([min('2026-10-20T00:00+02:00') + k * 60, 3950 - 2 * k]);
 for (let k = 0; k < 24; k++) trou.push([min('2026-10-23T00:00+02:00') + k * 60, 4000 - Math.round(k / 2)]);
 console.log('après un trou :', autonomie(trou));
+
+// 5. Carte avec jauge : [minutes, mV, dixièmes de %, dixièmes de % par heure]. Recharge vue par la vitesse
+//    mesurée (+15 % par heure), puis la tension retombe de 0,05 V sans que le pourcentage de la jauge bouge
+const jauge = [];
+for (let k = 0; k < 24; k++) jauge.push([min('2026-10-26T00:00+01:00') + k * 60, 3850 + bruit(4), Math.round(600 - 10 * k / 24), 0]);
+jauge.push([min('2026-10-27T00:00+01:00'), 4000, 650, 150], [min('2026-10-27T01:00+01:00'), 4100, 700, 140]);
+for (let k = 1; k <= 30; k++) jauge.push([min('2026-10-27T01:00+01:00') + k * 60, 4050 - Math.round(k / 3), Math.round(700 - 10 * k / 24), 0]);
+console.log('jauge : charge', charges(jauge), '| autonomie', autonomie(jauge));
+// 6. Batterie presque pleine branchée : la tension ne monte presque pas, seule la jauge voit la charge
+const pleine = [];
+for (let k = 0; k < 6; k++) pleine.push([min('2026-10-28T08:00+01:00') + k * 60, 4150 + bruit(3), 960, k >= 3 ? 25 : 0]);
+console.log('presque pleine :', charges(pleine));

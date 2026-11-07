@@ -367,10 +367,15 @@ async function routeEtat(url, env) {
     // L'offre gratuite limite les ecritures (~1 000 par jour) : l'etat du cadre n'est enregistre
     // que toutes les 10 min, ou quand quelque chose d'important change (mode, version, batterie).
     const bat = parseFloat(url.searchParams.get('bat'));
+    // Jauge de la carte (MAX17048) : pourcentage et vitesse de charge (+) ou de decharge (-) en % par heure
+    const lu = (nom, min, max) => { const x = parseFloat(url.searchParams.get(nom)); return isNaN(x) ? null : Math.round(Math.max(min, Math.min(max, x)) * 10) / 10; };
+    const pct = lu('pct', 0, 110), crate = lu('crate', -200, 200);
     const cleStatut = ecran ? 'statut' + ecran : 'statut';
     const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null, hb: (ancien && ancien.hb) || 0 };
+    if (pct !== null) nouveau.pct = pct;
+    if (crate !== null) nouveau.crate = crate;
     // Historique de la batterie : un point par heure, 30 jours (24 ecritures par jour au plus)
     let historique = false;
     if (nouveau.bat > 2.5 && maintenant - nouveau.hb >= 55 * 60000) {
@@ -379,13 +384,17 @@ async function routeEtat(url, env) {
         const h = JSON.parse((await env.CADRE.get(cleH)) || '{"pts":[]}');
         const debut = Math.floor((maintenant - 30 * 86400e3) / 60000);
         h.pts = h.pts.filter(p => p[0] >= debut);
-        h.pts.push([Math.floor(maintenant / 60000), Math.round(nouveau.bat * 1000)]);   // minutes, millivolts
+        // minutes, millivolts, et si la carte a une jauge : dixiemes de %, dixiemes de % par heure
+        const p = [Math.floor(maintenant / 60000), Math.round(nouveau.bat * 1000)];
+        if (pct !== null) p.push(Math.round(pct * 10), crate !== null ? Math.round(crate * 10) : null);
+        h.pts.push(p);
         await env.CADRE.put(cleH, JSON.stringify(h));
         nouveau.hb = maintenant; historique = true;
       } catch (e) { /* limite d'ecriture */ }
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
-      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05);
+      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
+      (crate !== null && (ancien.crate >= 2) !== (crate >= 2));          // debut ou fin de charge : la page le montre tout de suite
     if (aEcrire) {
       try { await env.CADRE.put(cleStatut, JSON.stringify(nouveau)); } catch (e) { /* limite atteinte : sans gravite */ }
     }

@@ -21,3 +21,20 @@ kv.delete('batterie');
 horloge(new Date(t0 + 41 * 86400e3).toISOString());
 await req('/api/etat?bat=0.00');
 console.log('sans mesure :', kv.has('batterie') ? 'point ajouté (erreur)' : 'rien enregistré');
+// Carte avec jauge (Feather) : pourcentage et vitesse enregistrés dans l'état et dans l'historique
+kv.delete('batterie'); kv.delete('statut');
+horloge(new Date(t0 + 42 * 86400e3).toISOString());
+await req('/api/etat?bat=4.05&pct=85.34&crate=12.5');
+h = JSON.parse(kv.get('batterie').v);
+let st = JSON.parse(kv.get('statut').v);
+console.log('jauge : état', st.pct, st.crate, '| point', JSON.stringify(h.pts.at(-1).slice(1)));
+// Fin de charge 2 min plus tard : l'état est réécrit tout de suite, sans attendre 10 min
+horloge(new Date(t0 + 42 * 86400e3 + 2 * 60000).toISOString());
+await req('/api/etat?bat=4.05&pct=85.4&crate=0');
+st = JSON.parse(kv.get('statut').v);
+console.log('fin de charge enregistrée :', st.crate);
+// Valeurs absurdes : bornées (0 à 110 %, -200 à +200 % par heure)
+kv.delete('statut');
+await req('/api/etat?bat=4.05&pct=900&crate=-9999');
+st = JSON.parse(kv.get('statut').v);
+console.log('valeurs bornées :', st.pct, st.crate);
