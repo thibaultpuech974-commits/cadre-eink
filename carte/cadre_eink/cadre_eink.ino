@@ -7,8 +7,9 @@
 //      envoi d'une copie de l'image au serveur (apercu web)
 //   3. veille profonde jusqu'au prochain reveil
 //
-//  Ce fichier : reglages, Wi-Fi, ecran, veille. Le dessin de l'image est dans dessin.h
-//  (meme dossier, second onglet de l'IDE Arduino).
+//  Ce fichier : reglages, Wi-Fi, ecran, veille. Dans le meme dossier (autres onglets de l'IDE) :
+//  dessin.h (dessin de l'image), certificats.h (verification du serveur) et secrets.h (tes
+//  identifiants, a creer depuis secrets.exemple.h).
 //
 //  Bibliotheques (gestionnaire de bibliotheques de l'IDE Arduino) :
 //    GxEPD2, U8g2_for_Adafruit_GFX, ArduinoJson, JPEGDEC (bitbank2)
@@ -21,15 +22,18 @@
 // =====================================================================
 
 // ======================= A PERSONNALISER ==============================
-const char* WIFI_SSID   = "NOM_DE_TA_BOX";
-const char* WIFI_MDP    = "MOT_DE_PASSE";
-const char* SERVEUR     = "https://cadre.TON-NOM.workers.dev";   // sans / a la fin
-const char* CLE         = "TON_MOT_DE_PASSE";                    // la meme que dans Cloudflare (secours sans Access)
-// Jeton de service Cloudflare Access du cadre (Zero Trust -> Access -> Service credentials).
-// Laisser vide tant qu'Access n'est pas active sur le Worker.
-const char* ACCES_ID     = "";   // CF-Access-Client-Id     (se termine par .access)
-const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
+// Identifiants (Wi-Fi, adresse du serveur, mot de passe, jeton Access) : dans secrets.h, a cote de
+// ce fichier, jamais envoye sur GitHub. La premiere fois : copier secrets.exemple.h en secrets.h,
+// puis le remplir.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Fichier secrets.h introuvable : copie secrets.exemple.h en secrets.h (meme dossier) et remplis-le"
+#endif
 #define ECRAN_PRESENT 1   // 0 = pas d'ecran branche : on dessine quand meme et on envoie l'apercu
+// 1 = la carte verifie le certificat du serveur (voir certificats.h). 0 = sans verification, comme
+// avant : seulement pour depanner (Cloudflare passe a une autorite absente de certificats.h).
+#define VERIFIER_CERTIFICAT 1
 // =====================================================================
 
 #include <WiFi.h>
@@ -58,6 +62,8 @@ const char* ACCES_SECRET = "";   // CF-Access-Client-Secret
 
 // Dessin de l'image (dimensions, polices, blocs du tableau de bord, pochette...) : voir dessin.h
 #include "dessin.h"
+// Certificats racine des autorites qu'utilise Cloudflare (verification du serveur)
+#include "certificats.h"
 
 // =====================================================================
 //  PARTIE CARTE ESP32 (reseau, ecran, veille)
@@ -213,6 +219,17 @@ bool connecterWifi() {
   return true;
 }
 
+// Connexion securisee : la carte verifie que le serveur est bien le sien (certificat signe par une
+// autorite de certificats.h, au nom du serveur). Sans cela, une fausse borne Wi-Fi au meme nom pourrait
+// lire ses jetons et lui envoyer un faux programme.
+void securiser(WiFiClientSecure& client) {
+#if VERIFIER_CERTIFICAT
+  client.setCACert(RACINES);
+#else
+  client.setInsecure();
+#endif
+}
+
 // Identifie la carte aupres du serveur : jeton de service Cloudflare Access s'il est rempli,
 // et mot de passe CLE (utilise seulement si Access n'est pas active).
 // (static : les tests sur ordinateur, sans HTTPClient, ne generent pas son prototype)
@@ -303,7 +320,7 @@ void mettreAJourProgramme(const char* version) {
   }
   Serial.printf("Mise a jour du programme : %s -> %s\n", versionCarte, version);
   WiFiClientSecure client;
-  client.setInsecure();
+  securiser(client);
   client.setTimeout(30);
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.setLedPin(LED_BUILTIN, HIGH);  // la LED rouge s'allume pendant l'ecriture
@@ -351,7 +368,7 @@ char causeEchec = 'S';
 
 int telecharger(const String& chemin, uint8_t** dest, int max) {
   WiFiClientSecure client;
-  client.setInsecure();
+  securiser(client);
   HTTPClient http;
   causeEchec = 'S';
   if (!http.begin(client, String(SERVEUR) + chemin)) return 0;
@@ -397,7 +414,7 @@ static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   snprintf(chemin, sizeof chemin, "/api/apercu?r=%d&plan=1&crc=%08lx&dc=%lu&pr=%lu&np=%lu", rotation, (unsigned long)empreinteAffichee,
            (unsigned long)secondesDepuisComplet, (unsigned long)reveilSecondes, (unsigned long)partielsDepuisComplet);
   WiFiClientSecure client;
-  client.setInsecure();
+  securiser(client);
   HTTPClient http;
   if (!http.begin(client, String(SERVEUR) + chemin)) return 'C';
   identifier(&http);
@@ -451,9 +468,15 @@ void afficherComplet(bool nettoyage) {
 // memoire "precedente" (l'image a l'ecran) et sa memoire "courante" (la nouvelle). Ces memoires sont perdues
 // pendant la veille : on met la nouvelle image dans les deux, puis on prepare les zones selon la methode.
 // Le canvas a 1 = noir, l'ecran 1 = blanc : "true" inverse a l'ecriture, "false" donne le negatif.
+//
+// Attention : apres chaque mise a jour partielle, ce controleur ECHANGE le role de ses deux memoires
+// (constate avec le programme test_ecran, nov. 2026) : la memoire 0x24 (ecrite par writeImage, "courante")
+// devient la "precedente", et la 0x26 (writeImageToPrevious) la "courante". Une seconde passe doit en tenir
+// compte. Au rallumage de l'ecran, les roles reviennent a la normale.
 //  P (simple)    : ancien contenu des zones (envoye par le serveur) dans la "precedente", une passe ;
 //                  seuls les pixels qui changent bougent, sans clignotement.
-//  D (double)    : pareil, en deux passes : les pixels qui changent recoivent deux impulsions.
+//  D (double)    : pareil, puis memoires rechargees pour refaire le meme trajet : les pixels qui changent
+//                  recoivent une seconde impulsion dans le meme sens.
 //  I (inversion) : chaque zone passe en negatif, puis revient a la nouvelle image : tous ses pixels font
 //                  un aller-retour complet (moins de traces, petit clignotement des seules zones).
 bool afficherZones(const uint8_t* plan, int taille) {
@@ -462,20 +485,28 @@ bool afficherZones(const uint8_t* plan, int taille) {
   if (n < 0) { Serial.println("Plan partiel illisible : rafraichissement complet"); return false; }
 #if ECRAN_PRESENT
   uint8_t* img = canvas.getBuffer();
-  allumerEcran(false);
+  allumerEcran(false);             // controleur remis a zero : roles normaux des memoires
   display.epd2.writeImageAgain(img, 0, 0, LARGEUR, HAUTEUR, true);
   if (plan[0] == 'I') {
+    // 0x24 (courante) : zones en negatif ; 0x26 (precedente) : nouvelle image
     for (int k = 0; k < n; k++) display.epd2.writeImagePart(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, false);
-    display.epd2.refresh(true);    // zones en negatif
-    for (int k = 0; k < n; k++) {
-      display.epd2.writeImagePartToPrevious(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, false);
-      display.epd2.writeImagePart(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
-    }
-    display.epd2.refresh(true);    // retour a la nouvelle image
+    display.epd2.refresh(true);    // nouvelle image -> zones en negatif
+    // Echange : 0x24 (le negatif) est maintenant la precedente, 0x26 (la nouvelle image) la courante :
+    // les memoires sont deja comme il faut pour le retour
+    display.epd2.refresh(true);    // negatif -> nouvelle image
   } else {
+    // 0x26 (precedente) : ancien contenu des zones ; 0x24 (courante) : nouvelle image
     for (int k = 0; k < n; k++) display.epd2.writeImageToPrevious(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
     display.epd2.refresh(true);    // partiel sur tout l'ecran : seuls les pixels differents bougent
-    if (plan[0] == 'D') display.epd2.refresh(true);   // memoires inchangees : memes pixels, 2e impulsion
+    if (plan[0] == 'D') {
+      // Echange : 0x24 est maintenant la precedente, 0x26 la courante. On y remet l'ancien contenu et la
+      // nouvelle image (dans cet ordre de roles) pour refaire le meme trajet ancien -> nouveau.
+      for (int k = 0; k < n; k++) {
+        display.epd2.writeImage(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
+        display.epd2.writeImagePartToPrevious(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
+      }
+      display.epd2.refresh(true);  // 2e impulsion, dans le meme sens
+    }
   }
   eteindreEcran();
 #endif
