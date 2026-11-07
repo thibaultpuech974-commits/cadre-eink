@@ -13,134 +13,34 @@
 //   - Cloudflare Access sur le Worker (connexion + double authentification
 //     pour la page web, jetons de service pour la carte et le raccourci iPhone)
 //   - en secours, sans Access : une variable secrete CLE (mot de passe)
+//
+//  Ce fichier garde le point d'entree et les routes (/api/...). Le reste est range par theme :
+//   commun.js            dimensions de l'ecran, reponses HTTP, copie de secours, texte pour l'ecran
+//   temps.js             fuseaux horaires, noms des jours et des mois
+//   config.js            reglages (defaut, lecture, verification d'une modification)
+//   disposition.js       grille et blocs de l'ecran
+//   scenes.js            creneaux, nuit, scenes
+//   bus.js               horaires et temps reel des bus
+//   meteo.js             Open-Meteo
+//   agenda.js            calendriers ICS et anniversaires
+//   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
+//   tableau.js           donnees de chaque bloc envoyees a la carte
+//   rafraichissement.js  plan de rafraichissement partiel de l'ecran
 // =====================================================================
 
-import CIRCUITS from './circuits.js';
 // Page web de reglage : fichier a part, integre par Cloudflare au deploiement (regle "Text" de wrangler.jsonc)
 import INTERFACE from './interface.html';
 // Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
 import APERCU_WASM from './apercu.wasm';
-
-const LARGEUR = 960, HAUTEUR = 680, OCTETS = (LARGEUR / 8) * HAUTEUR;   // 81 600 octets
-const TZ = 'Europe/Paris';
-const MODES = ['tableau', 'photo', 'pochette', 'blanc'];
-
-const CONFIG_DEFAUT = {
-  mode: 'tableau',
-  version: 1,
-  reveilMin: 10,
-  dev: false, devSecondes: 30,     // mode developpement : la carte ne dort pas
-  // Mode nuit : reveils espaces (economie de batterie), la plage peut passer minuit
-  nuit: { actif: false, debut: '23:00', fin: '07:00', intervalleMin: 60 },
-  // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
-  // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
-  // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double (deux passes, pixels plus
-  // francs) ou inversion (chaque zone passe en negatif puis revient : moins de traces, petit clignotement).
-  // maxPartiels : rafraichissement complet apres ce nombre de mises a jour partielles (0 = pas de limite)
-  rafraich: { partiel: true, completH: 24, seuil: 40, methode: 'simple', maxPartiels: 0 },
-  meteo: {
-    ville: 'Nîmes', lat: 43.84, lon: 4.36,
-    vent: true, details: true, soleil: true,
-    heures: true, pasHeures: 3, nbHeures: 6,
-    jours: true, nbJours: 4,
-    courbeHeures: 24,              // graphique de temperature : 12, 24, 36 ou 48 h
-  },
-  // Scenes : dispositions affichees pendant une periode (creneaux, Grand Prix, dates), par ordre de priorite.
-  // Hors de toute scene, c'est la disposition "par defaut" (disposition / dispositionPortrait).
-  scenes: [],
-  agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [] },
-  // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
-  disposition: [
-    { id: 'date', x: 0, y: 0, w: 12, h: 1 },
-    { id: 'meteo', x: 0, y: 1, w: 12, h: 2 },
-    { id: 'heures', x: 0, y: 3, w: 12, h: 2 },
-    { id: 'jours', x: 0, y: 5, w: 5, h: 3 },
-    { id: 'agenda', x: 5, y: 5, w: 7, h: 3 },
-  ],
-  dispositionPortrait: [
-    { id: 'date', x: 0, y: 0, w: 8, h: 1 },
-    { id: 'meteo', x: 0, y: 1, w: 8, h: 2 },
-    { id: 'heures', x: 0, y: 3, w: 8, h: 2 },
-    { id: 'jours', x: 0, y: 5, w: 8, h: 2 },
-    { id: 'agenda', x: 0, y: 7, w: 8, h: 5 },
-  ],
-  affichage: { traits: true, bordureApercu: 10, rotation: 0 },
-  // Un ou deux ecrans identiques assembles en un seul grand ecran : 'cote' (cote a cote) ou 'dessus'
-  // (l'un au-dessus de l'autre). L'ecran 0 est celui de gauche (ou du haut). joint = espace entre
-  // les zones affichables des deux dalles, en mm (sert a l'apercu et a la photo).
-  ecrans: { nb: 1, assemblage: 'cote', joint: 15 },
-  photo: { version: 0, t: 0 },
-  pochette: { version: 0, titre: '', artiste: '', album: '', t: 0 },
-  // Prochains bus : arrets choisis sur la page web, lignes (null = toutes)
-  bus: { arrets: [], options: [], lignes: null, nb: 4, horizon: 90, sourceRT: '' },
-};
-
-// --- Grille de disposition (memes valeurs dans l'interface web) ---
-const MARGE = 24, GOUTTIERE = 16;
-const WIDGETS = {               // taille minimale de chaque widget (en cases)
-  date: { w: 3, h: 1 }, meteo: { w: 4, h: 2 }, heures: { w: 4, h: 2 }, jours: { w: 3, h: 2 }, agenda: { w: 3, h: 1 }, bus: { w: 3, h: 2 },
-  courbe: { w: 4, h: 2 }, f1: { w: 3, h: 2 },
-};
-const ROTATIONS = [0, 1, 3];
-// Taille et police du texte, reglables bloc par bloc
-const TAILLES = { S: 0.8, M: 1, L: 1.25, XL: 1.5 };
-const POLICES = ['moderne', 'helvetica', 'classique', 'machine'];    // 0 = paysage, 1 = portrait, 3 = portrait inverse
-// Grille selon l'orientation : 12 x 8 cases en paysage, 8 x 12 en portrait
-// Avec deux ecrans, la grille est doublee (24 x 8 cote a cote, 12 x 16 l'un sur l'autre en paysage) ;
-// pc x pr = cases d'une dalle. Un bloc ne peut pas etre a cheval sur la jointure.
-function grille(rotation, ecrans) {
-  const portrait = rotation === 1 || rotation === 3;
-  const g = portrait ? { pc: 8, pr: 12, L: HAUTEUR, H: LARGEUR } : { pc: 12, pr: 8, L: LARGEUR, H: HAUTEUR };
-  const deux = ecrans && ecrans.nb === 2;
-  g.nx = deux && ecrans.assemblage !== 'dessus' ? 2 : 1;
-  g.ny = deux && ecrans.assemblage === 'dessus' ? 2 : 1;
-  g.cols = g.pc * g.nx; g.rangs = g.pr * g.ny;
-  g.caseL = (g.L - 2 * MARGE + GOUTTIERE) / g.pc;
-  g.caseH = (g.H - 2 * MARGE + GOUTTIERE) / g.pr;
-  return g;
-}
-// Ecran (0 ou 1) qui contient le bloc, ou -1 s'il est a cheval sur la jointure
-function ecranDuBloc(d, g) {
-  const ex = Math.floor(d.x / g.pc), ey = Math.floor(d.y / g.pr);
-  if (ex !== Math.floor((d.x + d.w - 1) / g.pc) || ey !== Math.floor((d.y + d.h - 1) / g.pr)) return -1;
-  return ex + ey;
-}
-function enPixels(d, g) {
-  const n = ecranDuBloc(d, g), x = d.x % g.pc, y = d.y % g.pr;   // position dans sa dalle
-  return {
-    id: d.id, n,
-    e: TAILLES[d.t] || 1,
-    f: Math.max(0, POLICES.indexOf(d.p)),
-    x: Math.round(MARGE + x * g.caseL), y: Math.round(MARGE + y * g.caseH),
-    w: Math.round(d.w * g.caseL - GOUTTIERE), h: Math.round(d.h * g.caseH - GOUTTIERE),
-  };
-}
-// Garde seulement des widgets valides, sans doublon ni chevauchement
-function validerDisposition(liste, g) {
-  const res = [];
-  const occupe = new Set();
-  for (const d of Array.isArray(liste) ? liste : []) {
-    const min = WIDGETS[d && d.id];
-    if (!min || res.some(r => r.id === d.id)) continue;
-    const x = d.x | 0, y = d.y | 0, w = d.w | 0, h = d.h | 0;
-    if (x < 0 || y < 0 || w < min.w || h < min.h || x + w > g.cols || y + h > g.rangs) continue;
-    if (ecranDuBloc({ x, y, w, h }, g) < 0) continue;
-    const cases = [];
-    for (let i = x; i < x + w; i++) for (let j = y; j < y + h; j++) cases.push(i + ',' + j);
-    if (cases.some(c => occupe.has(c))) continue;
-    cases.forEach(c => occupe.add(c));
-    const o = { id: d.id, x, y, w, h };
-    if (TAILLES[d.t] && d.t !== 'M') o.t = d.t;
-    if (POLICES.includes(d.p) && d.p !== 'moderne') o.p = d.p;
-    res.push(o);
-  }
-  return res;
-}
-
-const JOURS_COURTS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-const JOURS_LONGS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
-  'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.js';
+import { dateDuJour, deux, mural } from './temps.js';
+import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
+import { ROTATIONS } from './disposition.js';
+import { reveilNuit } from './scenes.js';
+import { GTFS_TANGO, oublierIndexBus, prochainsBus } from './bus.js';
+import { evenementsICS } from './agenda.js';
+import { construireTableau } from './tableau.js';
+import { empreinteImage, encoderPlan, planRafraichissement, resumePlan } from './rafraichissement.js';
 
 // ---------------------------------------------------------------------
 //  Point d'entree
@@ -198,7 +98,6 @@ export default {
     }
   },
 };
-
 // Comment la page web est connectee : par Cloudflare Access (avec l'adresse email) ou par mot de passe
 async function routeSession(access) {
   if (!access) return json({ access: false });
@@ -206,108 +105,6 @@ async function routeSession(access) {
   try { const id = await access.getIdentity(); email = (id && id.email) || ''; } catch (e) { /* jeton de service : pas d'identite */ }
   return json({ access: true, email });
 }
-
-// ---------------------------------------------------------------------
-//  Utilitaires
-// ---------------------------------------------------------------------
-function texte(t, statut = 200) {
-  return new Response(t, { status: statut, headers: { 'content-type': 'text/plain; charset=utf-8' } });
-}
-function json(obj, statut = 200) {
-  return new Response(JSON.stringify(obj), {
-    status: statut,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  });
-}
-function fusionner(cible, source) {
-  for (const k of Object.keys(source || {})) {
-    const v = source[k];
-    if (v && typeof v === 'object' && !Array.isArray(v) && cible[k] && typeof cible[k] === 'object' && !Array.isArray(cible[k])) {
-      fusionner(cible[k], v);
-    } else {
-      cible[k] = v;
-    }
-  }
-  return cible;
-}
-async function lireConfig(env) {
-  const brut = await env.CADRE.get('config');
-  const lu = brut ? JSON.parse(brut) : {};
-  const cfg = fusionner(JSON.parse(JSON.stringify(CONFIG_DEFAUT)), lu);
-  if (!Array.isArray(lu.scenes)) migrerScenes(cfg, lu);
-  return cfg;
-}
-// Anciens reglages (disposition "pendant les creneaux bus", option F1 "semaine du GP") -> scenes
-function migrerScenes(cfg, lu) {
-  const copie = o => JSON.parse(JSON.stringify(o || []));
-  const sans = (l, id) => (l || []).filter(d => d.id !== id);
-  const avec = (l, id) => (l || []).some(d => d.id === id);
-  const b = lu.bus || {};
-  cfg.scenes = [];
-  const dB = lu.dispositionBus || [], dBP = lu.dispositionBusPortrait || [];
-  const busUtilise = avec(cfg.disposition, 'bus') || avec(cfg.dispositionPortrait, 'bus') || dB.length || dBP.length;
-  if (busUtilise && !b.toujours) {
-    const cr = Array.isArray(b.creneaux) ? b.creneaux : b.jours ? [{ jours: b.jours, debut: b.debut, fin: b.fin }]
-      : [{ jours: [0, 0, 0, 0, 1, 0, 0], debut: '18:00', fin: '20:00' }];
-    cfg.scenes.push({ id: 'bus', nom: 'Bus', creneaux: cr, f1: '', du: '', au: '', reveilMin: b.reveilMin || 3,
-      disposition: copie(dB.length ? dB : cfg.disposition), dispositionPortrait: copie(dBP.length ? dBP : cfg.dispositionPortrait) });
-    cfg.disposition = sans(cfg.disposition, 'bus'); cfg.dispositionPortrait = sans(cfg.dispositionPortrait, 'bus');
-  }
-  if (lu.f1 && lu.f1.semaine && (avec(cfg.disposition, 'f1') || avec(cfg.dispositionPortrait, 'f1'))) {
-    cfg.scenes.push({ id: 'gp', nom: 'Grand Prix', creneaux: [], f1: 'semaine', du: '', au: '', reveilMin: 0,
-      disposition: copie(cfg.disposition), dispositionPortrait: copie(cfg.dispositionPortrait) });
-    cfg.disposition = sans(cfg.disposition, 'f1'); cfg.dispositionPortrait = sans(cfg.dispositionPortrait, 'f1');
-  }
-  for (const k of ['dispositionBus', 'dispositionBusPortrait', 'f1']) delete cfg[k];
-  for (const k of ['toujours', 'creneaux', 'reveilMin', 'jours', 'debut', 'fin']) delete cfg.bus[k];
-}
-async function ecrireConfig(env, cfg) {
-  await env.CADRE.put('config', JSON.stringify(cfg));
-}
-async function empreinte(chaine) {
-  const h = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(chaine));
-  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
-}
-
-// ---------------------------------------------------------------------
-//  Fuseaux horaires (sans bibliotheque)
-// ---------------------------------------------------------------------
-const formats = {};
-function formatFuseau(tz) {
-  if (!formats[tz]) {
-    formats[tz] = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-  }
-  return formats[tz];
-}
-function fuseauValide(tz) {
-  try { formatFuseau(tz); return tz; } catch (e) { return TZ; }
-}
-// Heure "murale" (y, m, d, hh, mi, ss, js = jour de semaine) d'un instant UTC dans un fuseau
-function mural(utcMs, tz = TZ) {
-  const o = {};
-  for (const p of formatFuseau(tz).formatToParts(new Date(utcMs))) o[p.type] = p.value;
-  const y = +o.year, m = +o.month, d = +o.day;
-  return { y, m, d, hh: +o.hour % 24, mi: +o.minute, ss: +o.second, js: new Date(Date.UTC(y, m - 1, d)).getUTCDay() };
-}
-function decalageMin(utcMs, tz) {
-  const w = mural(utcMs, tz);
-  return (Date.UTC(w.y, w.m - 1, w.d, w.hh, w.mi, w.ss) - Math.floor(utcMs / 1000) * 1000) / 60000;
-}
-// Heure murale dans un fuseau -> instant UTC
-function versUTC(w, tz) {
-  const brut = Date.UTC(w.y, w.m - 1, w.d, w.hh || 0, w.mi || 0, w.ss || 0);
-  if (tz === 'UTC') return brut;
-  const o1 = decalageMin(brut, tz);
-  let utc = brut - o1 * 60000;
-  const o2 = decalageMin(utc, tz);
-  if (o2 !== o1) utc = brut - o2 * 60000;
-  return utc;
-}
-const deux = n => String(n).padStart(2, '0');
-
 // ---------------------------------------------------------------------
 //  Routes
 // ---------------------------------------------------------------------
@@ -419,14 +216,12 @@ async function routeEtat(url, env) {
   }
   return json(etat);
 }
-
 async function routeLireConfig(env) {
   const cfg = await lireConfig(env);
   const statut = JSON.parse((await env.CADRE.get('statut')) || 'null');
   const statut1 = cfg.ecrans && cfg.ecrans.nb === 2 ? JSON.parse((await env.CADRE.get('statut1')) || 'null') : null;
   return json({ config: cfg, statut, statut1, maintenant: Date.now() });
 }
-
 async function routeEcrireConfig(req, env) {
   const modif = await req.json();
   const cfg = await lireConfig(env);
@@ -437,44 +232,6 @@ async function routeEcrireConfig(req, env) {
   await ecrireConfig(env, cfg);
   return json({ config: cfg, ignorees });
 }
-// Verifie et nettoie une modification des reglages (renvoie les anniversaires illisibles, ou un message d'erreur)
-function preparerModif(modif, cfg) {
-  delete modif.version; delete modif.photo; delete modif.pochette; delete modif.firmware;
-  if (modif.mode && !MODES.includes(modif.mode)) return 'Mode inconnu';
-  if (modif.ecrans) {
-    const e = modif.ecrans;
-    modif.ecrans = { nb: e.nb === 2 ? 2 : 1, assemblage: e.assemblage === 'dessus' ? 'dessus' : 'cote',
-      joint: Math.max(0, Math.min(100, +e.joint || 0)) };
-  }
-  const ecrans = modif.ecrans || cfg.ecrans;
-  if (modif.disposition !== undefined) modif.disposition = validerDisposition(modif.disposition, grille(0, ecrans));
-  if (modif.dispositionPortrait !== undefined) modif.dispositionPortrait = validerDisposition(modif.dispositionPortrait, grille(1, ecrans));
-  if (modif.scenes !== undefined) modif.scenes = validerScenes(modif.scenes, ecrans);
-  delete modif.dispositionBus; delete modif.dispositionBusPortrait; delete modif.f1;
-  if (modif.affichage && modif.affichage.rotation !== undefined && !ROTATIONS.includes(modif.affichage.rotation)) delete modif.affichage.rotation;
-  if (modif.rafraich !== undefined) {
-    const r = modif.rafraich || {}, actuel = cfg.rafraich || CONFIG_DEFAUT.rafraich;
-    modif.rafraich = {
-      partiel: r.partiel === undefined ? actuel.partiel : !!r.partiel,
-      completH: [6, 12, 24].includes(+r.completH) ? +r.completH : actuel.completH,
-      seuil: [20, 40, 60].includes(+r.seuil) ? +r.seuil : actuel.seuil,
-      methode: METHODES_PARTIEL[r.methode] ? r.methode : (actuel.methode || 'simple'),
-      maxPartiels: [0, 3, 6, 12].includes(+r.maxPartiels) ? +r.maxPartiels : (actuel.maxPartiels || 0),
-    };
-  }
-  if (modif.agenda && Array.isArray(modif.agenda.urls)) {
-    modif.agenda.urls = modif.agenda.urls.map(u => String(u).trim()).filter(Boolean);
-  }
-  let ignorees = [];
-  if (modif.agenda && typeof modif.agenda.anniversairesTexte === 'string') {
-    const r = lireAnniversaires(modif.agenda.anniversairesTexte);
-    modif.agenda.anniversaires = r.liste;
-    ignorees = r.ignorees;
-    delete modif.agenda.anniversairesTexte;
-  }
-  return ignorees;
-}
-
 // --- Etat de chaque calendrier de l'agenda (page web) : accessible ? combien d'evenements a venir ? ---
 async function routeEtatAgenda(req, env) {
   let demande;
@@ -502,7 +259,6 @@ async function routeEtatAgenda(req, env) {
   }));
   return json({ jours, calendriers });
 }
-
 // --- Previsualisation : l'etat qu'enverrait le serveur avec des reglages pas encore enregistres ---
 // La page le dessine elle-meme avec le code de la carte (apercu.wasm). Rien n'est enregistre.
 async function routePrevisualiser(req, env) {
@@ -529,7 +285,6 @@ async function routePrevisualiser(req, env) {
   }
   return json({ scene: contenu.scene.nom, ecrans });
 }
-
 // --- Sauvegarde des reglages (fichier telecharge depuis la page web) et restauration ---
 async function routeSauvegarde(env) {
   const cfg = await lireConfig(env);
@@ -558,24 +313,9 @@ async function routeRestaurer(req, env) {
   for (const k of ['photo', 'pochette', 'firmware']) if (actuel[k]) cfg[k] = actuel[k];
   cfg.version = actuel.version + 1;
   await ecrireConfig(env, cfg);
-  if (s.bus && Array.isArray(s.bus.passages)) { await env.CADRE.put('bus', JSON.stringify(s.bus)); indexBusCache = null; }
+  if (s.bus && Array.isArray(s.bus.passages)) { await env.CADRE.put('bus', JSON.stringify(s.bus)); oublierIndexBus(); }
   return json({ config: cfg });
 }
-
-// Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative)
-function lireAnniversaires(texte) {
-  const liste = [], ignorees = [];
-  for (const brut of texte.split(/\r?\n/)) {
-    const l = brut.trim();
-    if (!l) continue;
-    const m = /^(.*?)[\s:,;-]+(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{4}))?$/.exec(l);
-    const j = m ? +m[2] : 0, mo = m ? +m[3] : 0;
-    if (!m || !m[1].trim() || j < 1 || j > 31 || mo < 1 || mo > 12) { ignorees.push(l); continue; }
-    liste.push({ nom: m[1].trim().slice(0, 40), j, m: mo, a: m[4] ? +m[4] : 0 });
-  }
-  return { liste, ignorees };
-}
-
 async function routeEnvoyerPhoto(req, url, env) {
   const donnees = await req.arrayBuffer();
   const cfg = await lireConfig(env);
@@ -591,7 +331,6 @@ async function routeEnvoyerPhoto(req, url, env) {
   await ecrireConfig(env, cfg);
   return json({ ok: true, config: cfg });
 }
-
 async function routeEnvoyerPochette(req, url, env) {
   const donnees = await req.arrayBuffer();
   if (donnees.byteLength < 100) return texte('Image vide', 400);
@@ -611,14 +350,12 @@ async function routeEnvoyerPochette(req, url, env) {
   await ecrireConfig(env, cfg);
   return texte('Pochette envoyée au cadre');
 }
-
 // Relais du fichier d'horaires Tango (pour que la page web puisse le lire)
 async function routeGTFS() {
   const r = await fetch(GTFS_TANGO, { cf: { cacheTtl: 86400, cacheEverything: true } });
   if (!r.ok) return texte('Horaires Tango indisponibles (HTTP ' + r.status + ')', 502);
   return new Response(r.body, { headers: { 'content-type': 'application/zip', 'cache-control': 'no-store' } });
 }
-
 // Index des passages aux arrets choisis, prepare par la page web
 async function routeIndexBus(req, env) {
   const t = await req.text();
@@ -626,16 +363,14 @@ async function routeIndexBus(req, env) {
   const idx = JSON.parse(t);
   if (!Array.isArray(idx.passages)) return texte('Index invalide', 400);
   await env.CADRE.put('bus', t);
-  indexBusCache = null;
+  oublierIndexBus();
   return json({ ok: true, passages: idx.passages.length });
 }
-
 async function routeBinaire(env, cle, type) {
   const donnees = await env.CADRE.get(cle, 'arrayBuffer');
   if (!donnees) return texte('Rien a envoyer', 404);
   return new Response(donnees, { headers: { 'content-type': type, 'cache-control': 'no-store' } });
 }
-
 // --- Programme de la carte (mise a jour par Wi-Fi) ---
 const VERSION_FW = /^\d{8}-\d{6}$/;
 async function routeEnvoyerFirmware(req, url, env) {
@@ -658,7 +393,6 @@ async function routeRetirerFirmware(env) {
   await env.CADRE.delete('firmware');
   return json({ ok: true });
 }
-
 // Image que la carte vient de dessiner (avant de l'afficher). Avec ?plan=1, le serveur la compare a l'image
 // precedente et repond comment rafraichir l'ecran (voir planRafraichissement) ; sinon il repond "ok".
 async function routeEnvoyerApercu(req, url, env) {
@@ -683,145 +417,6 @@ async function routeEnvoyerApercu(req, url, env) {
   await env.CADRE.put(cle, donnees, { metadata });
   return reponse;
 }
-
-// ---------------------------------------------------------------------
-//  Rafraichissement de l'ecran, commande par le serveur
-//
-//  Le controleur de l'ecran garde deux images : la "precedente" (ce qui est affiche) et la "courante"
-//  (la nouvelle). En mise a jour partielle, il ne fait bouger que les pixels qui different, sans
-//  clignotement (~0,6 s au lieu de 4,5 s). Mais sa memoire est perdue pendant la veille : la carte doit
-//  lui redonner l'image affichee. Elle ne la garde pas ; le serveur, si (la derniere image recue), et il
-//  envoie l'ancien contenu des seules zones qui changent.
-//  Securite : la carte garde l'empreinte de l'image vraiment affichee (memoire RTC) et l'envoie ; si elle
-//  ne correspond pas a l'image du serveur (rafraichissement rate, reporte...), rafraichissement complet.
-//
-//  Plans : R rien (image identique), P partiel (zones), C complet, N complet avec nettoyage (l'ecran
-//  passe d'abord au blanc : au demarrage de la carte et au moins une fois par jour, comme le conseille
-//  le fabricant).
-// ---------------------------------------------------------------------
-const OCTETS_LIGNE = LARGEUR / 8;            // 120 octets par ligne (1 bit par pixel, 1 = noir)
-const CASE_L = 8, CASE_H = 40;               // cases de 64 x 40 pixels pour regrouper les differences
-const NCX = OCTETS_LIGNE / CASE_L, NCY = HAUTEUR / CASE_H;   // 15 x 17 cases
-const ZONES_MAX = 8;
-// Methodes de mise a jour partielle et lettre du plan correspondant (la carte fait le reste)
-const METHODES_PARTIEL = { simple: 'P', double: 'D', inversion: 'I' };
-
-// Empreinte d'une image (FNV-1a 32 bits, calculee de la meme facon par la carte ; 0 = "inconnue")
-function empreinteImage(octets) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < octets.length; i++) { h ^= octets[i]; h = Math.imul(h, 0x01000193); }
-  return ((h >>> 0) || 1).toString(16).padStart(8, '0');
-}
-
-// Rectangles (en pixels, x et largeur multiples de 8) qui contiennent toutes les differences entre a et b
-function zonesModifiees(a, b) {
-  // 1. Dans chaque case, les bornes exactes des octets qui different
-  const bornes = new Array(NCX * NCY).fill(null);
-  for (let y = 0; y < HAUTEUR; y++) {
-    const ligne = y * OCTETS_LIGNE, cy = (y / CASE_H) | 0;
-    for (let x = 0; x < OCTETS_LIGNE; x++) {
-      if (a[ligne + x] === b[ligne + x]) continue;
-      const c = cy * NCX + ((x / CASE_L) | 0), z = bornes[c];
-      if (!z) bornes[c] = { x0: x, x1: x, y0: y, y1: y };
-      else { if (x < z.x0) z.x0 = x; if (x > z.x1) z.x1 = x; z.y1 = y; }
-    }
-  }
-  // 2. Les cases voisines (diagonales comprises) forment une zone
-  const union = (p, q) => ({ x0: Math.min(p.x0, q.x0), x1: Math.max(p.x1, q.x1), y0: Math.min(p.y0, q.y0), y1: Math.max(p.y1, q.y1) });
-  const zones = [], vu = new Uint8Array(NCX * NCY);
-  for (let c = 0; c < bornes.length; c++) {
-    if (!bornes[c] || vu[c]) continue;
-    let z = bornes[c];
-    const pile = [c];
-    vu[c] = 1;
-    while (pile.length) {
-      const k = pile.pop(), kx = k % NCX, ky = (k / NCX) | 0;
-      z = union(z, bornes[k]);
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = kx + dx, ny = ky + dy, n = ny * NCX + nx;
-          if (nx < 0 || ny < 0 || nx >= NCX || ny >= NCY || vu[n] || !bornes[n]) continue;
-          vu[n] = 1;
-          pile.push(n);
-        }
-      }
-    }
-    zones.push(z);
-  }
-  // 3. Zones qui se chevauchent fusionnees ; au-dela de ZONES_MAX, on fusionne celles dont l'union
-  //    ajoute le moins de surface
-  const aire = z => (z.x1 - z.x0 + 1) * (z.y1 - z.y0 + 1);
-  const chevauche = (p, q) => p.x0 <= q.x1 && q.x0 <= p.x1 && p.y0 <= q.y1 && q.y0 <= p.y1;
-  for (;;) {
-    let fusion = false;
-    for (let i = 0; i < zones.length && !fusion; i++) {
-      for (let j = i + 1; j < zones.length && !fusion; j++) {
-        if (chevauche(zones[i], zones[j])) { zones[i] = union(zones[i], zones[j]); zones.splice(j, 1); fusion = true; }
-      }
-    }
-    if (fusion) continue;
-    if (zones.length <= ZONES_MAX) break;
-    let mi = 0, mj = 1, cout = Infinity;
-    for (let i = 0; i < zones.length; i++) {
-      for (let j = i + 1; j < zones.length; j++) {
-        const c = aire(union(zones[i], zones[j])) - aire(zones[i]) - aire(zones[j]);
-        if (c < cout) { cout = c; mi = i; mj = j; }
-      }
-    }
-    zones[mi] = union(zones[mi], zones[mj]);
-    zones.splice(mj, 1);
-  }
-  return zones.sort((p, q) => p.y0 - q.y0 || p.x0 - q.x0)
-    .map(z => ({ x: z.x0 * 8, y: z.y0, w: (z.x1 - z.x0 + 1) * 8, h: z.y1 - z.y0 + 1 }));
-}
-
-// Comment rafraichir l'ecran. p : crc (empreinte de l'image affichee selon la carte), dc (secondes depuis
-// le dernier rafraichissement complet), pr (secondes avant le prochain reveil), np (mises a jour partielles
-// depuis le dernier complet), r (orientation).
-function planRafraichissement(prec, metaPrec, nouv, p, cfg) {
-  const R = Object.assign({}, CONFIG_DEFAUT.rafraich, cfg.rafraich || {});
-  const crc = String(p.crc).toLowerCase();
-  if (!/^[0-9a-f]{8}$/.test(crc) || crc === '00000000') return { type: 'N', raison: 'demarrage' };
-  if (p.dc + p.pr > R.completH * 3600) return { type: 'N', raison: 'quotidien' };
-  if (!R.partiel) return { type: 'C', raison: 'desactive' };
-  const lettre = METHODES_PARTIEL[R.methode] || 'P';
-  // Methode changee depuis la derniere image : on repart d'un ecran propre pour pouvoir comparer
-  if (metaPrec && metaPrec.m && metaPrec.m !== lettre) return { type: 'N', raison: 'methode' };
-  if (cfg.mode !== 'tableau') return { type: 'C', raison: 'mode' };      // photo, pochette : images tramees
-  if (!prec || ((metaPrec && metaPrec.h) || empreinteImage(prec)) !== crc) return { type: 'C', raison: 'inconnue' };
-  if (metaPrec && metaPrec.r !== undefined && metaPrec.r !== p.r) return { type: 'C', raison: 'orientation' };
-  const zones = zonesModifiees(prec, nouv);
-  if (!zones.length) return { type: 'R' };
-  const part = zones.reduce((s, z) => s + z.w * z.h, 0) / (LARGEUR * HAUTEUR) * 100;
-  if (part > R.seuil) return { type: 'C', raison: 'seuil', part };
-  if (R.maxPartiels && p.np >= R.maxPartiels) return { type: 'C', raison: 'serie' };
-  return { type: lettre, zones, part };
-}
-// Reponse binaire lue par la carte : 1 octet (R, C, N), ou la lettre de la methode partielle (P, D, I),
-// le nombre de zones, puis pour chaque zone x, y, largeur, hauteur (2 octets chacun, petit-boutiste) et
-// l'ancien contenu de la zone, ligne par ligne
-function encoderPlan(plan, prec) {
-  if (!plan.zones) return new Uint8Array([plan.type.charCodeAt(0)]);
-  let taille = 2;
-  for (const z of plan.zones) taille += 8 + (z.w / 8) * z.h;
-  const o = new Uint8Array(taille), v = new DataView(o.buffer);
-  o[0] = plan.type.charCodeAt(0); o[1] = plan.zones.length;
-  let i = 2;
-  for (const z of plan.zones) {
-    v.setUint16(i, z.x, true); v.setUint16(i + 2, z.y, true); v.setUint16(i + 4, z.w, true); v.setUint16(i + 6, z.h, true);
-    i += 8;
-    const debut = z.x / 8, wb = z.w / 8;
-    for (let y = z.y; y < z.y + z.h; y++) { o.set(prec.subarray(y * OCTETS_LIGNE + debut, y * OCTETS_LIGNE + debut + wb), i); i += wb; }
-  }
-  return o;
-}
-// Resume pour la page web (en-tete x-plan de l'apercu) : "P;2;3" (partiel simple, 2 zones, 3 % de l'ecran ;
-// D double, I inversion), "C;seuil", "N;quotidien", "R"
-function resumePlan(plan) {
-  if (plan.zones) return plan.type + ';' + plan.zones.length + ';' + Math.max(1, Math.round(plan.part));
-  return plan.type + (plan.raison ? ';' + plan.raison : '');
-}
-
 async function routeLireApercu(url, env) {
   const { value, metadata } = await env.CADRE.getWithMetadata(url.searchParams.get('ecran') === '1' ? 'apercu1' : 'apercu', 'arrayBuffer');
   if (!value) return texte('Pas encore d\'apercu', 404);
@@ -829,857 +424,4 @@ async function routeLireApercu(url, env) {
     headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'x-date': String(metadata ? metadata.t : 0),
       'x-rotation': String(metadata && metadata.r ? metadata.r : 0), 'x-plan': (metadata && metadata.p) || '' },
   });
-}
-
-// ---------------------------------------------------------------------
-//  Prochains bus (reseau Tango, Nimes Metropole, donnees ouvertes)
-//
-//  - Les horaires theoriques (GTFS) sont analyses par la page web, qui ne
-//    garde que les passages aux arrets choisis : c'est "l'index" stocke en KV.
-//  - Le serveur y applique le temps reel (GTFS-RT) au moment de la demande.
-// ---------------------------------------------------------------------
-const GTFS_TANGO = 'https://www.data.gouv.fr/api/1/datasets/r/15aeb8a5-1cca-4bb9-ae5f-b6e67e4ff2ab';
-const RT_TANGO = [
-  'https://gtfs.bus-tracker.fr/gtfs-rt/tango/trip-updates?format=json',     // version corrigee (Bus Tracker)
-  'https://transport.data.gouv.fr/resources/80731/download',                // flux officiel (protobuf)
-];
-
-let indexBusCache = null, indexBusMaj = 0;
-async function lireIndexBus(env) {
-  if (indexBusCache && Date.now() - indexBusMaj < 60000) return indexBusCache;
-  const brut = await env.CADRE.get('bus');
-  indexBusCache = brut ? JSON.parse(brut) : null;
-  indexBusMaj = Date.now();
-  return indexBusCache;
-}
-
-// --- Lecture minimale du format protobuf GTFS-RT (TripUpdate seulement) ---
-function lireProtobuf(octets) {
-  let p = 0, bas32 = 0;
-  const varint = () => {
-    let r = 0, m = 1, b, decalage = 0;
-    bas32 = 0;
-    do {
-      b = octets[p++];
-      r += (b & 0x7f) * m; m *= 128;
-      if (decalage < 32) bas32 = (bas32 | ((b & 0x7f) << decalage)) >>> 0;   // 32 bits de poids faible, exacts
-      decalage += 7;
-    } while (b & 0x80);
-    return r;
-  };
-  function message(fin, champs) {
-    const o = {};
-    while (p < fin) {
-      const cle = varint(), num = Math.floor(cle / 8), type = cle & 7;
-      const def = champs[num];
-      let v;
-      let signe32 = 0;
-      if (type === 0) { v = varint(); signe32 = bas32 | 0; }
-      else if (type === 2) {
-        const l = varint(), debut = p;
-        if (def && def.sous) v = message(p + l, def.sous);
-        else if (def && def.texte) v = new TextDecoder().decode(octets.subarray(p, p + l));
-        p = debut + l;
-      } else if (type === 1) p += 8;
-      else if (type === 5) p += 4;
-      else break;
-      if (!def || v === undefined) continue;
-      if (def.signe && type === 0) v = signe32;    // retards negatifs (int32)
-      if (def.liste) (o[def.nom] = o[def.nom] || []).push(v); else o[def.nom] = v;
-    }
-    return o;
-  }
-  const evenement = { 1: { nom: 'delay', signe: true }, 2: { nom: 'time' } };
-  const arret = { 1: { nom: 'stopSequence' }, 2: { nom: 'arrival', sous: evenement }, 3: { nom: 'departure', sous: evenement },
-    4: { nom: 'stopId', texte: true }, 5: { nom: 'scheduleRelationship' } };
-  const trajet = { 1: { nom: 'tripId', texte: true }, 3: { nom: 'startDate', texte: true }, 4: { nom: 'scheduleRelationship' },
-    5: { nom: 'routeId', texte: true } };
-  const maj = { 1: { nom: 'trip', sous: trajet }, 2: { nom: 'stopTimeUpdate', sous: arret, liste: true }, 5: { nom: 'delay', signe: true } };
-  const entite = { 1: { nom: 'id', texte: true }, 3: { nom: 'tripUpdate', sous: maj } };
-  return message(octets.length, { 2: { nom: 'entity', sous: entite, liste: true } });
-}
-
-// Temps reel : trip_id -> { annule, parArret: { stop_id: { t (s, epoch) | delai (s) } }, delai }
-async function tempsReel(source) {
-  const sources = source ? [source] : RT_TANGO;
-  for (const url of sources) {
-    try {
-      const r = await fetch(url, { cf: { cacheTtl: 30, cacheEverything: true } });
-      if (!r.ok) continue;
-      const octets = new Uint8Array(await r.arrayBuffer());
-      let flux;
-      if (octets[0] === 0x7b) flux = JSON.parse(new TextDecoder().decode(octets));   // '{' : JSON
-      else flux = lireProtobuf(octets);
-      const res = {};
-      for (const e of flux.entity || []) {
-        const tu = e.tripUpdate || e.trip_update;
-        if (!tu || !tu.trip) continue;
-        const tid = tu.trip.tripId || tu.trip.trip_id;
-        if (!tid) continue;
-        const sr = tu.trip.scheduleRelationship ?? tu.trip.schedule_relationship;
-        const info = { annule: sr === 3 || sr === 'CANCELED', parArret: {}, delai: tu.delay };
-        for (const s of tu.stopTimeUpdate || tu.stop_time_update || []) {
-          const sid = s.stopId || s.stop_id;
-          if (!sid) continue;
-          const ev = s.departure || s.arrival || {};
-          const ssr = s.scheduleRelationship ?? s.schedule_relationship;
-          info.parArret[sid] = {
-            t: ev.time !== undefined ? Number(ev.time) : undefined,
-            delai: ev.delay !== undefined ? Number(ev.delay) : undefined,
-            saute: ssr === 1 || ssr === 'SKIPPED',
-          };
-        }
-        res[tid] = info;
-      }
-      return res;
-    } catch (e) { /* source suivante */ }
-  }
-  return null;     // pas de temps reel : horaires theoriques seulement
-}
-
-function serviceActif(s, date, jsLundi0) {
-  if (!s) return false;
-  if (s.moins && s.moins.includes(date)) return false;
-  if (s.plus && s.plus.includes(date)) return true;
-  return !!s.j && s.j[jsLundi0] === '1' && (!s.d || s.d <= date) && (!s.f || date <= s.f);
-}
-
-// --- Creneaux d'affichage des bus (ex. vendredi 18h-20h) ---
-const enMinutes = s => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
-function listeCreneaux(o) {
-  if (Array.isArray(o.creneaux)) return o.creneaux;
-  return o.jours ? [{ jours: o.jours, debut: o.debut, fin: o.fin }] : [];   // anciens reglages
-}
-function dansCreneau(o, maintenant) {
-  if (o.toujours) return true;
-  const w = mural(maintenant), jour = (w.js + 6) % 7, min = w.hh * 60 + w.mi;
-  return listeCreneaux(o).some(c => (c.jours || [])[jour] && min >= enMinutes(c.debut) && min < enMinutes(c.fin));
-}
-// Instant (ms) du debut du prochain creneau, ou null
-function prochainDebutCreneau(o, maintenant, champ = 'debut') {
-  let meilleur = null;
-  for (let k = 0; k <= 7; k++) {
-    const w = mural(maintenant + k * 86400e3), jour = (w.js + 6) % 7;
-    for (const c of listeCreneaux(o)) {
-      if (!(c.jours || [])[jour]) continue;
-      const m = enMinutes(c[champ]);
-      const t = versUTC({ y: w.y, m: w.m, d: w.d, hh: Math.floor(m / 60), mi: m % 60 }, TZ);
-      if (t > maintenant && (meilleur === null || t < meilleur)) meilleur = t;
-    }
-  }
-  return meilleur;
-}
-// --- Mode nuit ---
-// Minutes ecoulees depuis le debut de la nuit en cours, ou -1 si on n'est pas la nuit
-function dansNuit(n, maintenant) {
-  if (!n || !n.actif) return -1;
-  const w = mural(maintenant), min = w.hh * 60 + w.mi;
-  const d = enMinutes(n.debut), f = enMinutes(n.fin);
-  if (d === f) return -1;
-  const depuis = (min - d + 1440) % 1440, duree = (f - d + 1440) % 1440;
-  return depuis < duree ? depuis : -1;
-}
-// Intervalle de reveil (s) : la nuit, reveil espace, et cale sur la fin de la nuit
-function reveilNuit(cfg, maintenant, normal) {
-  const n = cfg.nuit, depuis = dansNuit(n, maintenant);
-  if (depuis >= 0) {
-    const w = mural(maintenant);
-    const resteS = ((enMinutes(n.fin) - (w.hh * 60 + w.mi) + 1440) % 1440) * 60 - w.ss;
-    const inter = Math.max(15, Math.min(240, n.intervalleMin || 60)) * 60;
-    return Math.max(60, Math.min(inter, resteS + 5));
-  }
-  return normal;
-}
-function texteCreneaux(o) {
-  const J = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
-  return listeCreneaux(o).map(c => J.filter((x, i) => (c.jours || [])[i]).join(', ') + ' ' +
-    String(c.debut).replace(':', 'h') + '-' + String(c.fin).replace(':', 'h')).join(' ; ');
-}
-
-// --- Scenes ---
-const heureOK = h => (/^\d{1,2}:\d{2}$/.test(String(h)) ? String(h) : null);
-const dateOK = d => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d) : '');
-function validerCreneaux(liste) {
-  return (Array.isArray(liste) ? liste : []).map(c => ({
-    jours: [0, 1, 2, 3, 4, 5, 6].map(i => (c && c.jours || [])[i] ? 1 : 0),
-    debut: heureOK(c && c.debut) || '07:00', fin: heureOK(c && c.fin) || '08:00',
-  })).filter(c => c.jours.some(Boolean) && enMinutes(c.fin) > enMinutes(c.debut)).slice(0, 8);
-}
-function validerScenes(liste, ecrans) {
-  const vus = new Set();
-  return (Array.isArray(liste) ? liste : []).slice(0, 8).map((sc, i) => {
-    let id = String(sc && sc.id || '').replace(/[^a-z0-9-]/gi, '').slice(0, 20) || 's' + i;
-    while (vus.has(id)) id += 'x';
-    vus.add(id);
-    return {
-      id, nom: String(sc.nom || '').trim().slice(0, 40) || 'Scène ' + (i + 1),
-      creneaux: validerCreneaux(sc.creneaux),
-      f1: ['semaine', 'weekend'].includes(sc.f1) ? sc.f1 : '',
-      du: dateOK(sc.du), au: dateOK(sc.au),
-      reveilMin: [0, 3, 5, 10, 15, 30, 60].includes(+sc.reveilMin) ? +sc.reveilMin : 0,
-      disposition: validerDisposition(sc.disposition, grille(0, ecrans)),
-      dispositionPortrait: validerDisposition(sc.dispositionPortrait, grille(1, ecrans)),
-    };
-  });
-}
-const dateDuJour = w => w.y + '-' + deux(w.m) + '-' + deux(w.d);
-// Une scene est active si toutes ses conditions sont remplies (sans condition : toujours active)
-function sceneActive(sc, maintenant, gp) {
-  const jour = dateDuJour(mural(maintenant));
-  if (sc.du && jour < sc.du) return false;
-  if (sc.au && jour > sc.au) return false;
-  if (sc.f1) {
-    const p = gp && gp.periodes && gp.periodes[sc.f1];
-    if (!p || maintenant < p[0] || maintenant >= p[1]) return false;
-  }
-  if ((sc.creneaux || []).length && !dansCreneau({ creneaux: sc.creneaux }, maintenant)) return false;
-  return true;
-}
-// Prochain instant ou une scene peut commencer ou finir (pour que le cadre se reveille pile a ce moment)
-function prochainChangementScene(scenes, maintenant, gp) {
-  const t = [];
-  for (const sc of scenes) {
-    if ((sc.creneaux || []).length) {
-      t.push(prochainDebutCreneau({ creneaux: sc.creneaux }, maintenant, 'debut'));
-      t.push(prochainDebutCreneau({ creneaux: sc.creneaux }, maintenant, 'fin'));
-    }
-    const p = sc.f1 && gp && gp.periodes && gp.periodes[sc.f1];
-    if (p) t.push(p[0], p[1]);
-    for (const [d, lendemain] of [[sc.du, 0], [sc.au, 1]]) {
-      if (!d) continue;
-      const [y, m, j] = d.split('-').map(Number);
-      t.push(versUTC({ y, m, d: j + lendemain }, TZ));
-    }
-  }
-  const futurs = t.filter(x => x && x > maintenant);
-  return futurs.length ? Math.min(...futurs) : null;
-}
-
-async function prochainsBus(o, maintenant, env, ignorerCreneau) {
-  const idx = await lireIndexBus(env);
-  if (!idx || !idx.passages || !idx.passages.length) return { erreur: 'Aucun arrêt choisi' };
-  if (!ignorerCreneau && !dansCreneau(o, maintenant)) {
-    return { hors: 'Bus affichés : ' + texteCreneaux(o) };
-  }
-  const horizon = Math.max(15, Math.min(240, o.horizon || 90)) * 60000;
-  const lignes = Array.isArray(o.lignes) ? new Set(o.lignes) : null;   // null = toutes
-  const rt = await tempsReel(o.sourceRT);
-  const res = [];
-  // Passages du jour, et de la veille apres minuit (horaires GTFS > 24h)
-  for (const decalageJour of [0, -1]) {
-    const w = mural(maintenant + decalageJour * 86400e3);
-    const date = '' + w.y + deux(w.m) + deux(w.d);
-    const minuit = versUTC({ y: w.y, m: w.m, d: w.d }, TZ);
-    const lundi0 = (w.js + 6) % 7;
-    for (const [tripId, ligne, dest, service, secondes, arretId] of idx.passages) {
-      if (decalageJour === -1 && secondes < 86400) continue;
-      const cle = idx.lignes[ligne] + '|' + idx.destinations[dest];
-      if (lignes && !lignes.has(cle)) continue;
-      if (!serviceActif(idx.services[service], date, lundi0)) continue;
-      let t = minuit + secondes * 1000, reel = false, annule = false;
-      const info = rt && rt[tripId];
-      if (info) {
-        const a = info.parArret[arretId];
-        if (info.annule || (a && a.saute)) annule = true;
-        else if (a && a.t) { t = a.t * 1000; reel = true; }
-        else if (a && a.delai !== undefined) { t += a.delai * 1000; reel = true; }
-        else if (info.delai !== undefined) { t += info.delai * 1000; reel = true; }
-      }
-      if (t < maintenant - 30000 || t > maintenant + horizon) continue;
-      res.push({ t, l: idx.lignes[ligne], d: idx.destinations[dest], reel, annule });
-    }
-  }
-  res.sort((a, b) => a.t - b.t);
-  return {
-    passages: res.slice(0, Math.max(1, Math.min(10, o.nb || 4))).map(p => {
-      const w = mural(p.t);
-      return { l: pourEcran(p.l), d: pourEcran(p.d), h: deux(w.hh) + 'h' + deux(w.mi),
-        m: Math.max(0, Math.round((p.t - maintenant) / 60000)), tr: p.reel ? 1 : 0, x: p.annule ? 1 : 0 };
-    }),
-    tempsReel: rt ? 1 : 0,
-    arrets: (idx.arrets || []).map(pourEcran).join(' · '),
-  };
-}
-
-// ---------------------------------------------------------------------
-//  Tableau de bord : date + meteo + agenda
-// ---------------------------------------------------------------------
-// forcer : numero de la scene a afficher (-1 = Par defaut) ; absent = scene active a cet instant
-async function construireTableau(cfg, maintenant, env, forcer = null) {
-  const w = mural(maintenant);
-  const rotation = ROTATIONS.includes(cfg.affichage.rotation) ? cfg.affichage.rotation : 0;
-  const g = grille(rotation, cfg.ecrans);
-  // Grand Prix de F1 : utile pour le bloc F1 et pour les scenes "semaine / week-end de GP"
-  const scenes = cfg.scenes || [];
-  let f1 = null;
-  const chargerGP = async () => {
-    if (!f1) {
-      try { f1 = await grandPrix(maintenant, env); }
-      catch (e) { console.log('F1 :', e.message); f1 = { erreur: 'Calendrier F1 indisponible (' + e.message + ')' }; }
-    }
-    return f1;
-  };
-  // Toutes les sources sont interrogees en meme temps (reponse plus rapide = carte allumee moins
-  // longtemps). Meteo, agenda et F1 sont lancees avant de connaitre la scene, si une des dispositions
-  // possibles les utilise ; les bus (plus lourds) seulement si la scene affichee les montre.
-  const cle = rotation ? 'dispositionPortrait' : 'disposition';
-  const possibles = [cfg[cle]].concat(scenes.map(sc => sc[cle]));
-  const peutServir = ids => possibles.some(l => (l || []).some(d => ids.includes(d.id)));
-  const sansErreur = (p, message) => p.catch(e => { console.log(message, ':', e.message); return { erreur: message }; });
-  const pMeteo = peutServir(['meteo', 'heures', 'jours', 'courbe'])
-    ? sansErreur(chargerMeteo(cfg.meteo, env), 'Météo indisponible') : null;
-  const avecAgenda = cfg.agenda.urls.length || cfg.agenda.anniversaires.length;
-  const pAgenda = peutServir(['agenda']) && avecAgenda ? sansErreur(agenda(cfg.agenda, maintenant, env), 'Agenda indisponible') : null;
-  const pGP = scenes.some(sc => sc.f1) || peutServir(['f1']) ? chargerGP() : null;
-  if (scenes.some(sc => sc.f1)) await pGP;
-  // Scene affichee : la premiere active de la liste, sinon la disposition par defaut
-  const active = forcer === null || forcer === undefined ? scenes.find(sc => sceneActive(sc, maintenant, f1))
-    : forcer >= 0 ? scenes[forcer] || null : null;
-  let dispo = validerDisposition(active ? active[cle] : cfg[cle], g);
-  const presents = new Set(dispo.map(d => d.id));
-  const pBus = presents.has('bus') ? sansErreur(prochainsBus(cfg.bus, maintenant, env, true), 'Bus indisponibles') : null;
-  const [brutMeteo, resAgenda] = await Promise.all([pMeteo, pAgenda, pGP]);
-  const res = {
-    date: JOURS_LONGS[w.js] + ' ' + w.d + ' ' + MOIS[w.m - 1],
-    rotation,
-    disposition: dispo.map(d => enPixels(d, g)),
-    gouttiere: GOUTTIERE,
-    traits: cfg.affichage.traits ? 1 : 0,
-    scene: { nom: active ? active.nom : 'Par défaut', reveilMin: active ? active.reveilMin : 0,
-      changement: prochainChangementScene(scenes, maintenant, f1) },
-  };
-  if (presents.has('f1')) { res.f1 = Object.assign({}, f1); delete res.f1.periodes; }
-  if (['meteo', 'heures', 'jours', 'courbe'].some(id => presents.has(id))) {
-    if (!brutMeteo || brutMeteo.erreur) res.meteo = { erreur: 'Météo indisponible' };
-    else {
-      try {
-        res.meteo = meteo(Object.assign({}, cfg.meteo,
-          { heures: presents.has('heures'), jours: presents.has('jours'), courbe: presents.has('courbe') }), brutMeteo);
-      } catch (e) { console.log('Météo :', e.message); res.meteo = { erreur: 'Météo indisponible' }; }
-    }
-  }
-  if (presents.has('agenda')) res.agenda = avecAgenda ? resAgenda : { erreur: 'Aucun calendrier configuré' };
-  if (presents.has('bus')) {
-    res.bus = await pBus;
-    // Les minutes restantes ne sont pas affichees : on les retire pour que la signature
-    // ne change pas a chaque minute (sinon l'ecran clignoterait a chaque reveil)
-    for (const p of res.bus.passages || []) delete p.m;
-  }
-  return res;
-}
-
-const DESCRIPTIONS = {
-  0: 'Ciel dégagé', 1: 'Plutôt dégagé', 2: 'Partiellement nuageux', 3: 'Couvert',
-  45: 'Brouillard', 48: 'Brouillard givrant',
-  51: 'Bruine légère', 53: 'Bruine', 55: 'Bruine dense', 56: 'Bruine verglaçante', 57: 'Bruine verglaçante',
-  61: 'Pluie faible', 63: 'Pluie', 65: 'Forte pluie', 66: 'Pluie verglaçante', 67: 'Pluie verglaçante',
-  71: 'Neige faible', 73: 'Neige', 75: 'Forte neige', 77: 'Grains de neige',
-  80: 'Averses', 81: 'Averses', 82: 'Fortes averses', 85: 'Averses de neige', 86: 'Averses de neige',
-  95: 'Orage', 96: 'Orage et grêle', 99: 'Orage et grêle',
-};
-// Les polices de l'ecran ne contiennent que l'alphabet latin (Latin-1) :
-// on remplace les caracteres typographiques et on retire le reste (emojis...)
-function pourEcran(t) {
-  return String(t || '')
-    .replace(/[\u2018\u2019\u02BC]/g, "'").replace(/[\u201C\u201D\u00AB\u00BB]/g, '"')
-    .replace(/[\u2013\u2014]/g, '-').replace(/\u2026/g, '...').replace(/\u0152/g, 'OE').replace(/\u0153/g, 'oe')
-    .normalize('NFC').replace(/[^\u0020-\u007E\u00A0-\u00FF]/g, '').replace(/\s+/g, ' ').trim();
-}
-function directionVent(deg) {
-  return ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
-}
-
-// Copie de secours d'une source externe : enregistree au plus une fois par heure (limite d'ecritures
-// du KV), relue si la source ne repond pas, tant qu'elle a moins de ageMax ms.
-// 'controle' : si la copie a ete faite pour une autre adresse (ville changee), elle n'est pas utilisee.
-async function avecSecours(env, cle, ageMax, charger, controle = '') {
-  try {
-    const texte = await charger();
-    try {
-      const { metadata } = await env.CADRE.getWithMetadata(cle);
-      if (!metadata || Date.now() - metadata.t > 3600e3 || metadata.c !== controle) {
-        await env.CADRE.put(cle, texte, { metadata: { t: Date.now(), c: controle } });
-      }
-    } catch (e) { /* limite d'ecriture : sans gravite */ }
-    return { texte, ancien: false };
-  } catch (e) {
-    const { value, metadata } = await env.CADRE.getWithMetadata(cle);
-    if (value && metadata && metadata.c === controle && Date.now() - metadata.t < ageMax) {
-      console.log('Copie de secours utilisee pour', cle, ':', e.message);
-      return { texte: value, ancien: true };
-    }
-    throw e;
-  }
-}
-
-// Donnees brutes d'Open-Meteo (avec copie de secours si le service ne repond pas)
-async function chargerMeteo(o, env) {
-  const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + o.lat + '&longitude=' + o.lon +
-    '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,' +
-    'wind_speed_10m,wind_direction_10m,wind_gusts_10m' +
-    '&hourly=temperature_2m,weather_code,precipitation_probability,is_day' +
-    '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max' +
-    '&timezone=Europe%2FParis&forecast_days=8&wind_speed_unit=kmh';
-  const { texte, ancien } = await avecSecours(env, 'secours-meteo', 24 * 3600e3, async () => {
-    const r = await fetch(url, { cf: { cacheTtl: 600, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.text();
-  }, url);
-  const d = JSON.parse(texte);
-  if (ancien) {
-    // Copie ancienne : on prend la prevision heure par heure de l'heure actuelle comme "meteo actuelle"
-    const w = mural(Date.now()), h = dateDuJour(w) + 'T' + deux(w.hh) + ':00';
-    const i = d.hourly.time.indexOf(h);
-    if (i < 0) throw new Error('copie trop ancienne');
-    Object.assign(d.current, { time: h, temperature_2m: d.hourly.temperature_2m[i], apparent_temperature: d.hourly.temperature_2m[i],
-      weather_code: d.hourly.weather_code[i], is_day: d.hourly.is_day[i] });
-    const j = d.daily.time.indexOf(dateDuJour(w));
-    if (j > 0) for (const k in d.daily) d.daily[k] = d.daily[k].slice(j);   // "aujourd'hui" en premier
-  }
-  return d;
-}
-function meteo(o, d) {
-  const c = d.current;
-  const res = {
-    ville: pourEcran(o.ville),
-    t: Math.round(c.temperature_2m),
-    c: c.weather_code,
-    n: c.is_day ? 0 : 1,
-    desc: DESCRIPTIONS[c.weather_code] || '',
-    min: Math.round(d.daily.temperature_2m_min[0]),
-    max: Math.round(d.daily.temperature_2m_max[0]),
-  };
-  if (o.details) {
-    res.ressenti = Math.round(c.apparent_temperature);
-    res.hum = Math.round(c.relative_humidity_2m);
-    // Risque de pluie maximal sur les 12 prochaines heures (heure en cours comprise) :
-    // repond a "faut-il un parapluie ?", meme le soir
-    const iH = d.hourly.time.indexOf(c.time.slice(0, 13) + ':00');
-    res.pluie = iH >= 0
-      ? Math.max(0, ...d.hourly.precipitation_probability.slice(iH, iH + 12).map(v => v ?? 0))
-      : (d.daily.precipitation_probability_max[0] ?? 0);
-  }
-  if (o.vent) {
-    res.vent = { v: Math.round(c.wind_speed_10m), raf: Math.round(c.wind_gusts_10m), dir: directionVent(c.wind_direction_10m) };
-  }
-  if (o.soleil) {
-    res.soleil = { lever: d.daily.sunrise[0].slice(11, 16).replace(':', 'h'), coucher: d.daily.sunset[0].slice(11, 16).replace(':', 'h') };
-  }
-  if (o.heures) {
-    const pas = Math.max(1, Math.min(6, o.pasHeures | 0 || 3));
-    let i = d.hourly.time.findIndex(t => t > c.time);
-    if (i < 0) i = 0;
-    res.heures = [];
-    const nbH = Math.max(2, Math.min(12, o.nbHeures | 0 || 6));
-    for (let k = 0; k < nbH && i < d.hourly.time.length; k++, i += pas) {
-      res.heures.push({
-        h: parseInt(d.hourly.time[i].slice(11, 13), 10) + 'h',
-        t: Math.round(d.hourly.temperature_2m[i]),
-        c: d.hourly.weather_code[i],
-        n: d.hourly.is_day[i] ? 0 : 1,
-        p: d.hourly.precipitation_probability[i] ?? 0,
-      });
-    }
-  }
-  if (o.courbe) {
-    // Graphique : temperature (en dixiemes de degre), risque de pluie et nuit, heure par heure
-    const nb = [12, 24, 36, 48].includes(o.courbeHeures) ? o.courbeHeures : 24;
-    let i0 = d.hourly.time.indexOf(c.time.slice(0, 13) + ':00');
-    if (i0 < 0) i0 = 0;
-    const fin = Math.min(d.hourly.time.length, i0 + nb + 1);
-    const g = { h0: parseInt(d.hourly.time[i0].slice(11, 13), 10), t: [], p: [], n: [], j: [] };
-    for (let i = i0; i < fin; i++) {
-      g.t.push(Math.round(d.hourly.temperature_2m[i] * 10));
-      g.p.push(d.hourly.precipitation_probability[i] ?? 0);
-      g.n.push(d.hourly.is_day[i] ? 0 : 1);
-      if (i > i0 && d.hourly.time[i].slice(11, 13) === '00') {      // nom des jours suivants, a minuit
-        const [y, m, j] = d.hourly.time[i].slice(0, 10).split('-').map(Number);
-        g.j.push(JOURS_COURTS[new Date(Date.UTC(y, m - 1, j)).getUTCDay()] + ' ' + j);
-      }
-    }
-    res.courbe = g;
-  }
-  if (o.jours) {
-    const nb = Math.max(1, Math.min(6, o.nbJours | 0 || 4));
-    res.jours = [];
-    for (let k = 1; k <= nb && k < d.daily.time.length; k++) {
-      const [y, m, j] = d.daily.time[k].split('-').map(Number);
-      res.jours.push({
-        j: JOURS_COURTS[new Date(Date.UTC(y, m - 1, j)).getUTCDay()] + ' ' + j,
-        c: d.daily.weather_code[k],
-        min: Math.round(d.daily.temperature_2m_min[k]),
-        max: Math.round(d.daily.temperature_2m_max[k]),
-        p: d.daily.precipitation_probability_max[k] ?? 0,
-      });
-    }
-  }
-  return res;
-}
-
-// ---------------------------------------------------------------------
-//  Agenda iCloud (fichiers .ics), y compris les evenements recurrents
-// ---------------------------------------------------------------------
-async function agenda(o, maintenant, env) {
-  const fin = maintenant + Math.max(1, o.joursMax || 14) * 86400e3;
-  // Tous les calendriers en meme temps ; un calendrier qui ne repond pas est remplace par sa
-  // derniere copie (jusqu'a 7 jours), ou ignore si les autres repondent
-  const lus = await Promise.allSettled(o.urls.map(async brut => {
-    const url = brut.replace(/^webcal:\/\//i, 'https://');
-    const { texte } = await avecSecours(env, 'secours-ics-' + await empreinte(url), 7 * 86400e3, async () => {
-      const r = await fetch(url, { cf: { cacheTtl: 900, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
-      if (!r.ok) throw new Error('Calendrier HTTP ' + r.status);
-      return r.text();
-    });
-    return evenementsICS(texte, maintenant, fin);
-  }));
-  const reussis = lus.filter(l => l.status === 'fulfilled');
-  if (o.urls.length && !reussis.length) throw lus[0].reason;
-  let tous = [].concat(...reussis.map(l => l.value));
-  tous = tous.concat(anniversaires(o.anniversaires || [], maintenant, fin));
-  tous.sort((a, b) => a.debut - b.debut || (b.journee ? 1 : 0) - (a.journee ? 1 : 0));
-
-  const auj = mural(maintenant);
-  const demain = mural(maintenant + 86400e3);
-  const memeJour = (a, b) => a.y === b.y && a.m === b.m && a.d === b.d;
-  return tous.slice(0, Math.max(1, Math.min(14, o.nb || 8))).map(e => {
-    const enCours = e.debut < maintenant;
-    const w = enCours ? auj : mural(e.debut);
-    const j = memeJour(w, auj) ? "Aujourd'hui" : memeJour(w, demain) ? 'Demain' : JOURS_COURTS[w.js] + ' ' + w.d;
-    let h = '';
-    if (!e.journee) h = enCours ? 'en cours' : deux(w.hh) + ':' + deux(w.mi);
-    const t = pourEcran(titreF1(e.titre));
-    return { j, h, t: t.length > 60 ? t.slice(0, 57) + '...' : t };
-  });
-}
-
-// ---------------------------------------------------------------------
-//  Titres de Formule 1 : "FORMULA 1 SPONSOR XXX GRAND PRIX 2026 - Race"
-//  devient "GP de XXX - Course" (le nom du GP en premier, sans le sponsor)
-// ---------------------------------------------------------------------
-const GP_F1 = [            // mot-cle -> nom du GP (le dernier mot-cle trouve dans le titre l'emporte)
-  [/australi/i, "GP d'Australie"], [/chin/i, 'GP de Chine'], [/japan/i, 'GP du Japon'],
-  [/bahrain/i, 'GP de Bahreïn'], [/saudi|arabie/i, "GP d'Arabie saoudite"], [/miami/i, 'GP de Miami'],
-  [/canad/i, 'GP du Canada'], [/monaco/i, 'GP de Monaco'], [/barcelon|catalu/i, 'GP de Barcelone'],
-  [/spanish|spain|españa|espagne|madrid/i, "GP d'Espagne"], [/austria|österreich|autriche/i, "GP d'Autriche"],
-  [/british|britain|grande-bretagne/i, 'GP de Grande-Bretagne'], [/belgi/i, 'GP de Belgique'],
-  [/hungar|hongrie/i, 'GP de Hongrie'], [/dutch|netherlands|pays-bas/i, 'GP des Pays-Bas'],
-  [/emilia|imola/i, "GP d'Émilie-Romagne"], [/ital/i, "GP d'Italie"], [/azerbai/i, "GP d'Azerbaïdjan"],
-  [/singapo/i, 'GP de Singapour'], [/united states|usa|états-unis/i, 'GP des États-Unis'],
-  [/las vegas/i, 'GP de Las Vegas'], [/mexic|méxico/i, 'GP de Mexico'], [/s[ãa]o paulo|brazil|brasil/i, 'GP de São Paulo'],
-  [/qatar/i, 'GP du Qatar'], [/abu dhabi/i, "GP d'Abu Dhabi"],
-];
-const SESSIONS_F1 = [
-  [/(free )?practice 1|\bfp1\b|essais libres 1/i, 'Essais libres 1'],
-  [/(free )?practice 2|\bfp2\b|essais libres 2/i, 'Essais libres 2'],
-  [/(free )?practice 3|\bfp3\b|essais libres 3/i, 'Essais libres 3'],
-  [/sprint (qualifying|shootout|quali)|qualifications? sprint/i, 'Qualif. sprint'],
-  [/sprint/i, 'Sprint'],
-  [/qualif/i, 'Qualifications'],
-  [/\brace\b|course/i, 'Course'],
-];
-function titreF1(t) {
-  if (!/formula\s*1|\bf1\b|grand prix|gran premio|grande pr[eê]mio|grosser preis|großer preis/i.test(t)) return t;
-  // Le nom du GP = le mot-cle de lieu situe le plus loin dans le titre (les sponsors sont au debut)
-  let meilleur = null, pos = -1;
-  for (const [re, nom] of GP_F1) {
-    const g = new RegExp(re.source, 'gi');
-    let m;
-    while ((m = g.exec(t))) if (m.index > pos) { pos = m.index; meilleur = nom; }
-  }
-  if (!meilleur) return t;
-  let session = '';
-  for (const [re, nom] of SESSIONS_F1) if (re.test(t)) { session = nom; break; }
-  return session ? meilleur + ' - ' + session : meilleur;
-}
-
-// ---------------------------------------------------------------------
-//  Prochain Grand Prix de F1 : calendrier Jolpica (ex-Ergast), trace du circuit integre
-// ---------------------------------------------------------------------
-// Le calendrier est garde dans le KV et redemande au plus toutes les 12 h : Jolpica limite le nombre
-// de requetes par adresse, et les Workers Cloudflare partagent leurs adresses avec beaucoup d'autres
-// sites (d'ou des refus "HTTP 429"). Si Jolpica ne repond pas, on garde la derniere copie.
-const CLES_GP = ['round', 'raceName', 'date', 'time', 'Circuit', 'FirstPractice', 'SecondPractice', 'ThirdPractice',
-  'SprintQualifying', 'SprintShootout', 'Sprint', 'Qualifying'];
-async function calendrierF1(annee, env) {
-  const cle = 'f1-' + annee;
-  let memo = null;
-  try { memo = JSON.parse((await env.CADRE.get(cle)) || 'null'); } catch (e) { /* pas de copie */ }
-  if (memo && Date.now() - memo.t < 12 * 3600e3) return memo.courses;
-  try {
-    const r = await fetch('https://api.jolpi.ca/ergast/f1/' + annee + '.json?limit=40',
-      { cf: { cacheTtl: 21600, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const courses = ((((await r.json()).MRData || {}).RaceTable || {}).Races || [])
-      .map(c => Object.fromEntries(CLES_GP.filter(k => c[k] !== undefined).map(k => [k, c[k]])));
-    if (courses.length || !memo || !memo.courses.length) {
-      try { await env.CADRE.put(cle, JSON.stringify({ t: Date.now(), courses })); } catch (e) { /* limite d'ecriture */ }
-    }
-    return courses.length || !memo ? courses : memo.courses;
-  } catch (e) {
-    if (memo) return memo.courses;          // copie plus ancienne : toujours valable pour les horaires
-    throw new Error(e.name === 'TimeoutError' ? 'pas de réponse' : e.message);
-  }
-}
-const SESSIONS_JOLPICA = [['FirstPractice', 'Essais libres 1'], ['SecondPractice', 'Essais libres 2'],
-  ['ThirdPractice', 'Essais libres 3'], ['SprintQualifying', 'Qualif. sprint'], ['SprintShootout', 'Qualif. sprint'],
-  ['Sprint', 'Sprint'], ['Qualifying', 'Qualifications']];
-const instantF1 = s => (s && s.date ? Date.parse(s.date + 'T' + (s.time || '12:00:00Z')) : NaN);
-// Circuit integre le plus proche des coordonnees donnees par le calendrier
-function circuitProche(lat, lon) {
-  let meilleur = null, dMin = Infinity;
-  for (const id in CIRCUITS) {
-    const c = CIRCUITS[id];
-    const d = Math.hypot((c.lat - lat) * 111, (c.lon - lon) * 111 * Math.cos(lat * Math.PI / 180));
-    if (d < dMin) { dMin = d; meilleur = c; }
-  }
-  return dMin < 10 ? meilleur : null;          // a moins de 10 km
-}
-const numJour = w => Date.UTC(w.y, w.m - 1, w.d) / 86400e3;
-async function grandPrix(maintenant, env) {
-  const an = mural(maintenant).y;
-  // Le GP reste affiche jusqu'a 3 h apres le depart de la course
-  let gp = (await calendrierF1(an, env)).find(c => instantF1(c) + 3 * 3600e3 > maintenant);
-  if (!gp) { try { gp = (await calendrierF1(an + 1, env))[0]; } catch (e) { /* pas encore publie */ } }
-  if (!gp) return { erreur: 'Saison de F1 terminée' };
-  const course = instantF1(gp);
-  const sessions = SESSIONS_JOLPICA.filter(([k]) => gp[k]).map(([k, n]) => [instantF1(gp[k]), n, 3600e3]);
-  sessions.push([course, 'Course', 2 * 3600e3]);
-  sessions.sort((a, b) => a[0] - b[0]);
-  const auj = numJour(mural(maintenant));
-  const ecart = numJour(mural(sessions[0][0])) - auj;
-  const ecartCourse = numJour(mural(course)) - auj;
-  const quand = ecart > 1 ? 'Dans ' + ecart + ' jours' : ecart === 1 ? 'Demain' : ecartCourse > 0 ? 'Ce week-end' : maintenant < course ? "Aujourd'hui" : 'Terminé';
-  const loc = (gp.Circuit && gp.Circuit.Location) || {};
-  const c = circuitProche(parseFloat(loc.lat), parseFloat(loc.long));
-  const wC = mural(course);
-  return {
-    gp: pourEcran(titreF1(gp.raceName || '')),
-    manche: +gp.round || 0,
-    circuit: pourEcran(c ? c.nom : (gp.Circuit || {}).circuitName),
-    lieu: pourEcran(loc.locality || ''),
-    quand,
-    sessions: sessions.map(([t, n, duree]) => {
-      const w = mural(t);
-      return { j: JOURS_COURTS[w.js] + ' ' + w.d, h: w.hh + 'h' + deux(w.mi), n, f: t + duree < maintenant ? 1 : 0 };
-    }),
-    trace: c ? { l: c.l, h: c.h, p: c.p } : null,
-    // Periodes pour les scenes : semaine (du lundi 0 h) et week-end (du jour de la 1re seance, 0 h)
-    // jusqu'a 3 h apres le depart de la course
-    periodes: {
-      semaine: [versUTC({ y: wC.y, m: wC.m, d: wC.d - (wC.js + 6) % 7 }, TZ), course + 3 * 3600e3],
-      weekend: [versUTC(Object.assign({}, mural(sessions[0][0]), { hh: 0, mi: 0, ss: 0 }), TZ), course + 3 * 3600e3],
-    },
-  };
-}
-
-// Prochaine occurrence de chaque anniversaire (evenement "journee entiere")
-function anniversaires(liste, maintenant, fin) {
-  const auj = mural(maintenant);
-  const res = [];
-  for (const a of liste) {
-    for (const y of [auj.y, auj.y + 1]) {
-      let j = a.j;
-      const nbJ = new Date(Date.UTC(y, a.m, 0)).getUTCDate();
-      if (j > nbJ) j = nbJ;                       // 29 fevrier -> 28 les autres annees
-      const passe = a.m < auj.m || (a.m === auj.m && j < auj.d);
-      if (y === auj.y && passe) continue;
-      const debut = versUTC({ y, m: a.m, d: j }, TZ);
-      if (debut < fin) {
-        const age = a.a ? y - a.a : 0;
-        res.push({ debut, journee: true, titre: 'Anniversaire de ' + a.nom + (age > 0 ? ' (' + age + ' ans)' : '') });
-      }
-      break;
-    }
-  }
-  return res;
-}
-
-function lireDateICS(v, p) {
-  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(String(v).trim());
-  if (!m) return null;
-  const w = { y: +m[1], m: +m[2], d: +m[3], hh: +(m[4] || 0), mi: +(m[5] || 0), ss: +(m[6] || 0) };
-  const journee = (p && p.VALUE === 'DATE') || m[4] === undefined;
-  const tz = m[7] ? 'UTC' : (p && p.TZID ? fuseauValide(p.TZID) : TZ);
-  return { w, journee, tz, utc: versUTC(w, tz) };
-}
-function lireDuree(v) {
-  const m = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(String(v).trim());
-  if (!m) return 0;
-  const s = ((+m[2] || 0) * 7 + (+m[3] || 0)) * 86400 + (+m[4] || 0) * 3600 + (+m[5] || 0) * 60 + (+m[6] || 0);
-  return (m[1] === '-' ? -s : s) * 1000;
-}
-function analyserICS(texte) {
-  const lignes = texte.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
-  const evts = [];
-  let e = null;
-  for (const l of lignes) {
-    if (l === 'BEGIN:VEVENT') { e = {}; continue; }
-    if (l === 'END:VEVENT') { if (e) evts.push(e); e = null; continue; }
-    if (!e) continue;
-    const i = l.indexOf(':');
-    if (i < 0) continue;
-    const [nom, ...params] = l.slice(0, i).split(';');
-    const p = {};
-    for (const x of params) {
-      const j = x.indexOf('=');
-      if (j > 0) p[x.slice(0, j).toUpperCase()] = x.slice(j + 1).replace(/^"|"$/g, '');
-    }
-    const valeur = l.slice(i + 1);
-    const N = nom.toUpperCase();
-    if (N === 'EXDATE') (e.exdate = e.exdate || []).push(...valeur.split(',').map(v => ({ v, p })));
-    else e[N] = { v: valeur, p };
-  }
-  return evts;
-}
-
-function evenementsICS(texte, debutFenetre, finFenetre) {
-  const evts = analyserICS(texte);
-  // Occurrences modifiees d'un evenement recurrent (RECURRENCE-ID)
-  const surcharges = new Set();
-  for (const e of evts) {
-    if (e['RECURRENCE-ID'] && e.UID) {
-      const d = lireDateICS(e['RECURRENCE-ID'].v, e['RECURRENCE-ID'].p);
-      if (d) surcharges.add(e.UID.v + '|' + d.utc);
-    }
-  }
-  const res = [];
-  for (const e of evts) {
-    if (!e.DTSTART) continue;
-    if (e.STATUS && e.STATUS.v.toUpperCase() === 'CANCELLED') continue;
-    const titre = e.SUMMARY ? e.SUMMARY.v.replace(/\\n/gi, ' ').replace(/\\([,;\\])/g, '$1').trim() : '(sans titre)';
-    const estSurcharge = !!e['RECURRENCE-ID'];
-    for (const o of occurrences(e, debutFenetre, finFenetre)) {
-      if (!estSurcharge && e.UID && surcharges.has(e.UID.v + '|' + o.debut)) continue;
-      res.push({ debut: o.debut, journee: o.journee, titre });
-    }
-  }
-  return res;
-}
-
-// Date d'un champ ICS lue comme si elle etait en UTC (sans fuseau) : a 14 h pres, de quoi ecarter vite
-// un evenement tres loin de la fenetre
-function dateNaiveICS(v) {
-  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/.exec(String(v).trim());
-  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : null;
-}
-
-function occurrences(ev, debutFenetre, finFenetre) {
-  // Evenement unique nettement hors de la fenetre (les centaines d'evenements passes d'un calendrier) :
-  // ecarte sans conversion de fuseau, la partie la plus couteuse. Marge de 2 jours pour les fuseaux.
-  if (!ev.RRULE || ev['RECURRENCE-ID']) {
-    const n0 = dateNaiveICS(ev.DTSTART.v), n1 = ev.DTEND ? dateNaiveICS(ev.DTEND.v) : null;
-    const dn = n1 !== null && n0 !== null ? n1 - n0 : ev.DURATION ? lireDuree(ev.DURATION.v) : 0;
-    if (n0 !== null && (n0 - 2 * 86400e3 >= finFenetre || n0 + Math.max(dn, 86400e3) + 2 * 86400e3 <= debutFenetre)) return [];
-  }
-  const ds = lireDateICS(ev.DTSTART.v, ev.DTSTART.p);
-  if (!ds) return [];
-  let duree;
-  if (ev.DTEND) {
-    const de = lireDateICS(ev.DTEND.v, ev.DTEND.p);
-    duree = de ? de.utc - ds.utc : 3600e3;
-  } else if (ev.DURATION) duree = lireDuree(ev.DURATION.v);
-  else duree = ds.journee ? 86400e3 : 0;
-
-  const exclus = new Set();
-  for (const x of ev.exdate || []) {
-    const d = lireDateICS(x.v, x.p);
-    if (d) exclus.add(d.utc);
-  }
-  const res = [];
-  const ajouter = utc => {
-    if (exclus.has(utc)) return;
-    if (utc + Math.max(duree, 1) > debutFenetre && utc < finFenetre) res.push({ debut: utc, journee: ds.journee });
-  };
-  if (!ev.RRULE || ev['RECURRENCE-ID']) { ajouter(ds.utc); return res; }
-
-  const r = {};
-  for (const x of ev.RRULE.v.split(';')) {
-    const j = x.indexOf('=');
-    if (j > 0) r[x.slice(0, j).toUpperCase()] = x.slice(j + 1);
-  }
-  const freq = (r.FREQ || '').toUpperCase();
-  const inter = Math.max(1, parseInt(r.INTERVAL || '1', 10));
-  let compte = r.COUNT ? parseInt(r.COUNT, 10) : Infinity;
-  let jusqua = Infinity;
-  if (r.UNTIL) {
-    const u = lireDateICS(r.UNTIL, {});
-    if (u) jusqua = u.journee ? u.utc + 86400e3 - 1 : u.utc;
-  }
-  const NUM = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
-  // BYDAY : jours de la semaine, avec un rang facultatif en mensuel ("2TU" = 2e mardi, "-1FR" = dernier vendredi)
-  const parJourRang = (r.BYDAY || '').split(',').map(s => /^([+-]?\d{1,2})?(SU|MO|TU|WE|TH|FR|SA)$/i.exec(s.trim()))
-    .filter(Boolean).map(m => ({ n: m[1] ? parseInt(m[1], 10) : 0, j: NUM[m[2].toUpperCase()] }));
-  const parJour = parJourRang.map(x => x.j);
-  // BYMONTHDAY : jours du mois ("15", "-1" = dernier jour) ; BYSETPOS : une position parmi les dates du mois
-  const parJourMois = (r.BYMONTHDAY || '').split(',').map(s => parseInt(s, 10)).filter(n => n && Math.abs(n) <= 31);
-  const position = parseInt(r.BYSETPOS || '0', 10) || 0;
-  const J = 86400e3;
-  const w0 = ds.w;
-  const base = Date.UTC(w0.y, w0.m - 1, w0.d);
-  const heureMs = ((w0.hh || 0) * 3600 + (w0.mi || 0) * 60 + (w0.ss || 0)) * 1000;
-  const aUTC = dateMs => {
-    const d = new Date(dateMs);
-    return versUTC({ y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), hh: w0.hh, mi: w0.mi, ss: w0.ss }, ds.tz);
-  };
-  // Une date finie bien avant la fenetre n'est pas convertie dans son fuseau (deux appels a Intl, la partie
-  // la plus couteuse) : elle compte seulement pour COUNT. Marge de 2 jours pour l'heure et le fuseau.
-  const avantFenetre = dm => dm + heureMs + Math.max(duree, 0) + 2 * J < debutFenetre;
-  // Sans COUNT, on part directement de la periode qui precede la fenetre, au lieu de tout derouler depuis
-  // la premiere date (un cours hebdomadaire de la rentree, un rappel quotidien de 2005...). Les mois sont
-  // comptes pour 31 jours et les annees pour 366 : on ne saute jamais une periode qui toucherait la fenetre.
-  let k0 = 0;
-  const recul = debutFenetre - Math.max(duree, 0) - 3 * J - base;
-  if (compte === Infinity && recul > 0) {
-    const periode = { DAILY: 1, WEEKLY: 7, MONTHLY: 31, YEARLY: 366 }[freq];
-    if (periode) k0 = Math.floor(recul / (inter * periode * J));
-  }
-
-  for (let k = k0; k < k0 + 6000 && compte > 0; k++) {
-    let dates = [];
-    if (freq === 'DAILY') {
-      const dm = base + k * inter * J;
-      if (!parJour.length || parJour.includes(new Date(dm).getUTCDay())) dates = [dm];
-    } else if (freq === 'WEEKLY') {
-      if (parJour.length) {
-        const lundi = base - ((new Date(base).getUTCDay() + 6) % 7) * J + k * inter * 7 * J;
-        dates = parJour.map(j => lundi + ((j + 6) % 7) * J).sort((a, b) => a - b).filter(x => x >= base);
-      } else dates = [base + k * inter * 7 * J];
-    } else if (freq === 'MONTHLY') {
-      const m = new Date(Date.UTC(w0.y, w0.m - 1 + k * inter, 1));
-      const an = m.getUTCFullYear(), mois = m.getUTCMonth();
-      const nbJ = new Date(Date.UTC(an, mois + 1, 0)).getUTCDate();
-      const jourDuMois = n => (n > 0 ? n : nbJ + 1 + n);
-      let jours = [];
-      if (parJourRang.length) {
-        for (const { n, j } of parJourRang) {
-          const tous = [];
-          for (let d = 1 + ((j - m.getUTCDay() + 7) % 7); d <= nbJ; d += 7) tous.push(d);
-          if (!n) jours.push(...tous);
-          else { const d = n > 0 ? tous[n - 1] : tous[tous.length + n]; if (d) jours.push(d); }
-        }
-        if (parJourMois.length) jours = jours.filter(d => parJourMois.some(n => jourDuMois(n) === d));   // ex. vendredi 13
-      } else if (parJourMois.length) jours = parJourMois.map(jourDuMois);
-      else jours = [w0.d];
-      jours = [...new Set(jours)].filter(d => d >= 1 && d <= nbJ).sort((a, b) => a - b);
-      if (position) { const d = position > 0 ? jours[position - 1] : jours[jours.length + position]; jours = d ? [d] : []; }
-      dates = jours.map(d => Date.UTC(an, mois, d)).filter(x => x >= base);
-    } else if (freq === 'YEARLY') {
-      const dm = Date.UTC(w0.y + k * inter, w0.m - 1, w0.d);
-      if (new Date(dm).getUTCDate() === w0.d) dates = [dm];
-    } else {
-      ajouter(ds.utc);
-      break;
-    }
-    let stop = false;
-    for (const dm of dates) {
-      if (compte <= 0) { stop = true; break; }
-      if (avantFenetre(dm)) { compte--; continue; }
-      const utc = aUTC(dm);
-      if (utc > jusqua || utc >= finFenetre) { stop = true; break; }
-      compte--;
-      ajouter(utc);
-    }
-    if (stop) break;
-  }
-  return res;
 }
