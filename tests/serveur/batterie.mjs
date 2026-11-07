@@ -47,3 +47,13 @@ for (let i = 0; i < 20; i++) {
   await req('/api/etat?bat=4.18&pct=99&crate=' + (i % 2 ? '1.9' : '2.1'));
 }
 console.log('seuil hésitant, 20 réveils en 10 min :', ecrituresStatut, 'écriture(s)');
+// Temps d'éveil et d'écran cumulés par la carte : gardés dans l'état et dans l'historique (dixièmes de s)
+kv.delete('batterie'); kv.delete('statut');
+horloge(new Date(t0 + 44 * 86400e3).toISOString());
+await req('/api/etat?bat=4.05&pct=85.3&crate=-0.2&ev=123456&ee=45678');
+st = JSON.parse(kv.get('statut').v);
+console.log('éveil : état', st.ev, st.ee, '| point', JSON.stringify(JSON.parse(kv.get('batterie').v).pts.at(-1).slice(1)));
+kv.delete('batterie');
+horloge(new Date(t0 + 45 * 86400e3).toISOString());
+await req('/api/etat?bat=4.05&ev=2000&ee=900');
+console.log('éveil sans jauge : point', JSON.stringify(JSON.parse(kv.get('batterie').v).pts.at(-1).slice(1)));
