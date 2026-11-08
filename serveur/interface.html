@@ -318,9 +318,9 @@ pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflo
   <label>Réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
   <p class="aide repliable">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
   <label style="margin-top:12px"><input type="checkbox" id="partiel"> Mises à jour partielles de l'écran</label>
-  <label>Méthode <select id="methodePartiel" style="width:auto"><option value="simple">simple (sans clignotement)</option>
+  <label>Méthode <select id="methodePartiel" style="width:auto;flex:1;min-width:0"><option value="simple">simple</option>
     <option value="double">double passe</option><option value="triple">triple passe</option><option value="quadruple">quadruple passe</option>
-    <option value="inversion">inversion des zones (petit clignotement, moins de traces)</option></select></label>
+    <option value="inversion">inversion des zones</option></select></label>
   <label>Complet après <select id="maxPartiels" style="width:auto"><option value="0">aucune limite de</option><option>3</option><option>6</option><option>12</option></select> mises à jour partielles</label>
   <label>Rafraîchissement complet au moins toutes les <select id="completH" style="width:auto"><option>6</option><option>12</option><option>24</option></select> h</label>
   <label>Complet dès que plus de <select id="seuilPartiel" style="width:auto"><option>20</option><option>40</option><option>60</option></select> % de l'écran change</label>
