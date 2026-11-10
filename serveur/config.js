@@ -26,7 +26,10 @@ export const CONFIG_DEFAUT = {
   // Scenes : dispositions affichees pendant une periode (creneaux, Grand Prix, dates), par ordre de priorite.
   // Hors de toute scene, c'est la disposition "par defaut" (disposition / dispositionPortrait).
   scenes: [],
-  agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [] },
+  // lieu : affiche le lieu de chaque evenement (champ LOCATION du calendrier) apres son titre
+  agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [], lieu: true },
+  // Compte a rebours : dates a venir (nom, jour, mois, annee ou 0 = chaque annee), saisies sur la page web
+  rebours: { liste: [] },
   // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
   disposition: [
     { id: 'date', x: 0, y: 0, w: 12, h: 1 },
@@ -86,8 +89,9 @@ export function migrerScenes(cfg, lu) {
 export async function ecrireConfig(env, cfg) {
   await env.CADRE.put('config', JSON.stringify(cfg));
 }
-// Verifie et nettoie une modification des reglages (renvoie les anniversaires illisibles, ou un message d'erreur)
-export function preparerModif(modif, cfg) {
+// Verifie et nettoie une modification des reglages (renvoie les anniversaires illisibles, ou un message d'erreur).
+// rapport (facultatif) recoit les autres lignes non comprises : rapport.rebours (dates du compte a rebours)
+export function preparerModif(modif, cfg, rapport = {}) {
   delete modif.version; delete modif.photo; delete modif.pochette; delete modif.firmware;
   if (modif.mode && !MODES.includes(modif.mode)) return 'Mode inconnu';
   if (modif.ecrans) {
@@ -121,9 +125,22 @@ export function preparerModif(modif, cfg) {
     ignorees = r.ignorees;
     delete modif.agenda.anniversairesTexte;
   }
+  // Compte a rebours : texte saisi sur la page ("Vacances de Noël 19/12/2026", une date par ligne),
+  // ou liste deja prete (restauration d'une sauvegarde)
+  if (modif.rebours !== undefined) {
+    const r = modif.rebours || {};
+    let liste = Array.isArray(r.liste) ? r.liste : [];
+    if (typeof r.texte === 'string') {
+      const lu = lireAnniversaires(r.texte);
+      liste = lu.liste;
+      rapport.rebours = lu.ignorees;
+    }
+    modif.rebours = { liste: liste.filter(d => d && String(d.nom || '').trim() && d.j >= 1 && d.j <= 31 && d.m >= 1 && d.m <= 12)
+      .map(d => ({ nom: String(d.nom).trim().slice(0, 40), j: d.j | 0, m: d.m | 0, a: d.a >= 2000 && d.a <= 2100 ? d.a | 0 : 0 })).slice(0, 12) };
+  }
   return ignorees;
 }
-// Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative)
+// Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative) : anniversaires, compte a rebours
 function lireAnniversaires(texte) {
   const liste = [], ignorees = [];
   for (const brut of texte.split(/\r?\n/)) {

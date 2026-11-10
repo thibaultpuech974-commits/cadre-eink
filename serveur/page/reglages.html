@@ -14,7 +14,7 @@ function charger() {
   });
 }
 function remplirFormulaires() {
-  remplirMeteo(); remplirAgenda(); remplirDispo(); remplirBus();
+  remplirMeteo(); remplirAgenda(); remplirRebours(); remplirDispo(); remplirBus();
   choisirValeur($('reveil'), config.reveilMin);
   $('dev').checked = !!config.dev; choisirValeur($('devSecondes'), config.devSecondes || 30);
   var n = config.nuit || {};
@@ -42,10 +42,18 @@ function remplirMeteo() {
 function remplirAgenda() {
   $('aUrls').value = config.agenda.urls.join('\n');
   choisirValeur($('aNb'), config.agenda.nb);
+  $('aLieu').checked = config.agenda.lieu !== false;
   $('aAnniv').value = (config.agenda.anniversaires || []).map(function (a) {
     return a.nom + ' ' + String(a.j).padStart(2, '0') + '/' + String(a.m).padStart(2, '0') + (a.a ? '/' + a.a : '');
   }).join('\n');
+}// Compte a rebours : "Nom JJ/MM/AAAA", une date par ligne (l'annee est facultative)
+function remplirRebours() {
+  $('rTexte').value = ((config.rebours && config.rebours.liste) || []).map(function (d) {
+    return d.nom + ' ' + String(d.j).padStart(2, '0') + '/' + String(d.m).padStart(2, '0') + (d.a ? '/' + d.a : '');
+  }).join('\n');
 }
+function lireRebours() { return { texte: $('rTexte').value }; }
+
 function enregistrer(modif, idMsg) {
   return api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
     .then(function (r) { return r.json(); })
@@ -63,7 +71,7 @@ function modificationsCourantes() {
   lireFormScene(); ranger();
   return { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
     affichage: { traits: $('traits').checked, rotation: rot },
-    meteo: lireMeteo(), agenda: lireAgenda(), bus: lireBus(),
+    meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), bus: lireBus(),
     reveilMin: +$('reveil').value, dev: $('dev').checked, devSecondes: +$('devSecondes').value,
     nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
       intervalleMin: +$('nuitIntervalle').value },
@@ -98,7 +106,7 @@ function prendreReference() { reference = JSON.stringify(modificationsCourantes(
 function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
 // Menus dont les reglages different de ceux enregistres
 var PARTIES = [['Scènes', ['disposition', 'dispositionPortrait', 'scenes']], ['Montage', ['ecrans', 'affichage']],
-  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'rafraich']]];
+  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Compte à rebours', ['rebours']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'rafraich']]];
 function partiesModifiees() {
   var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes()));
   return PARTIES.filter(function (p) { return p[1].some(function (k) { return JSON.stringify(r[k]) !== JSON.stringify(c[k]); }); })
@@ -131,6 +139,7 @@ function toutEnregistrer() {
       reference = JSON.stringify(modificationsCourantes());
       // Ce que le serveur n'a pas pu garder
       if (d.ignorees && d.ignorees.length) $('msgAgenda').textContent = 'Anniversaires non compris : ' + d.ignorees.join(' ; ') + ' (format attendu : Prénom 14/03/2005)';
+      if (d.ignoreesRebours && d.ignoreesRebours.length) $('msgRebours').textContent = 'Lignes non comprises : ' + d.ignoreesRebours.join(' ; ') + ' (format attendu : Vacances 19/12/2026)';
       if ((config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; }))
         $('msgDispo').textContent = 'Un créneau a été ignoré : coche au moins un jour et mets une fin après le début.';
       if (config.dev && !devAvant) $('msgReveil').textContent = "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).";
@@ -181,7 +190,7 @@ function lireMeteo() {
   if (villeTemp) { m.ville = villeTemp.ville; m.lat = villeTemp.lat; m.lon = villeTemp.lon; }
   return m;
 }
-function lireAgenda() { return { urls: $('aUrls').value.split('\n'), nb: +$('aNb').value, anniversairesTexte: $('aAnniv').value }; }
+function lireAgenda() { return { urls: $('aUrls').value.split('\n'), nb: +$('aNb').value, lieu: $('aLieu').checked, anniversairesTexte: $('aAnniv').value }; }
 function lireBus() {
   var cases = $('busLignes').querySelectorAll('input'), choisies = [], toutes = true;
   for (var i = 0; i < cases.length; i++) { if (cases[i].checked) choisies.push(cases[i].value); else toutes = false; }

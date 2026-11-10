@@ -137,6 +137,8 @@
   <label>Nombre maximum d'événements
     <select id="aNb" style="width:auto"><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select></label>
   <p class="aide">Le cadre en affiche autant que la hauteur du bloc Agenda le permet.</p>
+  <label><input type="checkbox" id="aLieu"> Afficher le lieu après le titre (salle, adresse)</label>
+  <p class="aide repliable">Les évènements sont regroupés par jour : le jour n'est écrit qu'une fois. Le lieu est la première ligne du champ « Lieu » de l'évènement ; il s'affiche après le titre quand il reste de la place (« Colle de maths · C104 »).</p>
   <button style="width:100%;margin-top:8px" onclick="tester()">Voir les données envoyées au cadre</button>
   <div class="msg" id="msgAgenda"></div>
   <pre id="donnees" class="cache"></pre>
@@ -168,6 +170,14 @@
   <button style="width:100%;margin-top:8px" onclick="testerBus()">Voir les prochains passages maintenant</button>
   <div class="msg" id="msgBus"></div>
   <pre id="busTest" class="cache"></pre>
+</details>
+
+<details class="menu" id="menu-rebours">
+  <summary>Compte à rebours</summary>
+  <p class="aide">Dates à attendre, une par ligne : le nom puis la date. Sans année, la date revient chaque année.</p>
+  <textarea id="rTexte" placeholder="Vacances de Noël 19/12/2026&#10;Concours blanc 14/01/2027"></textarea>
+  <div class="msg" id="msgRebours"></div>
+  <p class="aide repliable">Le bloc « Compte à rebours » (à ajouter dans « Scènes et disposition ») affiche en grand les jours restants avant la date la plus proche (« J-39 », puis « Jour J »), et les suivantes en dessous ou à côté s'il a la place. Une date passée disparaît toute seule. 12 dates au plus.</p>
 </details>
 
 <details class="menu" id="menu-photo">

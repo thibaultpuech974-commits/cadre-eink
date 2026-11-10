@@ -23,6 +23,7 @@
 //   bus.js               horaires et temps reel des bus
 //   meteo.js             Open-Meteo
 //   agenda.js            calendriers ICS et anniversaires
+//   rebours.js           compte a rebours (jours restants avant une date)
 //   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
@@ -143,7 +144,7 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    for (const id of ['agenda', 'bus', 'f1']) if (!ici.has(id)) delete contenu[id];
+    for (const id of ['agenda', 'bus', 'f1', 'rebours']) if (!ici.has(id)) delete contenu[id];
     Object.assign(etat, contenu);
     // Scene affichee : son rythme (ou le rythme normal / de nuit), et reveil cale sur le prochain changement de scene
     const sc = contenu.scene;
@@ -255,12 +256,13 @@ async function routeLireConfig(env) {
 async function routeEcrireConfig(req, env) {
   const modif = await req.json();
   const cfg = await lireConfig(env);
-  const ignorees = preparerModif(modif, cfg);
+  const rapport = {};
+  const ignorees = preparerModif(modif, cfg, rapport);
   if (typeof ignorees === 'string') return texte(ignorees, 400);
   fusionner(cfg, modif);
   cfg.version++;
   await ecrireConfig(env, cfg);
-  return json({ config: cfg, ignorees });
+  return json({ config: cfg, ignorees, ignoreesRebours: rapport.rebours || [] });
 }
 // --- Etat de chaque calendrier de l'agenda (page web) : accessible ? combien d'evenements a venir ? ---
 async function routeEtatAgenda(req, env) {

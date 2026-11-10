@@ -70,6 +70,7 @@ void widgetDate(JsonVariant e, Boite b, float vBat);
 void widgetMeteo(JsonVariant m, Boite b);
 void widgetColonnes(JsonArray liste, Boite b, bool jours);
 void widgetAgenda(JsonVariant ag, Boite b);
+void widgetRebours(JsonVariant r, Boite b);
 void widgetBus(JsonVariant bus, Boite b);
 void trame(int x0, int y0, int w, int h, int pas);
 void ligneHPointillee(int x0, int x1, int y);
@@ -486,6 +487,8 @@ void widgetColonnes(JsonArray liste, Boite b, bool jours) {
   }
 }
 
+// Agenda : les evenements sont regroupes par jour (le jour n'est ecrit qu'une fois, avec un peu d'espace
+// avant le jour suivant), et le lieu suit le titre quand il y a la place ("Colle de maths · B12").
 void widgetAgenda(JsonVariant ag, Boite b) {
   if (ag.isNull()) return;
   policeT(20, false);
@@ -495,7 +498,20 @@ void widgetAgenda(JsonVariant ag, Boite b) {
   policeT(17, false);
   int aE = asc();
   int pas = aE * 17 / 10 + 1;
-  int lignes = max(1, (b.h - aE / 2) / pas + 1);
+  int ecartJour = pas / 3;                    // espace en plus entre deux jours
+  // Nombre de lignes qui tiennent, espaces entre les jours compris
+  int lignes = 0;
+  {
+    int yy = b.y + aE + 4;
+    const char* prec = nullptr;
+    for (JsonObject e : evts) {
+      const char* j = e["j"] | "";
+      if (prec && strcmp(j, prec) != 0) yy += ecartJour;
+      if (yy > b.y + b.h) break;
+      lignes++; yy += pas; prec = j;
+    }
+  }
+  lignes = max(1, lignes);
   // Colonne des jours : aussi large que le libelle le plus long ("Aujourd'hui"...), dans la limite de 35 %
   policeT(17, true);
   int colJour = 0, kj = 0;
@@ -515,25 +531,125 @@ void widgetAgenda(JsonVariant ag, Boite b) {
   largHeure = min(largHeure + 14, b.w * 3 / 10);
   bool colHeure = b.w >= colJour + largHeure + 120;
   int xHeure = b.x + colJour, xTitre = xHeure + largHeure;
-  int i = 0;
-  char tampon[160];
+  int i = 0, yy = b.y + aE + 4;
+  const char* prec = nullptr;
+  char tampon[160], avecLieu[200];
   for (JsonObject e : evts) {
-    if (i >= lignes) break;
-    int yy = b.y + aE + 4 + i * pas;
-    if (yy > b.y + b.h) break;
-    policeT(17, true);
-    texteTronque(b.x, yy, e["j"] | "", colJour - 8);
+    const char* j = e["j"] | "";
+    bool nouveauJour = !prec || strcmp(j, prec) != 0;
+    if (prec && nouveauJour) yy += ecartJour;
+    if (i >= lignes || yy > b.y + b.h) break;
+    if (nouveauJour) { policeT(17, true); texteTronque(b.x, yy, j, colJour - 8); }
     policeT(17, false);
     const char* h = e["h"] | "";
     const char* titre = e["t"] | "";
-    if (h[0] && colHeure) {
-      texteTronque(xHeure, yy, h, largHeure - 8);
-      texteTronque(xTitre, yy, titre, b.x + b.w - xTitre);
-    } else {
-      if (h[0]) { snprintf(tampon, sizeof tampon, "%s %s", h, titre); titre = tampon; }
-      texteTronque(xHeure, yy, titre, b.x + b.w - xHeure);
+    const char* lieu = e["l"] | "";
+    int x = xHeure;
+    if (h[0] && colHeure) { texteTronque(xHeure, yy, h, largHeure - 8); x = xTitre; }
+    else if (h[0]) { snprintf(tampon, sizeof tampon, "%s %s", h, titre); titre = tampon; }
+    int larg = b.x + b.w - x;
+    // Le lieu suit le titre s'il reste au moins la place d'en lire le debut
+    if (lieu[0] && largeurTexte(titre) + largeurTexte(" · ") + 48 <= larg) {
+      snprintf(avecLieu, sizeof avecLieu, "%s · %s", titre, lieu);
+      titre = avecLieu;
     }
-    i++;
+    texteTronque(x, yy, titre, larg);
+    prec = j; yy += pas; i++;
+  }
+}
+
+// Compte a rebours : jours restants avant une date (vacances, concours...). La date la plus proche en
+// grand ("J-12", puis son titre et sa date) ; les suivantes en liste, a droite si le bloc est large,
+// sinon dessous, tant qu'il reste de la place.
+void widgetRebours(JsonVariant r, Boite b) {
+  JsonArray L = r.as<JsonArray>();
+  if (r.isNull() || L.size() == 0) { policeT(20, false); texteTronque(b.x, b.y + asc() + 6, "Aucune date à venir", b.w); return; }
+  JsonObject p = L[0];
+  int n = p["n"] | 0;
+  const char* titre = p["t"] | "";
+  const char* date = p["d"] | "";
+  char jr[16], t[160];
+  if (n == 0) strcpy(jr, "Jour J"); else snprintf(jr, sizeof jr, "%d", n);
+
+  // Bloc d'une seule rangee : tout sur une ligne
+  if (b.h < 110) {
+    snprintf(t, sizeof t, n == 0 ? "%s" : "J-%s", jr);
+    policeQuiTient(true, b.h * 0.62f, t, b.w / 2);
+    int base = b.y + (b.h + asc()) / 2;
+    texte(b.x, base, t);
+    int x = b.x + largeurTexte(t) + 18, larg = b.x + b.w - x;
+    policeT(20, false);
+    snprintf(t, sizeof t, "%s · %s", titre, date);
+    if (largeurTexte(t) > larg) snprintf(t, sizeof t, "%s", titre);
+    if (larg >= 60) texteTronque(x, b.y + (b.h + asc()) / 2, t, larg);
+    return;
+  }
+
+  // Les dates suivantes : colonne de droite (bloc large) ou lignes sous la premiere
+  int suivantes = L.size() - 1;
+  bool aDroite = suivantes > 0 && b.w >= 620;
+  int larg = aDroite ? b.w * 55 / 100 : b.w;
+  policeT(17, false); int aS = asc(), ligneS = aS * 17 / 10 + 1;
+  policeAjustee(25, true, titre, larg); int aT = asc();
+  policeT(17, false); int aD = asc();
+  int bas = 14 + aT + 12 + aD;                       // titre et date, sous le chiffre
+  const int ecartListe = 30;                         // entre la date et la liste (trait de separation au milieu)
+  // Le chiffre : le plus grand qui laisse la place au titre et a la date (et a deux des dates suivantes
+  // quand elles vont dessous), et qui tient en largeur avec "J-"
+  float cible = min(92.0f, (float)(b.h - bas - 4));
+  if (!aDroite && suivantes > 0) cible = min(cible, max(42.0f, (float)(b.h - bas - ecartListe - min(suivantes, 2) * ligneS)));
+  cible = max(24.0f, cible);
+  int aC = 0, lC = 0, lJ = 0;
+  for (;;) {
+    if (n == 0) { policeQuiTient(true, cible, jr, larg); aC = asc(); lC = largeurTexte(jr); lJ = 0; break; }
+    policeChiffres(cible); aC = asc(); lC = largeurTexte(jr);
+    policeT(aC >= 60 ? 30 : aC >= 36 ? 25 : 20, true); lJ = largeurTexte("J-") + max(4, aC / 12);
+    if (lJ + lC <= larg || cible <= 24) break;
+    cible -= 6;
+  }
+  int haut = aC + bas;
+  // Nombre de dates suivantes affichees, puis le tout est centre en hauteur
+  int nb = 0;
+  if (aDroite) nb = min(suivantes, max(1, (b.h + ligneS - aS) / ligneS));
+  else if (suivantes > 0) nb = max(0, min(suivantes, (b.h - haut - ecartListe + (ligneS - aS)) / ligneS));
+  int hautListe = nb > 0 ? nb * ligneS - (ligneS - aS) : 0;
+  int y = centrerV(b, aDroite || !nb ? haut : haut + ecartListe + hautListe);
+  if (n == 0) { policeQuiTient(true, cible, jr, larg); texte(b.x, y + aC, jr); }
+  else {
+    policeT(aC >= 60 ? 30 : aC >= 36 ? 25 : 20, true);
+    texte(b.x, y + aC, "J-");
+    policeChiffres(cible);
+    texte(b.x + lJ, y + aC, jr);
+  }
+  y += aC + 14 + aT;
+  policeAjustee(25, true, titre, larg);
+  texteTronque(b.x, y, titre, larg);
+  y += 12 + aD;
+  policeT(17, false);
+  texteTronque(b.x, y, date, larg);
+  if (nb <= 0) return;
+
+  // Liste des suivantes : "J-40" en gras, puis le titre
+  int xl = aDroite ? b.x + larg + 28 : b.x, ll = b.x + b.w - xl;
+  int yl = aDroite ? centrerV(b, hautListe) + aS : y + ecartListe + aS;
+  if (aDroite) canvas.fillRect(xl - 15, b.y + 6, 2, b.h - 12, NOIR);
+  else canvas.fillRect(b.x, y + ecartListe / 2, min(b.w, 120), 2, NOIR);
+  policeT(17, true);
+  int colJ = 0;
+  for (int k = 1; k <= nb; k++) {
+    int nk = L[k]["n"] | 0;
+    if (nk == 0) strcpy(t, "Jour J"); else snprintf(t, sizeof t, "J-%d", nk);
+    colJ = max(colJ, (int)largeurTexte(t));
+  }
+  colJ += 16;
+  for (int k = 1; k <= nb; k++) {
+    int nk = L[k]["n"] | 0;
+    if (nk == 0) strcpy(t, "Jour J"); else snprintf(t, sizeof t, "J-%d", nk);
+    policeT(17, true);
+    texte(xl, yl, t);
+    policeT(17, false);
+    if (ll - colJ >= 40) texteTronque(xl + colJ, yl, L[k]["t"] | "", ll - colJ);
+    yl += ligneS;
   }
 }
 
@@ -890,6 +1006,7 @@ void dessinerTableau(JsonVariant e, float vBat) {
       else widgetColonnes(m[id].as<JsonArray>(), b, id[0] == 'j');
     }
     else if (!strcmp(id, "agenda")) widgetAgenda(e["agenda"], b);
+    else if (!strcmp(id, "rebours")) widgetRebours(e["rebours"], b);
     else if (!strcmp(id, "bus")) widgetBus(e["bus"], b);
     else if (!strcmp(id, "f1")) widgetF1(e["f1"], b);
     else if (!strcmp(id, "courbe")) {
