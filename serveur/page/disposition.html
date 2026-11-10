@@ -1,0 +1,428 @@
+<!-- Page web du cadre : menu Scènes et disposition, menu Montage du cadre (grille, scènes, éditeur de blocs, annuler / rétablir) -->
+<script>
+// --- Editeur de disposition (meme grille que le serveur) ---
+var MARGE = 24, GOUT = 16;
+// Grille selon l'orientation : 12 x 8 cases en paysage, 8 x 12 en portrait
+// Ecrans : un seul, ou deux assembles (cote a cote / l'un sur l'autre) en une grande image
+var ECR = { nb: 1, assemblage: 'cote', joint: 15 };
+var MM_PAR_PX = 0.2817;              // taille d'un point de la dalle 13,3" (270,4 mm / 960)
+function grilleUI(r) {
+  var portrait = r === 1 || r === 3;
+  var g = portrait ? { pc: 8, pr: 12, L: HAUT, H: LARG } : { pc: 12, pr: 8, L: LARG, H: HAUT };
+  var deux = ECR.nb === 2;
+  g.nx = deux && ECR.assemblage !== 'dessus' ? 2 : 1; g.ny = deux && ECR.assemblage === 'dessus' ? 2 : 1;
+  g.cols = g.pc * g.nx; g.rangs = g.pr * g.ny;
+  g.cl = (g.L - 2 * MARGE + GOUT) / g.pc; g.ch = (g.H - 2 * MARGE + GOUT) / g.pr;
+  g.J = deux ? Math.round((+ECR.joint || 0) / MM_PAR_PX) : 0;     // jointure reelle (photo)
+  g.JE = deux ? Math.max(g.J, 24) : 0;                             // jointure dessinee (editeur, apercu)
+  g.VL = g.L * g.nx + g.J * (g.nx - 1); g.VH = g.H * g.ny + g.J * (g.ny - 1);
+  g.VLE = g.L * g.nx + g.JE * (g.nx - 1); g.VHE = g.H * g.ny + g.JE * (g.ny - 1);
+  return g;
+}
+// Ecran (0 ou 1) d'un bloc en cases, -1 s'il est a cheval sur la jointure
+function ecranDe(d, g) {
+  var ex = Math.floor(d.x / g.pc), ey = Math.floor(d.y / g.pr);
+  if (ex !== Math.floor((d.x + d.w - 1) / g.pc) || ey !== Math.floor((d.y + d.h - 1) / g.pr)) return -1;
+  return ex + ey;
+}
+var rot = 0, G = grilleUI(0);
+var INFOS = {
+  date: { nom: 'Date et batterie', ex: 'Vendredi 23 octobre', min: [3, 1] },
+  meteo: { nom: 'Météo actuelle', ex: '17 °C, partiellement nuageux', min: [4, 2] },
+  heures: { nom: 'Prochaines heures', ex: '22h · 1h · 4h · 7h…', min: [4, 2] },
+  jours: { nom: 'Prochains jours', ex: 'Sam · Dim · Lun…', min: [3, 2] },
+  agenda: { nom: 'Agenda', ex: 'Demain 18:30 Colle…', min: [3, 1] },
+  bus: { nom: 'Prochains bus', ex: 'Ligne 4 → Gare  12:42', min: [3, 2] },
+  courbe: { nom: 'Graphique de température', ex: 'Courbe des prochaines 24 h', min: [4, 2] },
+  f1: { nom: 'Grand Prix de F1', ex: 'Tracé du circuit et horaires', min: [3, 2] }
+};
+var DISPO_DEFAUT = {
+  0: [ { id: 'date', x: 0, y: 0, w: 12, h: 1 }, { id: 'meteo', x: 0, y: 1, w: 12, h: 2 },
+       { id: 'heures', x: 0, y: 3, w: 12, h: 2 }, { id: 'jours', x: 0, y: 5, w: 5, h: 3 },
+       { id: 'agenda', x: 5, y: 5, w: 7, h: 3 } ],
+  1: [ { id: 'date', x: 0, y: 0, w: 8, h: 1 }, { id: 'meteo', x: 0, y: 1, w: 8, h: 2 },
+       { id: 'heures', x: 0, y: 3, w: 8, h: 2 }, { id: 'jours', x: 0, y: 5, w: 8, h: 2 },
+       { id: 'agenda', x: 0, y: 7, w: 8, h: 5 } ]
+};
+// Avec deux ecrans : la disposition habituelle sur le premier, d'autres blocs sur le second
+var DISPO_SECOND = {
+  0: [ { id: 'courbe', x: 0, y: 0, w: 12, h: 4 }, { id: 'agenda', x: 0, y: 4, w: 7, h: 4 }, { id: 'f1', x: 7, y: 4, w: 5, h: 4 } ],
+  1: [ { id: 'courbe', x: 0, y: 0, w: 8, h: 4 }, { id: 'f1', x: 0, y: 4, w: 8, h: 4 }, { id: 'jours', x: 0, y: 8, w: 8, h: 4 } ]
+};
+function dispoParDefaut(o) {
+  var l = copie(DISPO_DEFAUT[o]);
+  if (ECR.nb !== 2) return l;
+  var g = grilleUI(o ? 1 : 0), dx = g.nx === 2 ? g.pc : 0, dy = g.ny === 2 ? g.pr : 0;
+  var second = copie(DISPO_SECOND[o]).map(function (d) { d.x += dx; d.y += dy; return d; });
+  // le second ecran reprend des blocs du premier : on les retire du premier
+  l = l.filter(function (d) { return !second.some(function (x) { return x.id === d.id; }); });
+  l.forEach(function (d) { if (d.id === 'jours') { d.x = 0; d.w = g.pc; } });   // la place de l'agenda est libre
+  return l.concat(second);
+}
+// Dispositions de la scene "Par defaut" : '0' paysage, '1' portrait ; les autres scenes ont les leurs
+var dispos = { '0': [], '1': [] };
+var scenes = [];
+var sceneCourante = -1;               // -1 = Par defaut
+function cleDispo() { return cleOri(rot) ? 'dispositionPortrait' : 'disposition'; }
+function ranger() {                   // range la disposition en cours d'edition a sa place
+  if (sceneCourante < 0) dispos[cleOri(rot)] = dispo; else scenes[sceneCourante][cleDispo()] = dispo;
+}
+function dispoCourante() { return sceneCourante < 0 ? dispos[cleOri(rot)] : (scenes[sceneCourante][cleDispo()] || []); }
+var NOMS_J = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
+function resumeScene(sc) {
+  var t = [];
+  (sc.creneaux || []).forEach(function (c) {
+    var j = NOMS_J.filter(function (x, i) { return c.jours[i]; }).join(', ');
+    t.push(j + ' de ' + c.debut + ' à ' + c.fin);
+  });
+  if (sc.f1) t.push(sc.f1 === 'semaine' ? "la semaine d'un Grand Prix" : "le week-end d'un Grand Prix");
+  if (sc.du || sc.au) t.push((sc.du ? 'du ' + sc.du.split('-').reverse().join('/') : '') + (sc.au ? ' au ' + sc.au.split('-').reverse().join('/') : ''));
+  var r = t.length ? 'Affichée : ' + t.join(' ; ') + '.' : 'Aucune condition : cette scène est affichée tout le temps (et remplace « Par défaut »).';
+  r += sc.reveilMin ? ' Mise à jour toutes les ' + sc.reveilMin + ' min.' : ' Rythme de mise à jour normal.';
+  return r;
+}
+function lireFormScene() {
+  if (sceneCourante < 0) return;
+  var sc = scenes[sceneCourante];
+  sc.nom = $('sceneNom').value.trim() || sc.nom;
+  sc.creneaux = lireCreneaux('sceneCreneaux');
+  sc.f1 = $('sceneF1').value; sc.du = $('sceneDu').value; sc.au = $('sceneAu').value;
+  sc.reveilMin = +$('sceneReveil').value;
+}
+var dernierStatut = null;
+function dessinerPuces() {
+  var z = $('listeScenes'); z.innerHTML = '';
+  var affichee = (dernierStatut && dernierStatut.sc) || '';
+  var ajouter = function (nom, i) {
+    var b = document.createElement('button');
+    b.textContent = nom + (nom === affichee ? ' •' : '');
+    b.title = nom === affichee ? 'Scène affichée en ce moment' : '';
+    b.classList.toggle('actif', i === sceneCourante);
+    b.onclick = function () { choisirScene(i); };
+    z.appendChild(b);
+  };
+  ajouter('Par défaut', -1);
+  scenes.forEach(function (sc, i) { ajouter(sc.nom, i); });
+  var plus = document.createElement('button');
+  plus.textContent = '+ Nouvelle scène';
+  plus.onclick = nouvelleScene;
+  if (scenes.length < 8) z.appendChild(plus);
+}
+function afficherScenes() {
+  dessinerPuces();
+  $('titreEditeur').textContent = 'Blocs de la scène « ' + (sceneCourante < 0 ? 'Par défaut' : scenes[sceneCourante].nom) + ' »' + texteOrientation();
+  $('reglagesScene').classList.toggle('cache', sceneCourante < 0);
+  $('aideDefaut').classList.toggle('cache', sceneCourante >= 0);
+  if (sceneCourante >= 0) {
+    var sc = scenes[sceneCourante];
+    $('sceneNom').value = sc.nom;
+    $('sceneCreneaux').innerHTML = '';
+    (sc.creneaux || []).forEach(function (c) { ajouterCreneau(c, 'sceneCreneaux'); });
+    $('sceneF1').value = sc.f1 || ''; $('sceneDu').value = sc.du || ''; $('sceneAu').value = sc.au || '';
+    choisirValeur($('sceneReveil'), sc.reveilMin || 0);
+    $('sceneResume').textContent = resumeScene(sc);
+  }
+}
+// Le resume et le nom se mettent a jour pendant la saisie
+$('reglagesScene').addEventListener('change', function () { lireFormScene(); if (sceneCourante >= 0) $('sceneResume').textContent = resumeScene(scenes[sceneCourante]); });
+$('sceneNom').addEventListener('input', function () { if (sceneCourante >= 0 && this.value.trim()) { scenes[sceneCourante].nom = this.value.trim(); dessinerPuces();
+  $('titreEditeur').textContent = 'Blocs de la scène « ' + scenes[sceneCourante].nom + ' »' + texteOrientation(); } });
+function choisirScene(i) {
+  lireFormScene(); ranger();
+  sceneCourante = i; scenePrevisu = i;
+  afficherScenes();
+  appliquerRotation(rot);
+}
+function nouvelleScene() {
+  memoriserEtape();
+  lireFormScene(); ranger();
+  scenes.push({ id: 's' + Date.now().toString(36), nom: 'Scène ' + (scenes.length + 1),
+    creneaux: [{ jours: [1, 1, 1, 1, 1, 0, 0], debut: '07:00', fin: '08:00' }], f1: '', du: '', au: '', reveilMin: 0,
+    disposition: copie(dispos['0']), dispositionPortrait: copie(dispos['1']) });
+  sceneCourante = scenes.length - 1;
+  afficherScenes(); appliquerRotation(rot);
+  message('msgDispo', 'Scène créée à partir de « Par défaut » : choisis sa période et ses blocs, puis enregistre.');
+}
+function supprimerScene() {
+  memoriserEtape();
+  if (sceneCourante < 0) return;
+  var nom = scenes[sceneCourante].nom;
+  scenes.splice(sceneCourante, 1);
+  sceneCourante = -1;
+  afficherScenes(); appliquerRotation(rot);
+  message('msgDispo', 'Scène « ' + nom + ' » supprimée : enregistre pour confirmer (ou recharge la page pour annuler).');
+}
+function monterScene() {
+  if (sceneCourante <= 0) { message('msgDispo', 'Cette scène est déjà la plus prioritaire.'); return; }
+  memoriserEtape();
+  lireFormScene(); ranger();
+  var sc = scenes.splice(sceneCourante, 1)[0];
+  scenes.splice(sceneCourante - 1, 0, sc);
+  sceneCourante--;
+  afficherScenes();
+  message('msgDispo', "Si plusieurs scènes sont actives en même temps, celle de gauche l'emporte.");
+}
+function copierDefaut() {
+  memoriserEtape();
+  dispo = copie(dispos[cleOri(rot)]);
+  ranger(); dessinerEditeur();
+  message('msgDispo', 'Disposition « Par défaut » copiée dans cette scène (orientation actuelle).');
+}
+var dispo = [];
+var choisi = null;                    // bloc selectionne pour regler son texte
+var NOMS_TAILLES = { S: 'Petite', M: 'Normale', L: 'Grande', XL: 'Très grande' };
+var NOMS_POLICES = { moderne: 'Moderne', helvetica: 'Helvetica', classique: 'Classique', machine: 'Machine à écrire' };
+function descStyle(d) {
+  var t = [];
+  if (d.t && d.t !== 'M') t.push(NOMS_TAILLES[d.t]);
+  if (d.p && d.p !== 'moderne') t.push(NOMS_POLICES[d.p]);
+  return t.join(' · ');
+}
+// --- Annuler / Retablir les modifications des blocs (deplacement, taille, ajout, retrait, texte, scenes) ---
+var historique = [], aRefaire = [];
+function etatEditeur() { lireFormScene(); ranger(); return JSON.stringify({ dispos: dispos, scenes: scenes, ECR: ECR, scene: sceneCourante }); }
+function majBoutonsHisto() { $('btnAnnulerEtape').disabled = !historique.length; $('btnRetablir').disabled = !aRefaire.length; }
+function memoriserEtape(etat) {
+  historique.push(etat || etatEditeur());
+  if (historique.length > 50) historique.shift();
+  aRefaire = [];
+  majBoutonsHisto();
+}
+function restaurerEtat(e) {
+  var o = JSON.parse(e);
+  dispos = o.dispos; scenes = o.scenes; ECR = o.ECR; sceneCourante = Math.min(o.scene, scenes.length - 1);
+  choisi = null; $('styleBloc').classList.add('cache');
+  afficherEcrans(); afficherScenes(); appliquerRotation(rot);
+}
+function annulerEtape() { if (!historique.length) return; aRefaire.push(etatEditeur()); restaurerEtat(historique.pop()); majBoutonsHisto(); }
+function retablirEtape() { if (!aRefaire.length) return; historique.push(etatEditeur()); restaurerEtat(aRefaire.pop()); majBoutonsHisto(); }
+function viderHistorique() { historique = []; aRefaire = []; majBoutonsHisto(); }
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.target.closest('input, textarea, select')) return;
+  var k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); annulerEtape(); }
+  else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); retablirEtape(); }
+});
+function selectionner(id) {
+  choisi = id;
+  var d = dispo.filter(function (x) { return x.id === id; })[0];
+  if (!d) { choisi = null; $('styleBloc').classList.add('cache'); dessinerEditeur(); return; }
+  $('styleTitre').textContent = INFOS[id].nom;
+  $('styleTaille').value = d.t || 'M';
+  $('stylePolice').value = d.p || 'moderne';
+  $('styleBloc').classList.remove('cache');
+  dessinerEditeur();
+}
+// Pose la bulle juste sous le bloc choisi (ou au-dessus s'il n'y a pas la place), sans sortir de l'editeur en largeur
+function placerBulle() {
+  var b = $('styleBloc');
+  if (!choisi || b.classList.contains('cache')) return;
+  var el = document.querySelector('#editeur .widget[data-id="' + choisi + '"]');
+  if (!el) return;
+  var z = $('zoneEditeur').getBoundingClientRect(), r = el.getBoundingClientRect();
+  var w = b.offsetWidth, h = b.offsetHeight;
+  var x = Math.max(4, Math.min(r.left - z.left, z.width - w - 4));
+  var y = r.bottom - z.top + 6;
+  if (y + h > z.height + 120 && r.top - z.top - h - 6 >= 0) y = r.top - z.top - h - 6;   // pas la place dessous : au-dessus
+  b.style.left = x + 'px'; b.style.top = y + 'px';
+}
+// Toucher l'editeur en dehors d'un bloc ferme la bulle
+$('editeur').addEventListener('pointerdown', function (e) { if (!e.target.closest('.widget') && choisi) selectionner(null); });
+window.addEventListener('resize', placerBulle);
+function changerStyle() {
+  memoriserEtape();
+  var d = dispo.filter(function (x) { return x.id === choisi; })[0];
+  if (!d) return;
+  d.t = $('styleTaille').value; d.p = $('stylePolice').value;
+  if (d.t === 'M') delete d.t;
+  if (d.p === 'moderne') delete d.p;
+  dessinerEditeur();
+}
+$('styleTaille').onchange = changerStyle;
+$('stylePolice').onchange = changerStyle;
+function placer(el, d) {
+  var ex = Math.floor(d.x / G.pc), ey = Math.floor(d.y / G.pr);
+  var ox = ex * (G.L + G.JE) + MARGE + (d.x - ex * G.pc) * G.cl, oy = ey * (G.H + G.JE) + MARGE + (d.y - ey * G.pr) * G.ch;
+  el.style.left = pct(ox, G.VLE); el.style.top = pct(oy, G.VHE);
+  el.style.width = pct(d.w * G.cl - GOUT, G.VLE); el.style.height = pct(d.h * G.ch - GOUT, G.VHE);
+}
+function etiquette(el, d) {
+  el.classList.toggle('bas', d.h < 2);
+  el.classList.toggle('etroit', d.w < 4);
+}
+function chevauche(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
+function libre(d, sauf) {
+  if (d.x < 0 || d.y < 0 || d.x + d.w > G.cols || d.y + d.h > G.rangs) return false;
+  if (ecranDe(d, G) < 0) return false;            // pas a cheval sur la jointure
+  for (var i = 0; i < dispo.length; i++) if (dispo[i].id !== sauf && chevauche(d, dispo[i])) return false;
+  return true;
+}
+function borner(v, a, b) { return Math.max(a, Math.min(b, v)); }
+// Donne au canvas/element la forme de l'ecran (paysage ou portrait)
+function formeEcran(el, r, w, h) {
+  if (!w) { var g = grilleUI(r); w = g.VLE; h = g.VHE; }
+  var haut = h > w;
+  el.style.aspectRatio = w + ' / ' + h;
+  el.style.width = haut ? 'min(calc(100% - 2 * var(--bord, 10px)), ' + Math.round(600 * w / h) + 'px)' : '';
+  el.style.margin = haut ? '6px auto 0' : '';
+}
+function remplirDispo() {
+  ECR = copie(config.ecrans || { nb: 1, assemblage: 'cote', joint: 15 });
+  afficherEcrans();
+  dispos['0'] = copie(config.disposition || []);
+  dispos['1'] = copie(config.dispositionPortrait || []);
+  scenes = copie(config.scenes || []);
+  if (sceneCourante >= scenes.length) sceneCourante = -1;
+  afficherScenes();
+  $('traits').checked = !!config.affichage.traits;
+  appliquerRotation(config.affichage.rotation || 0);
+}
+function appliquerRotation(r) {
+  rot = r; G = grilleUI(r); dispo = dispoCourante();
+  choisi = null; $('styleBloc').classList.add('cache');
+  var b = document.querySelectorAll('[data-rot]');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', +b[i].getAttribute('data-rot') === r);
+  formeEcran($('editeur'), r);
+  dessinerEditeur();
+}
+function choisirRotation(r) { ranger(); appliquerRotation(r); afficherScenes(); }
+// Rappel de l'orientation et du nombre d'ecrans (reglés dans « Montage du cadre »)
+function texteOrientation() {
+  var t = rot === 0 ? 'paysage' : rot === 1 ? 'portrait' : 'portrait inversé';
+  if (ECR.nb === 2) t += ', deux écrans ' + (ECR.assemblage === 'dessus' ? "l'un sur l'autre" : 'côte à côte');
+  return ' — ' + t;
+}
+function afficherEcrans() {
+  var cle = ECR.nb === 2 ? ECR.assemblage : '1';
+  var b = document.querySelectorAll('[data-ecr]');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', b[i].getAttribute('data-ecr') === cle);
+  $('ligneJoint').classList.toggle('cache', ECR.nb !== 2);
+  $('joint').value = String(ECR.joint);
+}
+// Change l'assemblage : les blocs du second ecran suivent (ou disparaissent s'il n'y a plus qu'un ecran)
+function choisirEcrans(nb, assemblage) {
+  memoriserEtape();
+  ranger();
+  var avant = { 0: grilleUI(0), 1: grilleUI(1) };
+  ECR.nb = nb; ECR.assemblage = assemblage;
+  var apres = { 0: grilleUI(0), 1: grilleUI(1) }, perdus = 0;
+  var convertir = function (liste, o) {
+    var a = avant[o], n = apres[o];
+    return (liste || []).filter(function (d) {
+      if (ecranDe(d, a) <= 0) return true;
+      if (n.nx * n.ny === 1) { perdus++; return false; }
+      d.x = d.x % a.pc + (n.nx > 1 ? n.pc : 0); d.y = d.y % a.pr + (n.ny > 1 ? n.pr : 0);
+      return true;
+    });
+  };
+  dispos['0'] = convertir(dispos['0'], 0); dispos['1'] = convertir(dispos['1'], 1);
+  scenes.forEach(function (sc) { sc.disposition = convertir(sc.disposition, 0); sc.dispositionPortrait = convertir(sc.dispositionPortrait, 1); });
+  afficherEcrans();
+  appliquerRotation(rot);
+  afficherScenes();
+  if (image) tramer();
+  message('msgDispo', (perdus ? perdus + ' bloc(s) du second écran retiré(s). ' : '') + 'Pense à enregistrer.');
+}
+$('joint').onchange = function () { ECR.joint = Math.max(0, Math.min(100, +this.value || 0)); appliquerRotation(rot); if (image) tramer(); };
+function dessinerEditeur() {
+  demanderPrevisu(); verifierModifs();
+  var ed = $('editeur');
+  ed.innerHTML = '';
+  for (var y = 0; y < G.rangs; y++) for (var x = 0; x < G.cols; x++) {
+    var c = document.createElement('div'); c.className = 'case';
+    placer(c, { x: x, y: y, w: 1, h: 1 }); ed.appendChild(c);
+  }
+  if (G.nx * G.ny > 1) {                          // jointure entre les deux ecrans
+    var j = document.createElement('div'); j.className = 'jointure';
+    if (G.nx > 1) { j.style.left = pct(G.L, G.VLE); j.style.width = pct(G.JE, G.VLE); j.style.top = '0'; j.style.height = '100%'; }
+    else { j.style.top = pct(G.H, G.VHE); j.style.height = pct(G.JE, G.VHE); j.style.left = '0'; j.style.width = '100%'; }
+    ed.appendChild(j);
+  }
+  dispo.forEach(function (d) {
+    var el = document.createElement('div');
+    el.className = 'widget' + (d.id === choisi ? ' choisi' : '');
+    el.setAttribute('data-id', d.id);
+    el.innerHTML = '<b></b><small></small><div class="poignee"></div>';
+    el.querySelector('b').textContent = INFOS[d.id].nom;
+    el.querySelector('small').textContent = descStyle(d) || INFOS[d.id].ex;
+    placer(el, d);
+    etiquette(el, d);
+    ed.appendChild(el);
+    brancher(el, d);
+  });
+  var zone = $('choixWidgets');
+  zone.innerHTML = '';
+  Object.keys(INFOS).forEach(function (id) {
+    var l = document.createElement('label'), cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = dispo.some(function (d) { return d.id === id; });
+    cb.onchange = function () { basculer(id, cb.checked); };
+    l.appendChild(cb); l.appendChild(document.createTextNode(INFOS[id].nom));
+    zone.appendChild(l);
+  });
+  placerBulle();
+}
+function brancher(el, d) {
+  var depart = null;
+  el.addEventListener('pointerdown', function (ev) {
+    ev.preventDefault();
+    var r = $('editeur').getBoundingClientRect();
+    depart = { avant: etatEditeur(), px: ev.clientX, py: ev.clientY, d: copie(d), redim: ev.target.classList.contains('poignee'),
+      cl: r.width * G.cl / G.VLE, ch: r.height * G.ch / G.VHE, bouge: false };
+    el.setPointerCapture(ev.pointerId);
+    el.classList.add('actif');
+  });
+  el.addEventListener('pointermove', function (ev) {
+    if (!depart) return;
+    var dx = Math.round((ev.clientX - depart.px) / depart.cl), dy = Math.round((ev.clientY - depart.py) / depart.ch);
+    if (dx || dy) depart.bouge = true;
+    var e = copie(depart.d), min = INFOS[d.id].min;
+    if (depart.redim) {
+      e.w = borner(depart.d.w + dx, min[0], G.cols - e.x);
+      e.h = borner(depart.d.h + dy, min[1], G.rangs - e.y);
+    } else {
+      e.x = borner(depart.d.x + dx, 0, G.cols - e.w);
+      e.y = borner(depart.d.y + dy, 0, G.rangs - e.h);
+    }
+    if (libre(e, d.id)) { d.x = e.x; d.y = e.y; d.w = e.w; d.h = e.h; placer(el, d); etiquette(el, d); el.classList.remove('refus'); }
+    else el.classList.add('refus');
+  });
+  function fin() { depart = null; el.classList.remove('actif'); el.classList.remove('refus'); }
+  el.addEventListener('pointerup', function () {
+    var simpleClic = depart && !depart.bouge && !depart.redim;
+    if (depart && depart.bouge) {
+      if (depart.avant !== etatEditeur()) memoriserEtape(depart.avant);
+      demanderPrevisu(); verifierModifs();
+    }
+    fin();
+    if (simpleClic) selectionner(d.id);
+  });
+  el.addEventListener('pointercancel', fin);
+}
+function basculer(id, actif) {
+  memoriserEtape();
+  if (actif) {
+    var min = INFOS[id].min, place = null;
+    for (var y = 0; y <= G.rangs - min[1] && !place; y++)
+      for (var x = 0; x <= G.cols - min[0] && !place; x++) {
+        var e = { id: id, x: x, y: y, w: min[0], h: min[1] };
+        if (libre(e, id)) place = e;
+      }
+    if (!place) { message('msgDispo', "Pas assez de place : réduis ou retire d'abord un autre bloc."); }
+    else dispo.push(place);
+  } else {
+    dispo = dispo.filter(function (d) { return d.id !== id; });
+    if (choisi === id) { choisi = null; $('styleBloc').classList.add('cache'); }
+  }
+  ranger();
+  dessinerEditeur();
+}
+function reinitialiserDispo() {
+  memoriserEtape();
+  dispo = dispoParDefaut(cleOri(rot));
+  ranger();
+  $('traits').checked = true;
+  dessinerEditeur();
+  message('msgDispo', 'Disposition par défaut rétablie : pense à enregistrer.');
+}
+</script>

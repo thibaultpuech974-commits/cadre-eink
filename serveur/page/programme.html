@@ -1,0 +1,51 @@
+<!-- Page web du cadre : menu Programme de la carte (mise à jour par Wi-Fi) -->
+<script>
+// --- Programme de la carte ---
+function texteVersion(v) { return v.slice(6, 8) + '/' + v.slice(4, 6) + '/' + v.slice(0, 4) + ' à ' + v.slice(9, 11) + 'h' + v.slice(11, 13); }
+function afficherFirmware(s) {
+  var inst = s && s.fw, f = config.firmware;
+  var t = 'Version installée sur la carte : ' + (inst ? 'compilée le ' + texteVersion(inst) : 'inconnue (ancien programme, ou pas encore connectée)') + '.';
+  if (f) {
+    t += ' Programme envoyé : compilé le ' + texteVersion(f.version) + ' (' + Math.round(f.taille / 1024) + ' Ko), ';
+    if (inst === f.version) t += 'installé.';
+    else if (inst && inst > f.version) t += 'plus ancien que celui de la carte : ignoré.';
+    else if (s && s.fwko === f.version) t += 'essayé par la carte, mais il plantait ou ne joignait pas le serveur : elle est revenue à son programme précédent. Envoie une version corrigée.';
+    else if ((f.telech || 0) >= 3) t += 'téléchargé 3 fois sans être gardé par la carte : plus proposé. Renvoie-le pour réessayer.';
+    else t += 'en attente du prochain réveil.';
+  }
+  $('fwInfo').textContent = t;
+}
+// Retrouve la date de compilation ecrite par le programme ("CADRE_FW:Oct 24 2026 14:03:22")
+function versionDans(o) {
+  var m = 'CADRE_FW:', d2 = function (n) { return (n < 10 ? '0' : '') + n; };
+  for (var i = 0; i + 29 < o.length; i++) {
+    if (o[i] !== 67) continue;
+    var k = 1; while (k < 9 && o[i + k] === m.charCodeAt(k)) k++;
+    if (k < 9) continue;
+    var s = ''; for (var j = 0; j < 20; j++) s += String.fromCharCode(o[i + 9 + j]);
+    var mois = 'JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(s.slice(0, 3)) / 3 + 1;
+    var jour = parseInt(s.slice(4, 6), 10), an = s.slice(7, 11);
+    if (mois < 1 || !jour) return null;
+    return an + d2(mois) + d2(jour) + '-' + s.slice(12, 14) + s.slice(15, 17) + s.slice(18, 20);
+  }
+  return null;
+}
+function envoyerFirmware() {
+  var f = $('fichierFw').files[0];
+  if (!f) { message('msgFw', "Choisis d'abord le fichier .bin."); return; }
+  if (/merged|bootloader|partitions/i.test(f.name)) { message('msgFw', 'Ce n\'est pas le bon fichier : prends cadre_eink.ino.bin.'); return; }
+  var version;
+  f.arrayBuffer().then(function (buf) {
+    var o = new Uint8Array(buf);
+    if (o[0] !== 0xE9) throw new Error("ce n'est pas un programme ESP32");
+    version = versionDans(o);
+    if (!version) throw new Error('ce programme ne vient pas du cadre (version introuvable)');
+    $('msgFw').textContent = 'Envoi…';
+    return api('/api/firmware?v=' + version + '&nom=' + encodeURIComponent(f.name),
+      { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: buf });
+  }).then(function () {
+    message('msgFw', 'Programme du ' + texteVersion(version) + ' envoyé : la carte l\'installera à son prochain réveil.');
+    return rafraichir();
+  }).catch(function (e) { message('msgFw', 'Erreur : ' + e.message); });
+}
+</script>

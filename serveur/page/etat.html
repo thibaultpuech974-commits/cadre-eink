@@ -1,0 +1,182 @@
+<!-- Page web du cadre : aperçu de l'écran et état du cadre (pastilles, image envoyée par la carte) -->
+<script>
+// --- Contour de l'apercu ---
+function appliquerBordure() { document.documentElement.style.setProperty('--bord', $('bordure').value + 'px'); }
+$('bordure').oninput = appliquerBordure;
+$('bordure').onchange = function () {
+  api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ affichage: { bordureApercu: +$('bordure').value } }) })
+    .then(function (r) { return r.json(); }).then(function (d) { config = d.config; }).catch(function () {});
+};
+// --- Conversion entre l'image "physique" de l'ecran (960 x 680) et l'image "a l'endroit" ---
+// (memes formules que la rotation de la bibliotheque Adafruit GFX sur la carte)
+function lireBit(b, i) { return (b[i >> 3] >> (7 - (i & 7))) & 1; }
+function physVersLog(phys, r) {
+  if (!r) return { bits: phys, w: LARG, h: HAUT };
+  var log = new Uint8Array(OCTETS), w = HAUT, h = LARG;
+  for (var py = 0; py < HAUT; py++) for (var px = 0; px < LARG; px++) {
+    if (!lireBit(phys, py * LARG + px)) continue;
+    var lx = r === 1 ? py : HAUT - 1 - py, ly = r === 1 ? LARG - 1 - px : px;
+    var n = ly * w + lx; log[n >> 3] |= 0x80 >> (n & 7);
+  }
+  return { bits: log, w: w, h: h };
+}
+function logVersPhys(log, r) {
+  if (!r) return log;
+  var phys = new Uint8Array(OCTETS), w = HAUT;
+  for (var ly = 0; ly < LARG; ly++) for (var lx = 0; lx < HAUT; lx++) {
+    if (!lireBit(log, ly * w + lx)) continue;
+    var px = r === 1 ? LARG - 1 - ly : ly, py = r === 1 ? lx : HAUT - 1 - lx;
+    var n = py * LARG + px; phys[n >> 3] |= 0x80 >> (n & 7);
+  }
+  return phys;
+}
+function pourcentage(v) {
+  var T = [3.3, 3.5, 3.6, 3.65, 3.7, 3.75, 3.8, 3.9, 4.0, 4.1, 4.2], P = [0, 5, 10, 20, 30, 40, 50, 65, 80, 90, 100];
+  if (v <= T[0]) return 0; if (v >= T[10]) return 100;
+  for (var i = 0; i < 10; i++) if (v < T[i + 1]) return Math.round(P[i] + (v - T[i]) / (T[i + 1] - T[i]) * (P[i + 1] - P[i]));
+  return 100;
+}
+var NOMS = { tableau: 'tableau de bord', photo: 'photo', pochette: 'pochette', blanc: 'écran blanc' };
+var statutCourant = null, dateApercu = 0, planApercu = '';
+function afficherStatut(s, maintenant, s1) {
+  dernierStatut = s;
+  statutCourant = { s: s, maintenant: maintenant, s1: s1 };
+  if (config.mode === 'tableau' && s && s.sc) setTimeout(dessinerPuces, 0);
+  dessinerStatut();
+  afficherFirmware(s);
+  var boutons = document.querySelectorAll('[data-mode]');
+  for (var i = 0; i < boutons.length; i++) boutons[i].classList.toggle('actif', boutons[i].getAttribute('data-mode') === config.mode);
+  var aide = '';
+  if (config.mode === 'blanc') aide = "L'écran s'effacera au prochain réveil du cadre. Attends que l'aperçu soit blanc avant de débrancher la batterie.";
+  else if (config.dev) aide = "Mode développement actif : le changement s'applique dans " + config.devSecondes + ' s environ.';
+  else aide = "Le changement s'applique au prochain réveil du cadre (dans " + config.reveilMin + ' min au plus).';
+  $('aideMode').textContent = aide;
+}
+// Comment l'ecran a ete rafraichi pour la derniere image (plan du serveur : "P;2;3", "C;seuil", "N;quotidien", "R")
+function decrirePlan(p) {
+  var m = String(p || '').split(';');
+  var methodes = { P: '', D: ', double passe', I: ', inversion des zones' };
+  if (m[0] in methodes) return { court: 'partielle', long: 'mise à jour partielle' + methodes[m[0]] + ', ' + m[1] + (m[1] === '1' ? ' zone' : ' zones') + ' (' + m[2] + ' % de l\'écran)' };
+  if (m[0] === 'R') return { court: 'identique', long: 'image identique, écran non rafraîchi' };
+  var raisons = { seuil: 'trop de changements', inconnue: 'image à l\'écran inconnue', desactive: 'mises à jour partielles désactivées',
+    mode: 'photo, pochette ou écran blanc', orientation: 'orientation changée', demarrage: 'démarrage de la carte', quotidien: 'nettoyage régulier',
+    methode: 'méthode partielle changée', serie: 'après une série de mises à jour partielles' };
+  if (m[0] === 'C' || m[0] === 'N') return { court: 'complète', long: 'rafraîchissement complet' + (m[0] === 'N' ? ' avec nettoyage' : '') + (raisons[m[1]] ? ' (' + raisons[m[1]] + ')' : '') };
+  return null;     // ancien programme de la carte
+}
+// Pastilles : connexion, batterie, prochain reveil, scene, ecran 2, date de l'image
+function dessinerStatut() {
+  if (!statutCourant) return;
+  var s = statutCourant.s, maintenant = statutCourant.maintenant, s1 = statutCourant.s1, z = $('statut');
+  z.innerHTML = '';
+  var ajouter = function (texte, genre, titre) {
+    var e = document.createElement('span'); e.className = 'pastille' + (genre ? ' ' + genre : ''); e.textContent = texte;
+    if (titre) e.title = titre;
+    z.appendChild(e);
+  };
+  // Dernier contact du cadre : l'etat n'est enregistre que toutes les 10 min (limite d'ecritures), mais
+  // chaque image envoyee est datee : la plus recente des deux dates compte
+  var vuCadre = function (st, nom) { return Math.max(st.vu || 0, !nom && dateApercu ? dateApercu : 0); };
+  var connexion = function (st, nom) {
+    var maj = function (t) { return nom ? nom + t : t.charAt(0).toUpperCase() + t.slice(1); };
+    if (!st) { ajouter(maj('jamais connecté'), 'doux'); return; }
+    var attendu = (st.r ? st.r * 1000 : config.reveilMin * 60000);
+    var age = maintenant - vuCadre(st, nom);
+    if (age > attendu * 2 + 5 * 60000) ajouter(maj('sans nouvelles depuis ') + duree(age).replace('il y a ', ''), 'alerte',
+      "Le cadre aurait dû se connecter depuis longtemps : batterie vide, Wi-Fi perdu ou carte bloquée ?");
+    else ajouter(maj('vu ') + duree(age), 'ok', 'Dernière connexion : ' + new Date(maintenant - age).toLocaleString('fr-FR'));
+    if (st.bat && st.bat > 2.5) {
+      // Pourcentage de la jauge de la carte s'il est connu, sinon deduit de la tension
+      var jauge = typeof st.pct === 'number', pc = jauge ? Math.round(Math.min(100, st.pct)) : pourcentage(st.bat);
+      var charge = st.crate >= 2;
+      var detail = st.bat.toFixed(2).replace('.', ',') + ' V' + (jauge ? ', pourcentage mesuré par la jauge' : ', pourcentage estimé d\'après la tension') +
+        (typeof st.crate === 'number' ? ', ' + (st.crate > 0 ? '+' : '') + String(st.crate).replace('.', ',') + ' % par heure' : '');
+      ajouter((nom ? nom : 'Batterie ') + pc + ' %' + (charge ? ' · en charge' : st.bat < 3.5 ? ' — à recharger' : ''),
+        st.bat < 3.5 && !charge ? 'alerte' : '', detail);
+    }
+    return age <= attendu * 2 + 5 * 60000;
+  };
+  var vivant = connexion(s, '');
+  if (s && vivant) {
+    var prochain = vuCadre(s, '') + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
+    ajouter(prochain > 60000 ? 'Réveil dans ' + Math.round(prochain / 60000) + ' min' : 'Réveil imminent');
+  }
+  if (config.mode === 'tableau' && s && s.sc) ajouter('Scène : ' + s.sc);
+  // Redemarrage anormal de la carte dans les 7 derniers jours (garde-fou)
+  if (s && s.pat && maintenant - s.pat < 7 * 86400e3) {
+    var causes = { P: 'le programme a planté', W: 'le programme était bloqué (chien de garde)', B: 'tension trop basse (batterie faible ou pic de consommation)',
+      L: 'un cycle a duré plus de 4 minutes' };
+    var dp = new Date(s.pat);
+    ajouter('Redémarrage anormal le ' + dp.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + dp.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), 'alerte',
+      'La carte a redémarré toute seule : ' + (causes[s.ra] || 'cause inconnue') + '.\n' + s.pa + ' redémarrage(s) anormal(aux) depuis sa mise sous tension.' +
+      '\nAprès 3 d\'affilée, elle se met en pause une heure avant de réessayer.');
+  }
+  if (config.dev) ajouter('Mode développement', 'alerte', "La carte ne se met pas en veille : à désactiver sur batterie (menu Réveil du cadre).");
+  if (config.ecrans && config.ecrans.nb === 2) connexion(s1, 'Écran 2 : ');
+  if (dateApercu) {
+    var d = new Date(dateApercu), auj = new Date().toDateString() === d.toDateString();
+    var pl = decrirePlan(planApercu);
+    ajouter('Image de ' + (auj ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })) +
+      (pl ? ' · ' + pl.court : ''), 'doux', 'Image envoyée par le cadre le ' + d.toLocaleString('fr-FR') + (pl ? '\nÉcran : ' + pl.long : ''));
+  }
+}
+// Affiche des bits (1 = noir) de taille w x h dans un canvas
+// Dessine des bits (1 = noir) de taille w x h a la position (ox, oy) d'un canvas deja dimensionne
+function dessinerBitsA(ctx, octets, w, h, ox, oy) {
+  var img = ctx.createImageData(w, h);
+  for (var i = 0; i < w * h; i++) {
+    var v = (octets[i >> 3] >> (7 - (i & 7))) & 1 ? 20 : 255;
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, ox, oy);
+}
+function dessinerBits(canvas, octets, w, h) {
+  w = w || LARG; h = h || HAUT;
+  canvas.width = w; canvas.height = h;
+  var ctx = canvas.getContext('2d');
+  var img = ctx.createImageData(w, h);
+  for (var i = 0; i < w * h; i++) {
+    var noir = (octets[i >> 3] >> (7 - (i & 7))) & 1;
+    var v = noir ? 20 : 255;
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+function lireApercu(n) {
+  return api('/api/apercu' + (n ? '?ecran=1' : '')).then(function (r) {
+    var t = +r.headers.get('x-date'), rr = +(r.headers.get('x-rotation') || 0), plan = r.headers.get('x-plan') || '';
+    return r.arrayBuffer().then(function (b) { return { t: t, rr: rr, plan: plan, l: physVersLog(new Uint8Array(b), rr) }; });
+  }).catch(function () { return null; });
+}
+function chargerApercu() {
+  var deux = config.ecrans && config.ecrans.nb === 2;
+  Promise.all(deux ? [lireApercu(0), lireApercu(1)] : [lireApercu(0)]).then(function (res) {
+    var ok = res.filter(Boolean);
+    if (!ok.length) throw new Error('aucun');
+    var ancien = ECR; ECR = config.ecrans || ECR;          // assemblage enregistre
+    var g = grilleUI(ok[0].rr);
+    ECR = ancien;
+    var cv = $('apercu'); cv.width = g.VLE; cv.height = g.VHE; formeEcran(cv, ok[0].rr, g.VLE, g.VHE);
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#2a2927'; ctx.fillRect(0, 0, g.VLE, g.VHE);
+    res.forEach(function (a, n) {
+      var ox = g.nx > 1 ? n * (g.L + g.JE) : 0, oy = g.ny > 1 ? n * (g.H + g.JE) : 0;
+      if (a) dessinerBitsA(ctx, a.l.bits, a.l.w, a.l.h, ox, oy);
+      else {
+        ctx.fillStyle = '#eee'; ctx.fillRect(ox, oy, g.L, g.H);
+        ctx.fillStyle = '#888'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('Écran ' + (n + 1) + " : pas encore d'aperçu", ox + g.L / 2, oy + g.H / 2);
+      }
+    });
+    dateApercu = Math.max.apply(null, ok.map(function (a) { return a.t || 0; }));
+    planApercu = ok[0].plan;
+    dessinerStatut();
+  }).catch(function () {
+    var cv = $("apercu"); cv.width = LARG; cv.height = HAUT; formeEcran(cv, 0, LARG, HAUT);
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, LARG, HAUT);
+    ctx.fillStyle = '#888'; ctx.font = '32px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText("Pas encore d'aperçu : le cadre ne s'est pas encore connecté", LARG / 2, HAUT / 2);
+  });
+}
+</script>

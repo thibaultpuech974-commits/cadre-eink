@@ -1,0 +1,78 @@
+<!-- Page web du cadre : menu Photo plein écran (recadrage et tramage dans le navigateur) -->
+<script>
+// --- Photo : recadrage + tramage Floyd-Steinberg dans le navigateur ---
+var bitsPhoto = null;
+$('fichier').onchange = function () {
+  var f = this.files[0]; if (!f) return;
+  var img = new Image();
+  img.onload = function () { image = img; tramer(); };
+  img.src = URL.createObjectURL(f);
+};
+$('lum').oninput = tramer; $('contraste').oninput = tramer;
+var radios = document.getElementsByName('cadrage');
+for (var i = 0; i < radios.length; i++) radios[i].onchange = tramer;
+
+function tramer() {
+  if (!image) return;
+  // La photo est preparee "a l'endroit" selon l'orientation du cadre, sur toute la surface
+  // (avec deux ecrans : les deux dalles et la jointure, cachee, pour que l'image reste continue)
+  var rp = (config && config.affichage.rotation) || 0;
+  var gP = grilleUI(rp);
+  var LARG = gP.VL, HAUT = gP.VH;
+  var c = document.createElement('canvas'); c.width = LARG; c.height = HAUT;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, LARG, HAUT);
+  var remplir = document.querySelector('input[name=cadrage]:checked').value === 'remplir';
+  var e = remplir ? Math.max(LARG / image.width, HAUT / image.height) : Math.min(LARG / image.width, HAUT / image.height);
+  var w = image.width * e, h = image.height * e;
+  ctx.drawImage(image, (LARG - w) / 2, (HAUT - h) / 2, w, h);
+  var px = ctx.getImageData(0, 0, LARG, HAUT).data;
+  var lum = +$('lum').value, k = +$('contraste').value / 100;
+  var g = new Float32Array(LARG * HAUT);
+  for (var j = 0; j < LARG * HAUT; j++) {
+    var v = 0.299 * px[j * 4] + 0.587 * px[j * 4 + 1] + 0.114 * px[j * 4 + 2];
+    g[j] = (v - 128) * k + 128 + lum;
+  }
+  bitsPhoto = new Uint8Array(Math.ceil(LARG * HAUT / 8));
+  for (var y = 0; y < HAUT; y++) for (var x = 0; x < LARG; x++) {
+    var n = y * LARG + x, ancien = g[n], nouveau = ancien < 128 ? 0 : 255, err = ancien - nouveau;
+    if (nouveau === 0) bitsPhoto[n >> 3] |= 0x80 >> (n & 7);
+    if (x + 1 < LARG) g[n + 1] += err * 7 / 16;
+    if (y + 1 < HAUT) {
+      if (x > 0) g[n + LARG - 1] += err * 3 / 16;
+      g[n + LARG] += err * 5 / 16;
+      if (x + 1 < LARG) g[n + LARG + 1] += err / 16;
+    }
+  }
+  formeEcran($('photoTramee'), rp, LARG, HAUT);
+  dessinerBits($('photoTramee'), bitsPhoto, LARG, HAUT);
+  if (gP.J) {                                     // partie cachee par la jointure
+    var cx = $('photoTramee').getContext('2d');
+    cx.fillStyle = 'rgba(42,41,39,0.85)';
+    if (gP.nx > 1) cx.fillRect(gP.L, 0, gP.J, HAUT); else cx.fillRect(0, gP.H, LARG, gP.J);
+  }
+  rotationPhoto = rp; grillePhoto = gP;
+}
+var grillePhoto = null;
+// Decoupe l'image en une image par dalle (en "physique", comme la carte l'attend), mises bout a bout
+function photoParEcran() {
+  var g = grillePhoto, n = g.nx * g.ny, res = new Uint8Array(OCTETS * n);
+  for (var e = 0; e < n; e++) {
+    var ox = g.nx > 1 ? e * (g.L + g.J) : 0, oy = g.ny > 1 ? e * (g.H + g.J) : 0;
+    var b = new Uint8Array(OCTETS);
+    for (var y = 0; y < g.H; y++) for (var x = 0; x < g.L; x++) {
+      if (!lireBit(bitsPhoto, (oy + y) * g.VL + ox + x)) continue;
+      var k = y * g.L + x; b[k >> 3] |= 0x80 >> (k & 7);
+    }
+    res.set(logVersPhys(b, rotationPhoto), e * OCTETS);
+  }
+  return res;
+}
+var rotationPhoto = 0;
+function envoyerPhoto() {
+  if (!bitsPhoto) { message('msgPhoto', "Choisis d'abord une photo."); return; }
+  api('/api/photo?r=' + rotationPhoto, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: photoParEcran() })
+    .then(function () { message('msgPhoto', 'Photo envoyée : elle s\'affichera au prochain réveil du cadre.'); return rafraichir(); })
+    .catch(function (e) { message('msgPhoto', 'Erreur : ' + e.message); });
+}
+</script>

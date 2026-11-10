@@ -69,15 +69,19 @@ const ATTENDU = {
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
 let echecs = 0;
-// La page web : son script doit etre du JavaScript valide (sinon la page entiere ne marche plus)
+// La page web : chaque script doit etre du JavaScript valide (sinon ce morceau de la page ne marche plus)
 try {
-  const { readFileSync } = await import('fs');
-  const page = readFileSync(ici + '/../../serveur/interface.html', 'utf8');
-  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-  if (!scripts.length) throw new Error('aucun script trouvé');
-  scripts.forEach(js => new Function(js));
-  console.log('ok   interface.html (script valide)');
-} catch (e) { echecs++; console.log('ÉCHEC interface.html : ' + e.message); }
+  const { readFileSync, readdirSync } = await import('fs');
+  const dossier = ici + '/../../serveur/page/';
+  let n = 0;
+  for (const f of readdirSync(dossier).filter(f => f.endsWith('.html')).sort()) {
+    for (const m of readFileSync(dossier + f, 'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+      try { new Function(m[1]); n++; } catch (e) { throw new Error(f + ' : ' + e.message); }
+    }
+  }
+  if (!n) throw new Error('aucun script trouvé');
+  console.log('ok   page web (' + n + ' scripts valides)');
+} catch (e) { echecs++; console.log('ÉCHEC page web : ' + e.message); }
 for (const [fichier, motifs] of Object.entries(ATTENDU)) {
   let sortie = '';
   try {

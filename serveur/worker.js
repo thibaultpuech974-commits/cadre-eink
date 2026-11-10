@@ -27,10 +27,11 @@
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
 //   acces.js             droits des jetons de service Cloudflare Access (carte, raccourci)
+//   page.js              page web de reglage, assemblee a partir des fichiers du dossier page/
 // =====================================================================
 
-// Page web de reglage : fichier a part, integre par Cloudflare au deploiement (regle "Text" de wrangler.jsonc)
-import INTERFACE from './interface.html';
+// Page web de reglage : assemblee par page.js a partir des fichiers du dossier page/
+import { PAGE } from './page.js';
 // Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
 import APERCU_WASM from './apercu.wasm';
 import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.js';
@@ -55,7 +56,7 @@ export default {
     if (chemin === '/' || chemin === '/index.html') {
       // no-cache : le navigateur revalide la page a chaque visite, pour qu'elle reste
       // accordee a la previsualisation (apercu.wasm) apres un deploiement
-      return new Response(INTERFACE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
+      return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
     }
     if (!chemin.startsWith('/api/')) return new Response('Introuvable', { status: 404 });
     // Cloudflare Access : ctx.access n'existe que si Access a authentifie la requete

@@ -1,0 +1,24 @@
+<!-- Page web du cadre : menu Sauvegarde des réglages -->
+<script>
+// --- Sauvegarde des reglages ---
+function telechargerReglages() {
+  api('/api/sauvegarde').then(function (r) { return r.blob(); }).then(function (b) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'cadre-reglages-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+    message('msgSauvegarde', 'Fichier téléchargé.');
+  }).catch(function (e) { message('msgSauvegarde', 'Erreur : ' + e.message); });
+}
+function restaurerReglages() {
+  var f = $('fichierReglages').files[0];
+  if (!f) { message('msgSauvegarde', "Choisis d'abord le fichier de sauvegarde."); return; }
+  f.text().then(function (t) {
+    return api('/api/sauvegarde', { method: 'POST', headers: { 'content-type': 'application/json' }, body: t });
+  }).then(function () {
+    message('msgSauvegarde', 'Réglages restaurés : le cadre les appliquera à son prochain réveil.');
+    return charger();
+  }).catch(function (e) { message('msgSauvegarde', 'Erreur : ' + e.message); });
+}
+</script>

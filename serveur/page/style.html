@@ -1,0 +1,115 @@
+<!-- Page web du cadre : feuille de style -->
+<style>
+:root{--fond:#f4f2ee;--carte:#fff;--texte:#1d1c1a;--doux:#6b6862;--trait:#dedbd4;--accent:#1d1c1a;--alerte:#b3261e}
+@media (prefers-color-scheme:dark){:root{--fond:#171615;--carte:#22211f;--texte:#ecebe7;--doux:#a3a09a;--trait:#3a3835;--accent:#ecebe7;--alerte:#f2b8b5}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fond);color:var(--texte);font:16px/1.5 -apple-system,system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:22px;font-weight:600;margin:8px 0 16px}
+h2{font-size:17px;font-weight:600;margin:0 0 12px}
+section,details.menu{background:var(--carte);border:1px solid var(--trait);border-radius:14px;padding:16px;margin-bottom:14px}
+details.menu{padding:0 16px}
+details.menu>summary{list-style:none;cursor:pointer;font-size:17px;font-weight:600;padding:16px;margin:0 -16px;display:flex;justify-content:space-between;align-items:center;-webkit-user-select:none;user-select:none}
+details.menu>summary::-webkit-details-marker{display:none}
+details.menu>summary::after{content:'';width:9px;height:9px;border-right:2px solid var(--doux);border-bottom:2px solid var(--doux);transform:rotate(45deg);transition:transform .2s;margin:0 4px 4px 12px}
+details.menu[open]>summary::after{transform:rotate(-135deg);margin-bottom:-4px}
+details.menu[open]>summary{padding-bottom:8px}
+details.menu[open]{padding-bottom:16px}
+.outilsMenus{display:flex;justify-content:flex-end;gap:14px;margin:4px 2px 8px;font-size:14px}
+.outilsMenus a{color:var(--doux)}
+.ecran{width:100%;aspect-ratio:960/680;background:#fff;border:var(--bord,10px) solid #2a2927;border-radius:6px;display:block;image-rendering:auto;box-sizing:content-box;max-width:calc(100% - 2 * var(--bord,10px))}
+.ecran.editeur{border-width:8px;max-width:calc(100% - 16px)}
+.editeur{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden;margin-top:6px}
+.historique{display:flex;gap:8px;margin:0 0 6px}
+.historique button{flex:1;padding:7px 10px}
+button:disabled{opacity:.4;cursor:default}
+#zoneEditeur{position:relative}
+/* Bulle de reglage du texte d'un bloc, posee contre le bloc touche */
+.bulle{position:absolute;z-index:6;width:min(320px,calc(100% - 8px));box-sizing:border-box;background:var(--carte);color:var(--texte);
+  border:1px solid var(--trait);border-radius:12px;padding:8px 12px 10px;box-shadow:0 6px 22px rgba(0,0,0,.28)}
+.bulle .teteBulle{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.bulle .teteBulle b{flex:1;min-width:0;font-size:15px}
+.bulle .teteBulle button{flex:none;padding:3px 9px}
+.bulle .ligne{flex-direction:column;align-items:stretch;gap:0}
+.bulle label{margin:4px 0;display:flex;align-items:center;gap:8px}
+.bulle label select{flex:1;min-width:0;width:auto!important}
+.editeur .jointure{position:absolute;background:#2a2927}
+.editeur .case{position:absolute;border:1px dashed #dcd9d2;border-radius:3px;box-sizing:border-box}
+.editeur .widget{position:absolute;background:#f3f2ef;border:2px solid #1d1c1a;border-radius:6px;color:#1d1c1a;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;font-size:13px;line-height:1.2;text-align:center;cursor:grab;padding:4px 18px 4px 4px;box-sizing:border-box;overflow:hidden}
+.editeur .widget.actif{background:#e6e3dc;cursor:grabbing;box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:2}
+.editeur .widget.refus{border-color:#b3261e}
+.editeur .widget.choisi{box-shadow:inset 0 0 0 3px #2f6fd6;border-color:#2f6fd6}
+.editeur .widget b{font-weight:600}
+.editeur .widget small{color:#6b6862;font-size:11px}
+.editeur .widget.bas{flex-direction:row;gap:8px}
+.editeur .widget.bas small,.editeur .widget.etroit small{display:none}
+.editeur .poignee{position:absolute;right:0;bottom:0;width:min(24px,60%);height:min(24px,60%);cursor:nwse-resize;background:linear-gradient(135deg,transparent 52%,#1d1c1a 52%);border-bottom-right-radius:3px}
+.puces{display:flex;flex-wrap:wrap;gap:0 16px;margin-top:10px}
+.statut{color:var(--doux);font-size:14px;margin-top:10px}
+.modes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+@media (min-width:560px){.modes{grid-template-columns:repeat(4,1fr)}}
+button{font:inherit;border-radius:10px;border:1px solid var(--trait);background:var(--carte);color:var(--texte);padding:10px 12px;cursor:pointer}
+button.actif{background:var(--accent);color:var(--fond);border-color:var(--accent)}
+button.principal{background:var(--accent);color:var(--fond);border-color:var(--accent);width:100%;margin-top:12px}
+button.danger{color:var(--alerte)}
+label{display:flex;align-items:center;gap:8px;margin:6px 0}
+input[type=text],input[type=password],input[type=time],textarea,select{font:inherit;width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--trait);background:var(--fond);color:var(--texte)}
+textarea{min-height:80px;font-size:13px}
+.ligne{display:flex;gap:8px;align-items:center}
+.ligne>*{flex:1;min-width:0}
+.ligne>button[style*="flex:0"]{flex:none!important}
+.aide{color:var(--doux);font-size:14px;margin:6px 0 0}
+.resultats div{padding:6px 8px;border-radius:8px;cursor:pointer}
+.resultats div:hover{background:var(--fond)}
+canvas.photo{width:100%;aspect-ratio:960/680;background:#fff;border:1px solid var(--trait);border-radius:6px;margin-top:10px}
+code{font-size:13px;word-break:break-all;background:var(--fond);padding:2px 6px;border-radius:6px}
+pre{font-size:12px;background:var(--fond);padding:10px;border-radius:8px;overflow:auto;max-height:260px}
+#connexion{max-width:360px;margin:15vh auto}
+.cache{display:none!important}   /* toujours prioritaire sur le display des autres regles */
+/* Barre "modifications non enregistrees" (un seul bouton Enregistrer pour toute la page) */
+.barreModifs{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;
+  background:var(--accent);color:var(--fond);border-radius:14px;padding:8px 8px 8px 16px;box-shadow:0 6px 24px rgba(0,0,0,.3);
+  z-index:30;max-width:calc(100vw - 24px);box-sizing:border-box;font-size:15px}
+.barreModifs span{flex:1;min-width:0;cursor:pointer}
+#detailModifs{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;z-index:30;width:min(calc(100vw - 24px),520px);box-sizing:border-box;
+  background:var(--carte);color:var(--texte);border:1px solid var(--trait);border-radius:12px;padding:10px 12px;font-size:13px;
+  box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:40vh;overflow:auto;word-break:break-word}
+.barreModifs button{flex:none;padding:8px 12px;border-color:transparent}
+.barreModifs .annuler{background:transparent;color:var(--fond);border-color:var(--fond)}
+.barreModifs .enreg{background:var(--fond);color:var(--accent);font-weight:600}
+.barreModifs.fait .annuler,.barreModifs.fait .enreg{display:none}
+/* Etat du cadre en pastilles */
+.pastilles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.pastille{font-size:13px;line-height:1.4;padding:3px 10px;border-radius:999px;background:var(--fond);border:1px solid var(--trait);color:var(--texte);white-space:nowrap}
+.pastille.ok::before,.pastille.alerte::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.pastille.ok::before{background:#2e7d32}
+.pastille.alerte{border-color:#c77700;color:#c77700}
+.pastille.alerte::before{background:#e08a00}
+.pastille.doux{color:var(--doux)}
+/* Etat des calendriers */
+.calendriers{margin:6px 0 2px;font-size:14px}
+.calendriers div{display:flex;gap:6px;align-items:baseline;padding:2px 0}
+.calendriers .signe{flex:none;font-weight:700}
+.calendriers .bon .signe{color:#2e7d32}
+.calendriers .mauvais .signe{color:var(--alerte)}
+.calendriers .detail{color:var(--doux)}
+#panneauPrevisu{position:fixed;left:0;top:0;width:min(calc(100vw - 24px),460px);max-height:85vh;overflow:auto;background:var(--carte);border:1px solid var(--trait);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.28);padding:10px 12px;z-index:20;box-sizing:border-box}
+#panneauPrevisu .tete{display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:move;touch-action:none;-webkit-user-select:none;user-select:none}
+#panneauPrevisu .poignee{position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;
+  background:linear-gradient(135deg,transparent 0 55%,var(--doux) 55% 62%,transparent 62% 72%,var(--doux) 72% 79%,transparent 79%)}
+#panneauPrevisu.reduit .poignee{display:none}
+#panneauPrevisu .infoPrevisu{margin:6px 18px 0 0}
+/* Textes d'aide repliables : une seule ligne terminee par "... plus" (comme une legende Instagram),
+   "plus" deplie le texte, "moins" le replie. Toujours replies a l'ouverture de la page. */
+.repliable .bascule{color:var(--doux);font-weight:600;text-decoration:none;white-space:nowrap}
+.repliable:not(.ouvert){display:flex;gap:4px}
+.repliable:not(.ouvert) .texte{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.repliable:not(.ouvert) .bascule{flex:none}
+#panneauPrevisu .tete b{flex:none}
+#panneauPrevisu .tete select{flex:1;min-width:0;width:auto;padding:5px 8px}
+#panneauPrevisu .tete button{flex:none;padding:4px 11px;line-height:1.2}
+#panneauPrevisu.reduit .corps{display:none}
+#panneauPrevisu.reduit .tete{margin-bottom:0}
+#previsu{--bord:6px}
+.msg{font-size:14px;margin-top:8px;min-height:1.2em}
+</style>

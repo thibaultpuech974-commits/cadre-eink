@@ -1,0 +1,35 @@
+<!-- Page web du cadre : menus déroulants, textes d'aide repliables, démarrage de la page (toujours en dernier) -->
+<script>
+// --- Menus deroulants : on retient ceux qui sont ouverts (sur cet appareil) ---
+var menus = document.querySelectorAll('details.menu');
+var menusOuverts = [];
+try { menusOuverts = JSON.parse(localStorage.getItem('cadre-menus') || '[]'); } catch (e) {}
+for (var i = 0; i < menus.length; i++) {
+  if (menusOuverts.indexOf(menus[i].id) >= 0) menus[i].open = true;
+  menus[i].addEventListener('toggle', function () {
+    var ouverts = [];
+    for (var k = 0; k < menus.length; k++) if (menus[k].open) ouverts.push(menus[k].id);
+    try { localStorage.setItem('cadre-menus', JSON.stringify(ouverts)); } catch (e) {}
+  });
+}
+function toutesLesSections(ouvrir) { for (var k = 0; k < menus.length; k++) menus[k].open = ouvrir; }
+// Textes repliables : le contenu va dans <span class="texte">, suivi du lien "plus" / "moins"
+function preparerRepliable(p) {
+  if (p.querySelector(':scope > .texte')) return p.querySelector(':scope > .texte');
+  var t = document.createElement('span'); t.className = 'texte';
+  while (p.firstChild) t.appendChild(p.firstChild);
+  var a = document.createElement('a'); a.href = '#'; a.className = 'bascule'; a.textContent = 'plus';
+  a.onclick = function () {
+    var ouvert = p.classList.toggle('ouvert');
+    a.textContent = ouvert ? 'moins' : 'plus';
+    if (p.closest('#panneauPrevisu') && previsuActive) placerPanneau();
+    return false;
+  };
+  p.appendChild(t); p.appendChild(document.createTextNode(' ')); p.appendChild(a);
+  return t;
+}
+var repliables = document.querySelectorAll('.repliable');
+for (var i = 0; i < repliables.length; i++) preparerRepliable(repliables[i]);
+demarrer();
+setInterval(function () { if (config) rafraichir().catch(function () {}); }, 60000);
+</script>

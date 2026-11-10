@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cadre</title>
+<!-- STYLE -->
+</head><body><main>
+
+<section id="connexion" class="cache">
+  <h2>Cadre</h2>
+  <p class="aide">Entre le mot de passe défini dans Cloudflare (variable CLE).</p>
+  <input type="password" id="champCle" placeholder="Mot de passe">
+  <button class="principal" onclick="seConnecter()">Se connecter</button>
+  <div class="msg" id="msgCle"></div>
+</section>
+
+<div id="app" class="cache">
+<h1>Cadre</h1>
+
+<section>
+  <h2>Aperçu de l'écran</h2>
+  <canvas id="apercu" class="ecran" width="960" height="680"></canvas>
+  <div class="pastilles" id="statut"><span class="pastille doux">Chargement…</span></div>
+  <label style="margin-top:10px">Contour de l'aperçu <input type="range" id="bordure" min="0" max="40" value="10" style="flex:1"></label>
+</section>
+
+<section>
+  <h2>Affichage</h2>
+  <div class="modes">
+    <button data-mode="tableau" onclick="changerMode('tableau')">Tableau de bord</button>
+    <button data-mode="photo" onclick="changerMode('photo')">Photo</button>
+    <button data-mode="pochette" onclick="changerMode('pochette')">Pochette</button>
+    <button data-mode="blanc" class="danger" onclick="ecranBlanc()">Écran blanc</button>
+  </div>
+  <p class="aide" id="aideMode"></p>
+</section>
+
+<div class="outilsMenus"><a href="#" class="boutonPrevisu" onclick="previsualiser();return false">Prévisualiser</a><a href="#" onclick="toutesLesSections(true);return false">Tout ouvrir</a><a href="#" onclick="toutesLesSections(false);return false">Tout fermer</a></div>
+
+<details class="menu" id="menu-dispo">
+  <summary>Scènes et disposition</summary>
+  <p class="aide repliable">Une scène est une disposition des blocs, affichée pendant une période que tu choisis (par exemple « Bus » le vendredi de 18:00 à 20:00, ou « Grand Prix » la semaine d'une course). En dehors de toute scène, c'est la scène <b>Par défaut</b> qui s'affiche.</p>
+  <div class="puces" id="listeScenes" style="margin:8px 0"></div>
+  <div id="reglagesScene" class="cache" style="padding:10px 12px;border:1px solid var(--trait);border-radius:10px;margin-bottom:10px">
+    <label>Nom <input type="text" id="sceneNom" maxlength="40"></label>
+    <p class="aide" style="margin:8px 0 2px"><b>Quand l'afficher</b> (toutes les conditions remplies doivent l'être) :</p>
+    <div id="sceneCreneaux"></div>
+    <button style="margin-top:6px" onclick="ajouterCreneau(null, 'sceneCreneaux')">+ Ajouter un créneau</button>
+    <p class="aide" style="margin:10px 0 2px">Formule 1 :</p>
+    <select id="sceneF1"><option value="">peu importe</option><option value="semaine">la semaine d'un Grand Prix</option><option value="weekend">le week-end d'un Grand Prix</option></select>
+    <label>Du <input type="date" id="sceneDu" style="width:auto;flex:1;min-width:0"> au <input type="date" id="sceneAu" style="width:auto;flex:1;min-width:0"></label>
+    <label>Mise à jour toutes les
+      <select id="sceneReveil" style="width:auto"><option value="0">(rythme normal)</option><option>3</option><option>5</option><option>10</option><option>15</option><option>30</option><option>60</option></select> min</label>
+    <p class="aide" id="sceneResume"></p>
+    <div class="ligne" style="margin-top:6px">
+      <button onclick="monterScene()">Plus prioritaire</button>
+      <button onclick="copierDefaut()">Copier « Par défaut »</button>
+      <button class="danger" onclick="supprimerScene()">Supprimer</button>
+    </div>
+  </div>
+  <p class="aide" id="aideDefaut">Scène affichée quand aucune autre n'est active. Son rythme se règle dans « Réveil du cadre ».</p>
+  <p class="aide repliable">Fais glisser un bloc pour le déplacer, tire son coin en bas à droite pour l'agrandir. Les blocs ne peuvent pas se chevaucher ; le contenu s'adapte à leur taille.</p>
+  <p style="margin:10px 0 4px;font-weight:600" id="titreEditeur"></p>
+  <div class="historique">
+    <button id="btnAnnulerEtape" onclick="annulerEtape()" title="Annuler la dernière modification des blocs (Ctrl+Z)" disabled>↶ Annuler</button>
+    <button id="btnRetablir" onclick="retablirEtape()" title="Rétablir (Ctrl+Maj+Z)" disabled>↷ Rétablir</button>
+  </div>
+  <div id="zoneEditeur">
+  <div id="editeur" class="ecran editeur"></div>
+  <div id="styleBloc" class="bulle cache" role="dialog">
+    <div class="teteBulle"><b id="styleTitre"></b><button onclick="selectionner(null)" title="Fermer" aria-label="Fermer">✕</button></div>
+    <div class="ligne" style="flex-wrap:wrap">
+      <label>Taille <select id="styleTaille" style="width:auto"><option value="S">Petite</option><option value="M">Normale</option><option value="L">Grande</option><option value="XL">Très grande</option></select></label>
+      <label>Police <select id="stylePolice" style="width:auto"><option value="moderne">Moderne</option><option value="helvetica">Helvetica</option><option value="classique">Classique</option><option value="machine">Machine à écrire</option></select></label>
+    </div>
+    <p class="aide repliable">Chaque cran agrandit ou réduit tous les textes du bloc d'un palier (environ 25 %). Un texte trop long rétrécit d'abord un peu avant d'être coupé par « … ». Helvetica et Classique s'arrêtent à 25 px : en Grande et Très grande, leurs plus grands textes passent en Moderne. Moderne s'arrête à 42 px, Machine à écrire à 53 px. La température garde toujours ses chiffres hauts et fins.</p>
+  </div>
+  </div>
+  <button style="width:100%;margin-top:8px" class="boutonPrevisu" onclick="previsualiser()">Prévisualiser</button>
+  <p class="aide">Touche un bloc (sans le déplacer) pour régler la taille et la police de son texte.</p>
+  <div class="puces" id="choixWidgets"></div>
+  <button style="width:100%;margin-top:6px" onclick="reinitialiserDispo()">Disposition par défaut</button>
+  <div class="msg" id="msgDispo"></div>
+</details>
+
+<details class="menu" id="menu-montage">
+  <summary>Montage du cadre</summary>
+  <p class="aide" style="margin:0 0 6px">Nombre d'écrans :</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
+    <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
+    <button data-ecr="dessus" onclick="choisirEcrans(2, 'dessus')">Deux l'un sur l'autre</button>
+  </div>
+  <div id="ligneJoint" class="cache">
+    <label>Espace entre les zones d'affichage des deux écrans
+      <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
+    <p class="aide repliable">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
+  </div>
+  <p class="aide" style="margin:10px 0 6px">Sens du cadre :</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
+    <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
+    <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
+  </div>
+  <p class="aide repliable">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
+  <label style="margin-top:10px"><input type="checkbox" id="traits"> Traits de séparation entre les blocs</label>
+</details>
+
+<details class="menu" id="menu-meteo">
+  <summary>Météo</summary>
+  <div class="ligne"><input type="text" id="ville" placeholder="Rechercher une ville"><button style="flex:0" onclick="chercherVille()">Chercher</button></div>
+  <div class="resultats" id="resultatsVille"></div>
+  <p class="aide" id="villeChoisie"></p>
+  <label><input type="checkbox" id="mVent"> Vent et rafales</label>
+  <label><input type="checkbox" id="mDetails"> Ressenti, humidité, risque de pluie</label>
+  <label><input type="checkbox" id="mSoleil"> Lever et coucher du soleil</label>
+  <label>Prochaines heures :
+    <select id="mNbHeures" style="width:auto"><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select>
+    colonnes, une toutes les
+    <select id="mPas" style="width:auto"><option>1</option><option>2</option><option>3</option><option>4</option></select> h</label>
+  <label>Prochains jours : jusqu'à
+    <select id="mNbJours" style="width:auto"><option>3</option><option>4</option><option>5</option><option>6</option></select> jours</label>
+  <p class="aide">Le nombre de colonnes réellement affichées dépend de la largeur du bloc.</p>
+  <label>Graphique de température sur les
+    <select id="mCourbe" style="width:auto"><option>12</option><option>24</option><option>36</option><option>48</option></select> prochaines heures</label>
+  <p class="aide repliable">Le graphique montre la température heure par heure, le risque de pluie (barres hachurées) et la nuit (fond grisé). Ajoute le bloc « Graphique de température » dans la Disposition.</p>
+  <div class="msg" id="msgMeteo"></div>
+</details>
+
+<details class="menu" id="menu-agenda">
+  <summary>Agenda</summary>
+  <p class="aide">Liens de calendriers publics iCloud, un par ligne (ils commencent par webcal://).</p>
+  <textarea id="aUrls" placeholder="webcal://p00-caldav.icloud.com/published/2/..."></textarea>
+  <div class="calendriers" id="etatCalendriers"></div>
+  <p class="aide">Anniversaires, un par ligne : prénom puis date (l'année est facultative, elle sert à afficher l'âge).</p>
+  <textarea id="aAnniv" placeholder="Léa 14/03/2005&#10;Mamie 02/11"></textarea>
+  <label>Nombre maximum d'événements
+    <select id="aNb" style="width:auto"><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select></label>
+  <p class="aide">Le cadre en affiche autant que la hauteur du bloc Agenda le permet.</p>
+  <button style="width:100%;margin-top:8px" onclick="tester()">Voir les données envoyées au cadre</button>
+  <div class="msg" id="msgAgenda"></div>
+  <pre id="donnees" class="cache"></pre>
+</details>
+
+<details class="menu" id="menu-bus">
+  <summary>Prochains bus (Tango)</summary>
+  <p class="aide" id="busEtat"></p>
+  <button style="width:100%" onclick="chargerGTFS()">Choisir mes arrêts (charge les horaires Tango)</button>
+  <div id="busChoix" class="cache" style="margin-top:8px">
+    <input type="text" id="busRecherche" placeholder="Nom de l'arrêt, par ex. Gare Feuchères" oninput="chercherArret()">
+    <div class="resultats" id="busResultats"></div>
+    <p class="aide">Arrêts choisis (2 au maximum) :</p>
+    <div id="busArrets" class="puces"></div>
+    <button class="principal" onclick="construireIndexBus()">Utiliser ces arrêts</button>
+  </div>
+  <p class="aide" style="margin-top:12px">Lignes et sens affichés :</p>
+  <div id="busLignes" class="puces"></div>
+  <label style="flex-wrap:wrap">Afficher
+    <select id="busNb" style="width:auto"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option></select>
+    passages, sur les
+    <select id="busHorizon" style="width:auto"><option>30</option><option>60</option><option>90</option><option>120</option><option>180</option></select>
+    prochaines minutes</label>
+  <p class="aide repliable">Le bloc « Prochains bus » s'affiche dans les scènes où tu le places (section « Scènes et disposition ») : crée par exemple une scène « Bus » pour les heures où tu prends le bus, avec une mise à jour toutes les 3 min.</p>
+  <details style="margin-top:6px"><summary class="aide">Réglage avancé</summary>
+    <label>Source du temps réel (laisser vide pour la source par défaut)</label>
+    <input type="text" id="busSource" placeholder="https://…">
+  </details>
+  <button style="width:100%;margin-top:8px" onclick="testerBus()">Voir les prochains passages maintenant</button>
+  <div class="msg" id="msgBus"></div>
+  <pre id="busTest" class="cache"></pre>
+</details>
+
+<details class="menu" id="menu-photo">
+  <summary>Photo plein écran</summary>
+  <input type="file" id="fichier" accept="image/*">
+  <div class="ligne" style="margin-top:8px">
+    <label><input type="radio" name="cadrage" value="remplir" checked> Remplir</label>
+    <label><input type="radio" name="cadrage" value="ajuster"> Image entière</label>
+  </div>
+  <label>Luminosité <input type="range" id="lum" min="-80" max="80" value="0"></label>
+  <label>Contraste <input type="range" id="contraste" min="50" max="200" value="110"></label>
+  <canvas class="photo" id="photoTramee" width="960" height="680"></canvas>
+  <button class="principal" onclick="envoyerPhoto()">Envoyer au cadre</button>
+  <div class="msg" id="msgPhoto"></div>
+</details>
+
+<details class="menu" id="menu-pochette">
+  <summary>Pochette Apple Music</summary>
+  <p class="aide" id="pochetteActuelle">Aucune pochette reçue pour l'instant.</p>
+  <p class="aide">Adresse à mettre dans le raccourci iPhone :</p>
+  <p><code id="urlPochette"></code></p>
+  <p class="aide cache" id="aidePochetteAccess">Dans l'action « Obtenir le contenu de l'URL », ajoute les en-têtes <code>CF-Access-Client-Id</code> et <code>CF-Access-Client-Secret</code> du jeton de service du raccourci (voir le guide d'installation).</p>
+</details>
+
+<details class="menu" id="menu-reveil">
+  <summary>Réveil du cadre</summary>
+  <label>En temps normal, le cadre vérifie s'il y a du nouveau toutes les
+    <select id="reveil" style="width:auto"><option>5</option><option>10</option><option>15</option><option>30</option><option>60</option></select> min</label>
+  <p class="aide">Plus c'est court, plus le cadre réagit vite, mais plus la batterie se vide.</p>
+  <label style="margin-top:12px"><input type="checkbox" id="dev"> Mode développement : la carte ne se met plus en veille et vérifie toutes les
+    <select id="devSecondes" style="width:auto"><option>15</option><option>30</option><option>60</option></select> s</label>
+  <p class="aide repliable">Le téléversement depuis l'IDE Arduino marche alors sans le bouton BOOT. À utiliser carte branchée en USB : sur batterie, elle se viderait en un jour. L'écran garde au moins 3 minutes entre deux rafraîchissements, mais l'aperçu ci-dessus se met à jour à chaque cycle. Pense à le désactiver une fois fini.</p>
+  <label style="margin-top:12px"><input type="checkbox" id="nuitActif"> Mode nuit</label>
+  <label>De <input type="time" id="nuitDebut" style="width:auto"> à <input type="time" id="nuitFin" style="width:auto"></label>
+  <label>Réveil toutes les <select id="nuitIntervalle" style="width:auto"><option>30</option><option>60</option><option>120</option></select> min</label>
+  <p class="aide repliable">La nuit, le cadre se réveille moins souvent pour économiser la batterie. Il se réveille tout seul à la fin de la nuit, et reste à l'heure pour les créneaux de bus.</p>
+  <label style="margin-top:12px"><input type="checkbox" id="partiel"> Mises à jour partielles de l'écran</label>
+  <label>Méthode <select id="methodePartiel" style="width:auto;flex:1;min-width:0"><option value="simple">simple</option>
+    <option value="double">double passe</option><option value="inversion">inversion des zones</option></select></label>
+  <label>Complet après <select id="maxPartiels" style="width:auto"><option value="0">aucune limite de</option><option>3</option><option>6</option><option>12</option></select> mises à jour partielles</label>
+  <label>Rafraîchissement complet au moins toutes les <select id="completH" style="width:auto"><option>6</option><option>12</option><option>24</option></select> h</label>
+  <label>Complet dès que plus de <select id="seuilPartiel" style="width:auto"><option>20</option><option>40</option><option>60</option></select> % de l'écran change</label>
+  <p class="aide repliable">Quand peu de choses changent (température, heure d'un bus), seules ces zones sont redessinées : environ 0,6 s sans clignotement, au lieu de 4,5 s pour un rafraîchissement complet. Le cadre repasse en complet quand une grande partie de l'écran change, pour une photo ou une pochette, et avec un nettoyage (l'écran passe d'abord au blanc) à son démarrage et au moins une fois par période choisie, comme le conseille le fabricant de l'écran. Si des traces d'anciennes images apparaissent, essaie une autre méthode (« double passe » insiste sur les pixels qui changent, « inversion » fait passer chaque zone en négatif puis la redessine), limite le nombre de mises à jour partielles entre deux complets, ou décoche-les. Changer de méthode nettoie l'écran au prochain affichage, pour comparer sur un écran propre.</p>
+  <div class="msg" id="msgReveil"></div>
+</details>
+
+<details class="menu" id="menu-programme">
+  <summary>Programme de la carte</summary>
+  <p class="aide" id="fwInfo">Version installée : inconnue.</p>
+  <input type="file" id="fichierFw" accept=".bin">
+  <button class="principal" onclick="envoyerFirmware()">Envoyer le programme</button>
+  <div class="msg" id="msgFw"></div>
+  <p class="aide repliable">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
+</details>
+
+<details class="menu" id="menu-batterie">
+  <summary>Batterie</summary>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
+    <button data-jours="2" onclick="dessinerBatterie(2)">2 jours</button>
+    <button data-jours="7" onclick="dessinerBatterie(7)">7 jours</button>
+    <button data-jours="30" onclick="dessinerBatterie(30)">30 jours</button>
+  </div>
+  <canvas id="courbeBatterie" style="width:100%;height:220px;display:block"></canvas>
+  <p class="aide" id="resumeBatterie">Chargement…</p>
+</details>
+
+<details class="menu" id="menu-jetons">
+  <summary>Accès des jetons</summary>
+  <div id="listeJetons"><p class="aide">Chargement…</p></div>
+  <div class="msg" id="msgJetons"></div>
+  <p class="aide repliable">La carte et le raccourci iPhone passent Cloudflare Access avec un jeton de service. Chacun n'a droit qu'à ce dont il a besoin : la carte lit son état, la photo, la pochette et le programme, et envoie son aperçu ; le raccourci envoie la pochette. Un jeton volé ne peut donc ni changer les réglages, ni lire la sauvegarde, ni envoyer un programme à la carte. Le rôle d'un jeton est deviné à sa première requête. Un jeton sans rôle garde tous les droits, comme une personne connectée : choisis-lui un rôle. Un changement s'applique tout de suite. « Oublier » retire un jeton de la liste : son rôle sera deviné à nouveau à sa prochaine requête.</p>
+</details>
+
+<details class="menu" id="menu-sauvegarde">
+  <summary>Sauvegarde des réglages</summary>
+  <p class="aide repliable">Télécharge un fichier avec tous tes réglages : scènes et dispositions, météo, agendas, anniversaires, arrêts de bus, réveil. Garde-le en lieu sûr (Fichiers, iCloud Drive) : il permet de tout remettre comme avant après une fausse manipulation. Les photos et la pochette ne sont pas incluses.</p>
+  <button class="principal" onclick="telechargerReglages()">Télécharger mes réglages</button>
+  <p class="aide" style="margin-top:14px">Restaurer une sauvegarde (remplace tous les réglages actuels) :</p>
+  <input type="file" id="fichierReglages" accept=".json,application/json">
+  <button style="width:100%;margin-top:8px" onclick="restaurerReglages()">Restaurer</button>
+  <div class="msg" id="msgSauvegarde"></div>
+</details>
+
+<div id="detailModifs" class="cache"></div>
+<div id="barreModifs" class="barreModifs cache" role="status">
+  <span id="texteModifs" onclick="basculerDetailModifs()" title="Toucher pour voir le détail">Modifications non enregistrées</span>
+  <button class="annuler" onclick="annulerModifs()">Annuler</button>
+  <button class="enreg" onclick="toutEnregistrer()">Enregistrer</button>
+</div>
+
+<div id="panneauPrevisu" class="cache" role="dialog" aria-label="Prévisualisation">
+  <div class="tete">
+    <b>Prévisualisation</b>
+    <select id="scenePrevisu" aria-label="Scène prévisualisée"></select>
+    <button id="reduirePrevisu" title="Réduire" aria-label="Réduire" onclick="reduirePrevisu()">–</button>
+    <button title="Fermer" aria-label="Fermer" onclick="fermerPrevisu()">✕</button>
+  </div>
+  <div class="corps">
+    <canvas id="previsu" class="ecran"></canvas>
+    <p class="aide repliable infoPrevisu" id="infoPrevisu"></p>
+  </div>
+  <div class="poignee" id="poigneePrevisu" title="Agrandir ou réduire"></div>
+</div>
+
+<p class="aide" style="text-align:center"><a href="#" id="lienDeconnexion" onclick="return deconnexion()" style="color:var(--doux)">Se déconnecter</a></p>
+</div>
+</main>
+
+<!-- SCRIPTS -->
+</body></html>
