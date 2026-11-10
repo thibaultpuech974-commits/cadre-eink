@@ -46,11 +46,32 @@ function afficherStatut(s, maintenant, s1) {
   afficherFirmware(s);
   var boutons = document.querySelectorAll('[data-mode]');
   for (var i = 0; i < boutons.length; i++) boutons[i].classList.toggle('actif', boutons[i].getAttribute('data-mode') === config.mode);
-  var aide = '';
-  if (config.mode === 'blanc') aide = "L'écran s'effacera au prochain réveil du cadre. Attends que l'aperçu soit blanc avant de débrancher la batterie.";
+  var aide = '', er = etatReglages();
+  if (er && er.recu) aide = 'Le cadre a appliqué les derniers réglages' + (er.t ? ' ' + quand(er.t) : '') + '.' +
+    (config.mode === 'blanc' ? " Attends que l'aperçu soit blanc avant de débrancher la batterie." : '');
+  else if (config.mode === 'blanc') aide = "L'écran s'effacera au prochain réveil du cadre. Attends que l'aperçu soit blanc avant de débrancher la batterie.";
+  else if (er) aide = "Changement en attente : le cadre l'appliquera à son prochain réveil.";
   else if (config.dev) aide = "Mode développement actif : le changement s'applique dans " + config.devSecondes + ' s environ.';
   else aide = "Le changement s'applique au prochain réveil du cadre (dans " + config.reveilMin + ' min au plus).';
   $('aideMode').textContent = aide;
+  // Tant qu'un changement attend le cadre, la page regarde plus souvent s'il est passe (toutes les 20 s)
+  clearTimeout(minuteurAttente);
+  if (er && !er.recu) minuteurAttente = setTimeout(function () { if (!document.hidden && config) rafraichir().catch(function () {}); }, 20000);
+}
+// Le cadre a-t-il recu les derniers reglages ? Le serveur note la version des reglages donnee a la carte a
+// chaque reveil (cv) et depuis quand (cvt). null : inconnu (cadre jamais connecte, ou pas encore repasse).
+var minuteurAttente = null;
+function etatReglages() {
+  var s = statutCourant && statutCourant.s, s1 = statutCourant && statutCourant.s1;
+  if (!s || typeof s.cv !== 'number') return null;
+  var deux = config.ecrans && config.ecrans.nb === 2 && s1 && typeof s1.cv === 'number';
+  var recu = s.cv === config.version && (!deux || s1.cv === config.version);
+  return { recu: recu, t: recu ? Math.max(s.cvt || 0, deux ? s1.cvt || 0 : 0) : 0 };
+}
+// "à 14:12" si c'est aujourd'hui, sinon "le 9 nov. à 14:12"
+function quand(t) {
+  var d = new Date(t), h = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  return (new Date().toDateString() === d.toDateString() ? '' : 'le ' + d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ') + 'à ' + h;
 }
 // Comment l'ecran a ete rafraichi pour la derniere image (plan du serveur : "P;2;3", "C;seuil", "N;quotidien", "R")
 function decrirePlan(p) {
@@ -97,10 +118,16 @@ function dessinerStatut() {
     return age <= attendu * 2 + 5 * 60000;
   };
   var vivant = connexion(s, '');
+  var er = etatReglages(), enAttente = er && !er.recu;
   if (s && vivant) {
     var prochain = vuCadre(s, '') + (s.r ? s.r * 1000 : config.dev ? config.devSecondes * 1000 : config.reveilMin * 60000) - maintenant;
-    ajouter(prochain > 60000 ? 'Réveil dans ' + Math.round(prochain / 60000) + ' min' : 'Réveil imminent');
-  }
+    var reveil = prochain > 60000 ? 'réveil dans ' + Math.round(prochain / 60000) + ' min' : 'réveil imminent';
+    if (enAttente) ajouter('Changement en attente · ' + reveil, 'attente', "Le cadre n'a pas encore reçu les derniers réglages : il les appliquera à son prochain réveil.");
+    else ajouter(reveil.charAt(0).toUpperCase() + reveil.slice(1));
+  } else if (enAttente) ajouter('Changement en attente', 'attente', "Le cadre n'a pas encore reçu les derniers réglages.");
+  // Changement recent (moins d'une heure) recu par le cadre
+  if (er && er.recu && er.t && maintenant - er.t < 3600e3 && maintenant - er.t >= 0)
+    ajouter('Appliqué ' + quand(er.t), 'ok', 'Le cadre a reçu les derniers réglages le ' + new Date(er.t).toLocaleString('fr-FR') + '.');
   if (config.mode === 'tableau' && s && s.sc) ajouter('Scène : ' + s.sc);
   // Redemarrage anormal de la carte dans les 7 derniers jours (garde-fou)
   if (s && s.pat && maintenant - s.pat < 7 * 86400e3) {

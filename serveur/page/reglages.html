@@ -133,6 +133,8 @@ function verifierModifs() {
     if (previsuActive) placerPanneau(); else ajusterMarge();
   }, 120);
 }
+// Message a ne pas manquer apres un enregistrement : il reste affiche, et son menu s'ouvre (meme dans un autre groupe)
+function signaler(idMsg, t) { $(idMsg).textContent = t; montrerMenu($(idMsg).closest('details.menu').id); }
 function remplirSansSignaler() { enChargement = true; try { remplirFormulaires(); } finally { enChargement = false; } }
 function toutEnregistrer() {
   var modif = modificationsCourantes();
@@ -147,13 +149,13 @@ function toutEnregistrer() {
       remplirSansSignaler();
       reference = JSON.stringify(modificationsCourantes());
       // Ce que le serveur n'a pas pu garder
-      if (d.ignorees && d.ignorees.length) $('msgAgenda').textContent = 'Anniversaires non compris : ' + d.ignorees.join(' ; ') + ' (format attendu : Prénom 14/03/2005)';
-      if (d.ignoreesRebours && d.ignoreesRebours.length) $('msgRebours').textContent = 'Lignes non comprises : ' + d.ignoreesRebours.join(' ; ') + ' (format attendu : Vacances 19/12/2026)';
+      if (d.ignorees && d.ignorees.length) signaler('msgAgenda', 'Anniversaires non compris : ' + d.ignorees.join(' ; ') + ' (format attendu : Prénom 14/03/2005)');
+      if (d.ignoreesRebours && d.ignoreesRebours.length) signaler('msgRebours', 'Lignes non comprises : ' + d.ignoreesRebours.join(' ; ') + ' (format attendu : Vacances 19/12/2026)');
       if ((config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; }))
-        $('msgDispo').textContent = 'Un créneau a été ignoré : coche au moins un jour et mets une fin après le début.';
-      if ((config.creuses.creneaux || []).length < plagesAvant) $('msgReveil').textContent = 'Une plage d\'heures creuses a été ignorée : coche au moins un jour et mets une fin après le début.';
+        signaler('msgDispo', 'Un créneau a été ignoré : coche au moins un jour et mets une fin après le début.');
+      if ((config.creuses.creneaux || []).length < plagesAvant) signaler('msgReveil', 'Une plage d\'heures creuses a été ignorée : coche au moins un jour et mets une fin après le début.');
       if ($('menu-alertes').open) chargerEtatAlertes();
-      if (config.dev && !devAvant) $('msgReveil').textContent = "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).";
+      if (config.dev && !devAvant) signaler('msgReveil', "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).");
       var b = $('barreModifs');
       b.classList.add('fait'); b.classList.remove('cache');
       $('texteModifs').textContent = window.innerWidth < 480 ? 'Enregistré ✓' : 'Enregistré : le cadre se mettra à jour à son prochain réveil.';

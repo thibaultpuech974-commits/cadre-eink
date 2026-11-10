@@ -111,6 +111,7 @@ function dessinerPuces() {
 }
 function afficherScenes() {
   dessinerPuces();
+  demanderFrise();
   $('titreEditeur').textContent = 'Blocs de la scène « ' + (sceneCourante < 0 ? 'Par défaut' : scenes[sceneCourante].nom) + ' »' + texteOrientation();
   $('reglagesScene').classList.toggle('cache', sceneCourante < 0);
   $('aideDefaut').classList.toggle('cache', sceneCourante >= 0);
@@ -124,8 +125,8 @@ function afficherScenes() {
     $('sceneResume').textContent = resumeScene(sc);
   }
 }
-// Le resume et le nom se mettent a jour pendant la saisie
-$('reglagesScene').addEventListener('change', function () { lireFormScene(); if (sceneCourante >= 0) $('sceneResume').textContent = resumeScene(scenes[sceneCourante]); });
+// Le resume, le nom et la frise se mettent a jour pendant la saisie
+$('reglagesScene').addEventListener('change', function () { lireFormScene(); if (sceneCourante >= 0) $('sceneResume').textContent = resumeScene(scenes[sceneCourante]); demanderFrise(); });
 $('sceneNom').addEventListener('input', function () { if (sceneCourante >= 0 && this.value.trim()) { scenes[sceneCourante].nom = this.value.trim(); dessinerPuces();
   $('titreEditeur').textContent = 'Blocs de la scène « ' + scenes[sceneCourante].nom + ' »' + texteOrientation(); } });
 function choisirScene(i) {
@@ -162,6 +163,126 @@ function monterScene() {
   sceneCourante--;
   afficherScenes();
   message('msgDispo', "Si plusieurs scènes sont actives en même temps, celle de gauche l'emporte.");
+}
+function descendreScene() {
+  if (sceneCourante < 0) return;
+  if (sceneCourante >= scenes.length - 1) { message('msgDispo', 'Cette scène est déjà la moins prioritaire.'); return; }
+  memoriserEtape();
+  lireFormScene(); ranger();
+  var sc = scenes.splice(sceneCourante, 1)[0];
+  scenes.splice(sceneCourante + 1, 0, sc);
+  sceneCourante++;
+  afficherScenes();
+  message('msgDispo', "Si plusieurs scènes sont actives en même temps, celle de gauche l'emporte.");
+}
+function dupliquerScene() {
+  if (sceneCourante < 0) return;
+  if (scenes.length >= 8) { message('msgDispo', '8 scènes au maximum : supprime-en une avant de dupliquer.'); return; }
+  memoriserEtape();
+  lireFormScene(); ranger();
+  var c = copie(scenes[sceneCourante]);
+  c.id = 's' + Date.now().toString(36);
+  c.nom = (c.nom.slice(0, 32) + ' (copie)');
+  scenes.splice(sceneCourante + 1, 0, c);
+  sceneCourante++;
+  afficherScenes(); appliquerRotation(rot);
+  message('msgDispo', 'Scène dupliquée : change son nom et ses créneaux, puis enregistre. Tant que les deux ont les mêmes créneaux, celle de gauche l\'emporte.');
+}
+// ---------------------------------------------------------------------
+// Frise : quelle scene s'affichera a chaque heure des 7 prochains jours (calculee par le serveur avec
+// les scenes du formulaire, meme pas encore enregistrees)
+// ---------------------------------------------------------------------
+var minuteurFrise = null, numFrise = 0, cleFrise = '', couleurScene = {};
+// Une couleur par scene, gardee tant que la page est ouverte (meme si la scene change de place ou de nom)
+function couleurDe(sc) {
+  if (!couleurScene[sc.id]) {
+    var prises = scenes.map(function (x) { return couleurScene[x.id]; });
+    for (var k = 1; k <= 8; k++) if (prises.indexOf(k) < 0) { couleurScene[sc.id] = k; break; }
+  }
+  return 'var(--s' + (couleurScene[sc.id] || 1) + ')';
+}
+function demanderFrise() {
+  if (!$('menu-dispo').open) return;
+  clearTimeout(minuteurFrise);
+  minuteurFrise = setTimeout(majFrise, 400);
+}
+$('menu-dispo').addEventListener('toggle', demanderFrise);
+function majFrise() {
+  if (!config) return;
+  lireFormScene(); ranger();
+  if (!scenes.length) { $('frise').classList.add('cache'); cleFrise = ''; return; }
+  // Rien n'a change dans les conditions des scenes depuis le dernier calcul (10 min au plus) : on garde la frise
+  var cle = Math.floor(Date.now() / 600000) + JSON.stringify(scenes.map(function (sc) { return [sc.id, sc.nom, sc.creneaux, sc.f1, sc.du, sc.au]; }));
+  if (cle === cleFrise) return;
+  var n = ++numFrise, liste = copie(scenes);
+  api('/api/frise', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ modif: { scenes: liste, ecrans: ECR } }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (n !== numFrise) return; cleFrise = cle; dessinerFrise(d, liste); })
+    .catch(function () { if (n === numFrise) $('frise').classList.add('cache'); });
+}
+function heureFrise(t) { return new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }); }
+function dessinerFrise(d, liste) {
+  var z = $('frise'); z.innerHTML = ''; z.classList.remove('cache');
+  var el = function (balise, classe, texte) { var e = document.createElement(balise); if (classe) e.className = classe; if (texte) e.textContent = texte; return e; };
+  var nomDe = function (i) { return i < 0 ? 'Par défaut' : d.noms[i]; };
+  var fin = d.jours[d.jours.length - 1].t1;
+  z.appendChild(el('p', 'aide', 'Scène affichée heure par heure, sur 7 jours (avec tes réglages, même non enregistrés) :'));
+  var detail = el('p', 'aide detail');
+  var heures = el('div', 'friseHeures');
+  heures.appendChild(el('span'));
+  var graduations = el('div');
+  ['0 h', '6 h', '12 h', '18 h', '24 h'].forEach(function (h) { graduations.appendChild(el('span', '', h)); });
+  heures.appendChild(graduations);
+  z.appendChild(heures);
+  d.jours.forEach(function (j, nj) {
+    var ligne = el('div', 'friseJour'), barre = el('div', 'barre');
+    ligne.appendChild(el('span', 'nom', nj === 0 ? "auj." : j.nom));
+    d.segments.forEach(function (sg, k) {
+      var a = Math.max(sg.t, j.t0), b = Math.min(k + 1 < d.segments.length ? d.segments[k + 1].t : fin, j.t1);
+      if (b <= a) return;
+      var s = el('button', 'seg' + (sg.scene < 0 ? ' defaut' : ''));
+      s.type = 'button';
+      s.style.left = ((a - j.t0) / (j.t1 - j.t0) * 100) + '%';
+      s.style.width = ((b - a) / (j.t1 - j.t0) * 100) + '%';
+      if (sg.scene >= 0) s.style.background = couleurDe(liste[sg.scene]);
+      var texte = j.nom + ', ' + heureFrise(a) + ' – ' + (b === j.t1 ? '24:00' : heureFrise(b)) + ' : ' + nomDe(sg.scene);
+      s.title = texte; s.setAttribute('aria-label', texte);
+      s.onclick = function () {
+        detail.textContent = texte;
+        // (la scene a pu changer de place depuis le calcul : on la retrouve par son identifiant)
+        var i = sg.scene < 0 ? -1 : scenes.findIndex(function (x) { return x.id === liste[sg.scene].id; });
+        if (i !== sceneCourante && (sg.scene < 0 || i >= 0)) choisirScene(i);
+      };
+      barre.appendChild(s);
+    });
+    if (d.maintenant >= j.t0 && d.maintenant < j.t1) {
+      var m = el('i', 'maintenant'); m.style.left = ((d.maintenant - j.t0) / (j.t1 - j.t0) * 100) + '%'; m.title = 'Maintenant';
+      barre.appendChild(m);
+    }
+    ligne.appendChild(barre);
+    z.appendChild(ligne);
+  });
+  // Legende : une pastille de couleur par scene qui apparait dans la semaine
+  var vues = {}, legende = el('div', 'friseLegende');
+  d.segments.forEach(function (sg) { vues[sg.scene] = 1; });
+  [-1].concat(liste.map(function (x, i) { return i; })).forEach(function (i) {
+    if (!vues[i]) return;
+    var e = el('span'), c = el('i');
+    if (i >= 0) c.style.background = couleurDe(liste[i]); else c.className = 'defaut';
+    e.appendChild(c); e.appendChild(document.createTextNode(nomDe(i)));
+    legende.appendChild(e);
+  });
+  z.appendChild(legende);
+  // En toutes lettres : la scene du moment et les prochains changements
+  var actuelle = -1, suite = [];
+  d.segments.forEach(function (sg) { if (sg.t <= d.maintenant) actuelle = sg.scene; else if (suite.length < 3) suite.push(sg); });
+  var jourDe = function (t) { for (var k = 0; k < d.jours.length; k++) if (t < d.jours[k].t1) return k ? d.jours[k].nom + ' ' : ''; return ''; };
+  var t = 'En ce moment : ' + nomDe(actuelle) + '.';
+  if (suite.length) t += ' Ensuite : ' + suite.map(function (sg) { return nomDe(sg.scene) + ' ' + jourDe(sg.t) + 'à ' + heureFrise(sg.t); }).join(', ') + '.';
+  var jamais = liste.filter(function (x, i) { return !vues[i]; }).map(function (x) { return '« ' + x.nom + ' »'; });
+  if (jamais.length) t += ' Jamais affichée cette semaine : ' + jamais.join(', ') + '.';
+  z.appendChild(el('p', 'aide', t));
+  z.appendChild(detail);
 }
 function copierDefaut() {
   memoriserEtape();

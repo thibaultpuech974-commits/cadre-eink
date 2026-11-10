@@ -1,4 +1,4 @@
-<!-- Page web du cadre : menus déroulants, textes d'aide repliables, démarrage de la page (toujours en dernier) -->
+<!-- Page web du cadre : groupes de menus, menus déroulants, textes d'aide repliables, démarrage de la page (toujours en dernier) -->
 <script>
 // --- Menus deroulants : on retient ceux qui sont ouverts (sur cet appareil) ---
 var menus = document.querySelectorAll('details.menu');
@@ -12,7 +12,31 @@ for (var i = 0; i < menus.length; i++) {
     try { localStorage.setItem('cadre-menus', JSON.stringify(ouverts)); } catch (e) {}
   });
 }
-function toutesLesSections(ouvrir) { for (var k = 0; k < menus.length; k++) menus[k].open = ouvrir; }
+// --- Trois groupes de menus (Contenu, Cadre, Systeme) : un seul est affiche a la fois, on retient lequel ---
+var groupeCourant = 'contenu';
+function choisirGroupe(g) {
+  if (!$('groupe-' + g)) g = 'contenu';
+  groupeCourant = g;
+  var groupes = document.querySelectorAll('.groupe'), onglets = document.querySelectorAll('.onglets button');
+  for (var k = 0; k < groupes.length; k++) groupes[k].classList.toggle('cache', groupes[k].id !== 'groupe-' + g);
+  for (var k = 0; k < onglets.length; k++) {
+    var choisi = onglets[k].getAttribute('data-groupe') === g;
+    onglets[k].classList.toggle('actif', choisi); onglets[k].setAttribute('aria-selected', choisi ? 'true' : 'false');
+  }
+  try { localStorage.setItem('cadre-groupe', g); } catch (e) {}
+}
+try { groupeCourant = localStorage.getItem('cadre-groupe') || 'contenu'; } catch (e) {}
+choisirGroupe(groupeCourant);
+// Ouvre un menu, dans son groupe, et l'amene a l'ecran (pour un message a ne pas manquer)
+function montrerMenu(id) {
+  var m = $(id);
+  if (!m) return;
+  choisirGroupe(m.parentNode.id.replace('groupe-', ''));
+  m.open = true;
+  if (m.scrollIntoView) m.scrollIntoView({ block: 'nearest' });
+}
+// "Tout ouvrir" et "Tout fermer" : les menus du groupe affiche
+function toutesLesSections(ouvrir) { for (var k = 0; k < menus.length; k++) if (menus[k].parentNode.id === 'groupe-' + groupeCourant) menus[k].open = ouvrir; }
 // Textes repliables : le contenu va dans <span class="texte">, suivi du lien "plus" / "moins"
 function preparerRepliable(p) {
   if (p.querySelector(':scope > .texte')) return p.querySelector(':scope > .texte');

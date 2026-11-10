@@ -35,12 +35,19 @@
   <p class="aide" id="aideMode"></p>
 </section>
 
+<div class="onglets" role="tablist" aria-label="Réglages">
+  <button role="tab" data-groupe="contenu" onclick="choisirGroupe('contenu')">Contenu</button>
+  <button role="tab" data-groupe="cadre" onclick="choisirGroupe('cadre')">Cadre</button>
+  <button role="tab" data-groupe="systeme" onclick="choisirGroupe('systeme')">Système</button>
+</div>
 <div class="outilsMenus"><a href="#" class="boutonPrevisu" onclick="previsualiser();return false">Prévisualiser</a><a href="#" onclick="toutesLesSections(true);return false">Tout ouvrir</a><a href="#" onclick="toutesLesSections(false);return false">Tout fermer</a></div>
 
+<div class="groupe" id="groupe-contenu" role="tabpanel" aria-label="Contenu">
 <details class="menu" id="menu-dispo">
   <summary>Scènes et disposition</summary>
   <p class="aide repliable">Une scène est une disposition des blocs, affichée pendant une période que tu choisis (par exemple « Bus » le vendredi de 18:00 à 20:00, ou « Grand Prix » la semaine d'une course). En dehors de toute scène, c'est la scène <b>Par défaut</b> qui s'affiche.</p>
   <div class="puces" id="listeScenes" style="margin:8px 0"></div>
+  <div id="frise" class="frise cache"></div>
   <div id="reglagesScene" class="cache" style="padding:10px 12px;border:1px solid var(--trait);border-radius:10px;margin-bottom:10px">
     <label>Nom <input type="text" id="sceneNom" maxlength="40"></label>
     <p class="aide" style="margin:8px 0 2px"><b>Quand l'afficher</b> (toutes les conditions remplies doivent l'être) :</p>
@@ -54,6 +61,10 @@
     <p class="aide" id="sceneResume"></p>
     <div class="ligne" style="margin-top:6px">
       <button onclick="monterScene()">Plus prioritaire</button>
+      <button onclick="descendreScene()">Moins prioritaire</button>
+    </div>
+    <div class="ligne" style="margin-top:6px">
+      <button onclick="dupliquerScene()">Dupliquer</button>
       <button onclick="copierDefaut()">Copier « Par défaut »</button>
       <button class="danger" onclick="supprimerScene()">Supprimer</button>
     </div>
@@ -81,29 +92,6 @@
   <div class="puces" id="choixWidgets"></div>
   <button style="width:100%;margin-top:6px" onclick="reinitialiserDispo()">Disposition par défaut</button>
   <div class="msg" id="msgDispo"></div>
-</details>
-
-<details class="menu" id="menu-montage">
-  <summary>Montage du cadre</summary>
-  <p class="aide" style="margin:0 0 6px">Nombre d'écrans :</p>
-  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
-    <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
-    <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
-    <button data-ecr="dessus" onclick="choisirEcrans(2, 'dessus')">Deux l'un sur l'autre</button>
-  </div>
-  <div id="ligneJoint" class="cache">
-    <label>Espace entre les zones d'affichage des deux écrans
-      <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
-    <p class="aide repliable">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
-  </div>
-  <p class="aide" style="margin:10px 0 6px">Sens du cadre :</p>
-  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
-    <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
-    <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
-    <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
-  </div>
-  <p class="aide repliable">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
-  <label style="margin-top:10px"><input type="checkbox" id="traits"> Traits de séparation entre les blocs</label>
 </details>
 
 <details class="menu" id="menu-meteo">
@@ -189,7 +177,13 @@
   </div>
   <label>Luminosité <input type="range" id="lum" min="-80" max="80" value="0"></label>
   <label>Contraste <input type="range" id="contraste" min="50" max="200" value="110"></label>
+  <label>Zoom <input type="range" id="zoomPhoto" min="100" max="400" value="100"></label>
+  <label>Tramage <select id="tramage" style="width:auto;flex:1;min-width:0"><option value="fs">Floyd-Steinberg (nuances fines)</option><option value="atkinson">Atkinson (plus contrasté)</option></select></label>
   <canvas class="photo" id="photoTramee" width="960" height="680"></canvas>
+  <div class="ligne cache" id="outilsCadrage" style="margin-top:6px">
+    <p class="aide" style="margin:0">Fais glisser la photo pour la cadrer, pince-la pour l'agrandir.</p>
+    <button style="flex:0;white-space:nowrap" onclick="recentrerPhoto()">Recentrer</button>
+  </div>
   <button class="principal" onclick="envoyerPhoto()">Envoyer au cadre</button>
   <div class="msg" id="msgPhoto"></div>
 </details>
@@ -200,6 +194,31 @@
   <p class="aide">Adresse à mettre dans le raccourci iPhone :</p>
   <p><code id="urlPochette"></code></p>
   <p class="aide cache" id="aidePochetteAccess">Dans l'action « Obtenir le contenu de l'URL », ajoute les en-têtes <code>CF-Access-Client-Id</code> et <code>CF-Access-Client-Secret</code> du jeton de service du raccourci (voir le guide d'installation).</p>
+</details>
+</div>
+
+<div class="groupe" id="groupe-cadre" role="tabpanel" aria-label="Cadre">
+<details class="menu" id="menu-montage">
+  <summary>Montage du cadre</summary>
+  <p class="aide" style="margin:0 0 6px">Nombre d'écrans :</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-ecr="1" onclick="choisirEcrans(1, 'cote')">Un écran</button>
+    <button data-ecr="cote" onclick="choisirEcrans(2, 'cote')">Deux côte à côte</button>
+    <button data-ecr="dessus" onclick="choisirEcrans(2, 'dessus')">Deux l'un sur l'autre</button>
+  </div>
+  <div id="ligneJoint" class="cache">
+    <label>Espace entre les zones d'affichage des deux écrans
+      <input type="number" id="joint" min="0" max="100" step="1" style="width:80px"> mm</label>
+    <p class="aide repliable">Les deux écrans forment une seule grande image ; un bloc ne peut pas être à cheval sur la jointure. Mesure l'espace entre les bords des deux zones d'affichage : il sert à aligner l'aperçu et les photos.</p>
+  </div>
+  <p class="aide" style="margin:10px 0 6px">Sens du cadre :</p>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:6px">
+    <button data-rot="0" onclick="choisirRotation(0)">Paysage</button>
+    <button data-rot="1" onclick="choisirRotation(1)">Portrait</button>
+    <button data-rot="3" onclick="choisirRotation(3)">Portrait inversé</button>
+  </div>
+  <p class="aide repliable">Les deux portraits correspondent aux deux sens possibles du cadre accroché en hauteur : choisis celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition.</p>
+  <label style="margin-top:10px"><input type="checkbox" id="traits"> Traits de séparation entre les blocs</label>
 </details>
 
 <details class="menu" id="menu-reveil">
@@ -229,15 +248,6 @@
   <div class="msg" id="msgReveil"></div>
 </details>
 
-<details class="menu" id="menu-programme">
-  <summary>Programme de la carte</summary>
-  <p class="aide" id="fwInfo">Version installée : inconnue.</p>
-  <input type="file" id="fichierFw" accept=".bin">
-  <button class="principal" onclick="envoyerFirmware()">Envoyer le programme</button>
-  <div class="msg" id="msgFw"></div>
-  <p class="aide repliable">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
-</details>
-
 <details class="menu" id="menu-batterie">
   <summary>Batterie</summary>
   <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
@@ -262,6 +272,17 @@
   <div class="msg" id="msgAlertes"></div>
   <p class="aide repliable">Installe l'application gratuite <b>ntfy</b> sur l'iPhone, touche « + » et abonne-toi au sujet ci-dessus, sans compte : c'est tout. Le serveur vérifie une fois par heure ; il envoie une notification par problème, puis un rappel par jour tant qu'il dure (tous les 3 jours pour les bus), et prévient quand le cadre répond à nouveau. Le sujet tient lieu de mot de passe : quiconque le connaît peut lire tes alertes, garde donc un sujet long tiré au hasard (bouton « Générer »). Les notifications passent par le service public ntfy.sh. En mode Écran blanc, le cadre est considéré comme rangé : pas d'alerte de silence.</p>
 </details>
+</div>
+
+<div class="groupe" id="groupe-systeme" role="tabpanel" aria-label="Système">
+<details class="menu" id="menu-programme">
+  <summary>Programme de la carte</summary>
+  <p class="aide" id="fwInfo">Version installée : inconnue.</p>
+  <input type="file" id="fichierFw" accept=".bin">
+  <button class="principal" onclick="envoyerFirmware()">Envoyer le programme</button>
+  <div class="msg" id="msgFw"></div>
+  <p class="aide repliable">Pour mettre la carte à jour sans câble : dans l'IDE Arduino, <b>Croquis → Exporter les binaires compilés</b>, puis choisis ici le fichier <code>cadre_eink.ino.bin</code> (dans le dossier <code>build</code> du croquis, pas le « merged »). La carte l'installe à son prochain réveil, si sa batterie est assez chargée, puis redémarre. Un programme plus ancien que celui de la carte est ignoré.</p>
+</details>
 
 <details class="menu" id="menu-jetons">
   <summary>Accès des jetons</summary>
@@ -279,6 +300,7 @@
   <button style="width:100%;margin-top:8px" onclick="restaurerReglages()">Restaurer</button>
   <div class="msg" id="msgSauvegarde"></div>
 </details>
+</div>
 
 <div id="detailModifs" class="cache"></div>
 <div id="barreModifs" class="barreModifs cache" role="status">

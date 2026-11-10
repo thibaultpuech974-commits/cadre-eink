@@ -1,16 +1,65 @@
-<!-- Page web du cadre : menu Photo plein écran (recadrage et tramage dans le navigateur) -->
+<!-- Page web du cadre : menu Photo plein écran (cadrage au doigt et tramage dans le navigateur) -->
 <script>
-// --- Photo : recadrage + tramage Floyd-Steinberg dans le navigateur ---
+// --- Photo : cadrage (glisser, pincer, zoom) + tramage dans le navigateur ---
 var bitsPhoto = null;
+// Cadrage : point de la photo place au centre du cadre (cx, cy entre 0 et 1) et agrandissement (1 a 4)
+var cadrage = { cx: 0.5, cy: 0.5, zoom: 1, w: 0, h: 0 };
 $('fichier').onchange = function () {
   var f = this.files[0]; if (!f) return;
   var img = new Image();
-  img.onload = function () { image = img; tramer(); };
+  img.onload = function () {
+    image = img; cadrage.cx = cadrage.cy = 0.5; cadrage.zoom = 1; $('zoomPhoto').value = '100';
+    $('photoTramee').classList.add('cadrable'); $('outilsCadrage').classList.remove('cache');
+    tramer();
+  };
   img.src = URL.createObjectURL(f);
 };
-$('lum').oninput = tramer; $('contraste').oninput = tramer;
+$('lum').oninput = tramer; $('contraste').oninput = tramer; $('tramage').onchange = tramer;
+$('zoomPhoto').oninput = function () { cadrage.zoom = +this.value / 100; tramer(); };
 var radios = document.getElementsByName('cadrage');
 for (var i = 0; i < radios.length; i++) radios[i].onchange = tramer;
+function recentrerPhoto() { cadrage.cx = cadrage.cy = 0.5; cadrage.zoom = 1; $('zoomPhoto').value = '100'; tramer(); }
+// Pendant un geste, une seule image calculee par rafraichissement de l'ecran
+var tramageDemande = false;
+function demanderTramage() {
+  if (tramageDemande) return;
+  tramageDemande = true;
+  requestAnimationFrame(function () { tramageDemande = false; tramer(); });
+}
+function zoomer(facteur) {
+  cadrage.zoom = Math.max(1, Math.min(4, cadrage.zoom * facteur));
+  $('zoomPhoto').value = String(Math.round(cadrage.zoom * 100));
+}
+// Gestes sur l'apercu : un doigt (ou la souris) deplace la photo, deux doigts l'agrandissent
+(function () {
+  var cv = $('photoTramee'), doigts = {};
+  var ecart = function () { var k = Object.keys(doigts); return Math.hypot(doigts[k[0]].x - doigts[k[1]].x, doigts[k[0]].y - doigts[k[1]].y); };
+  cv.addEventListener('pointerdown', function (e) {
+    if (!image) return;
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    doigts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    var d = doigts[e.pointerId];
+    if (!d || !image || !cadrage.w) return;
+    var n = Object.keys(doigts).length, avant = n === 2 ? ecart() : 0;
+    var echelle = cv.width / cv.getBoundingClientRect().width;      // points de l'image par point de l'ecran
+    var dx = (e.clientX - d.x) * echelle / n, dy = (e.clientY - d.y) * echelle / n;
+    d.x = e.clientX; d.y = e.clientY;
+    cadrage.cx -= dx / cadrage.w; cadrage.cy -= dy / cadrage.h;
+    if (n === 2 && avant > 10) zoomer(ecart() / avant);
+    demanderTramage();
+  });
+  var fin = function (e) { delete doigts[e.pointerId]; };
+  cv.addEventListener('pointerup', fin); cv.addEventListener('pointercancel', fin);
+  // Pincement sur un pave tactile (ou Ctrl + molette)
+  cv.addEventListener('wheel', function (e) {
+    if (!image || !e.ctrlKey) return;
+    e.preventDefault();
+    zoomer(Math.exp(-e.deltaY / 200)); demanderTramage();
+  }, { passive: false });
+})();
 
 function tramer() {
   if (!image) return;
@@ -23,9 +72,13 @@ function tramer() {
   var ctx = c.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, LARG, HAUT);
   var remplir = document.querySelector('input[name=cadrage]:checked').value === 'remplir';
-  var e = remplir ? Math.max(LARG / image.width, HAUT / image.height) : Math.min(LARG / image.width, HAUT / image.height);
+  var e = (remplir ? Math.max(LARG / image.width, HAUT / image.height) : Math.min(LARG / image.width, HAUT / image.height)) * cadrage.zoom;
   var w = image.width * e, h = image.height * e;
-  ctx.drawImage(image, (LARG - w) / 2, (HAUT - h) / 2, w, h);
+  // Le cadrage ne laisse jamais de vide la ou la photo peut couvrir le cadre ; plus petite que lui, elle reste centree
+  var borne = function (v, demi) { return demi >= 0.5 ? 0.5 : Math.max(demi, Math.min(1 - demi, v)); };
+  cadrage.cx = borne(cadrage.cx, LARG / 2 / w); cadrage.cy = borne(cadrage.cy, HAUT / 2 / h);
+  cadrage.w = w; cadrage.h = h;
+  ctx.drawImage(image, LARG / 2 - cadrage.cx * w, HAUT / 2 - cadrage.cy * h, w, h);
   var px = ctx.getImageData(0, 0, LARG, HAUT).data;
   var lum = +$('lum').value, k = +$('contraste').value / 100;
   var g = new Float32Array(LARG * HAUT);
@@ -33,10 +86,25 @@ function tramer() {
     var v = 0.299 * px[j * 4] + 0.587 * px[j * 4 + 1] + 0.114 * px[j * 4 + 2];
     g[j] = (v - 128) * k + 128 + lum;
   }
+  // Floyd-Steinberg repartit toute l'erreur sur 4 voisins (nuances fines) ; Atkinson n'en repartit que
+  // les trois quarts, sur 6 voisins : noirs et blancs plus francs, image plus contrastee
+  var atkinson = $('tramage').value === 'atkinson';
   bitsPhoto = new Uint8Array(Math.ceil(LARG * HAUT / 8));
   for (var y = 0; y < HAUT; y++) for (var x = 0; x < LARG; x++) {
     var n = y * LARG + x, ancien = g[n], nouveau = ancien < 128 ? 0 : 255, err = ancien - nouveau;
     if (nouveau === 0) bitsPhoto[n >> 3] |= 0x80 >> (n & 7);
+    if (atkinson) {
+      err /= 8;
+      if (x + 1 < LARG) g[n + 1] += err;
+      if (x + 2 < LARG) g[n + 2] += err;
+      if (y + 1 < HAUT) {
+        if (x > 0) g[n + LARG - 1] += err;
+        g[n + LARG] += err;
+        if (x + 1 < LARG) g[n + LARG + 1] += err;
+      }
+      if (y + 2 < HAUT) g[n + 2 * LARG] += err;
+      continue;
+    }
     if (x + 1 < LARG) g[n + 1] += err * 7 / 16;
     if (y + 1 < HAUT) {
       if (x > 0) g[n + LARG - 1] += err * 3 / 16;

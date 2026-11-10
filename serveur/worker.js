@@ -37,10 +37,11 @@ import { PAGE } from './page.js';
 // Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
 import APERCU_WASM from './apercu.wasm';
 import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.js';
-import { JOURS_COURTS, MOIS, dateDuJour, deux, mural } from './temps.js';
+import { JOURS_COURTS, MOIS, TZ, dateDuJour, deux, mural, versUTC } from './temps.js';
 import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
 import { ROTATIONS } from './disposition.js';
-import { reveilNuit } from './scenes.js';
+import { friseScenes, reveilNuit } from './scenes.js';
+import { grandPrix } from './f1.js';
 import { GTFS_TANGO, enregistrerIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
 import { construireTableau } from './tableau.js';
@@ -92,6 +93,7 @@ export default {
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
       if (chemin === '/api/agenda-etat' && m === 'POST') return await routeEtatAgenda(req, env);
       if (chemin === '/api/previsualiser' && m === 'POST') return await routePrevisualiser(req, env);
+      if (chemin === '/api/frise' && m === 'POST') return await routeFrise(req, env);
       if (chemin === '/api/apercu.wasm' && m === 'GET') return new Response(APERCU_WASM, { headers: { 'content-type': 'application/wasm', 'cache-control': 'private, max-age=3600' } });
       if (chemin === '/api/batterie' && m === 'GET') return texte((await env.CADRE.get('batterie' + (url.searchParams.get('ecran') === '1' ? '1' : ''))) || '{"pts":[]}');
       if (chemin === '/api/sauvegarde' && m === 'GET') return await routeSauvegarde(env);
@@ -216,6 +218,10 @@ async function routeEtat(url, env) {
     const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null, hb: (ancien && ancien.hb) || 0 };
+    // Version des reglages que la carte vient de recevoir, et depuis quand : la page affiche "en attente"
+    // tant que la carte n'a pas vu les derniers reglages, puis "appliques a 14:12"
+    nouveau.cv = cfg.version;
+    nouveau.cvt = ancien && ancien.cv === cfg.version && ancien.cvt ? ancien.cvt : maintenant;
     if (pct !== null) nouveau.pct = pct;
     if (crate !== null) nouveau.crate = crate;
     if (ev !== null) { nouveau.ev = ev; nouveau.ee = ee || 0; }
@@ -245,7 +251,7 @@ async function routeEtat(url, env) {
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
-      ancien.fwko !== nouveau.fwko ||
+      ancien.fwko !== nouveau.fwko || ancien.cv !== nouveau.cv ||
       // carte redemarree (bouton RESET, nouveau programme...) : son compteur d'eveil repart de zero
       (ev !== null && typeof ancien.ev === 'number' && ev < ancien.ev) || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
       // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
@@ -269,8 +275,11 @@ async function routeEcrireConfig(req, env) {
   const rapport = {};
   const ignorees = preparerModif(modif, cfg, rapport);
   if (typeof ignorees === 'string') return texte(ignorees, 400);
+  // Le contour de l'apercu ne concerne que la page web : la carte n'a rien a appliquer
+  const cles = Object.keys(modif);
+  const pourLaPage = cles.length === 1 && cles[0] === 'affichage' && Object.keys(modif.affichage).join() === 'bordureApercu';
   fusionner(cfg, modif);
-  cfg.version++;
+  if (!pourLaPage) cfg.version++;
   await ecrireConfig(env, cfg);
   return json({ config: cfg, ignorees, ignoreesRebours: rapport.rebours || [] });
 }
@@ -326,6 +335,34 @@ async function routePrevisualiser(req, env) {
     ecrans.push(e);
   }
   return json({ scene: contenu.scene.nom, ecrans });
+}
+// --- Frise des scenes : quelle scene s'affichera a chaque heure des 7 prochains jours, avec les scenes
+// des formulaires (meme pas encore enregistrees). Rien n'est enregistre.
+async function routeFrise(req, env) {
+  let demande;
+  try { demande = await req.json(); } catch (e) { return texte('Demande illisible', 400); }
+  const cfg = await lireConfig(env);
+  const modif = { scenes: (demande.modif || {}).scenes, ecrans: (demande.modif || {}).ecrans };
+  if (modif.scenes === undefined) delete modif.scenes;
+  if (modif.ecrans === undefined) delete modif.ecrans;
+  const err = preparerModif(modif, cfg);
+  if (typeof err === 'string') return texte(err, 400);
+  fusionner(cfg, modif);
+  const scenes = cfg.scenes || [];
+  const maintenant = Date.now(), w = mural(maintenant);
+  const jours = [];
+  for (let k = 0; k < 7; k++) {
+    const t0 = versUTC({ y: w.y, m: w.m, d: w.d + k }, TZ), t1 = versUTC({ y: w.y, m: w.m, d: w.d + k + 1 }, TZ);
+    jours.push({ t0, t1, nom: JOURS_COURTS[(w.js + k) % 7].toLowerCase() + '. ' + mural(t0 + 12 * 3600e3).d });
+  }
+  // Periodes du prochain Grand Prix, pour les scenes "semaine / week-end de GP" (lecture seule du KV)
+  let gp = null;
+  if (scenes.some(sc => sc.f1)) {
+    const kv = env.CADRE;
+    const lecture = { get: (...a) => kv.get(...a), getWithMetadata: (...a) => kv.getWithMetadata(...a), put: async () => {}, delete: async () => {} };
+    try { gp = await grandPrix(maintenant, Object.assign({}, env, { CADRE: lecture })); } catch (e) { console.log('Frise, F1 :', e.message); }
+  }
+  return json({ maintenant, jours, noms: scenes.map(sc => sc.nom), segments: friseScenes(scenes, jours[0].t0, jours[6].t1, gp) });
 }
 // --- Sauvegarde des reglages (fichier telecharge depuis la page web) et restauration ---
 async function routeSauvegarde(env) {
