@@ -1,7 +1,7 @@
 // Réglages : valeurs par défaut, lecture/écriture dans le KV, migration des anciens réglages, vérification d'une modification
 import { MODES, fusionner } from './commun.js';
 import { ROTATIONS, grille, validerDisposition } from './disposition.js';
-import { validerScenes } from './scenes.js';
+import { validerCreneaux, validerScenes } from './scenes.js';
 
 export const CONFIG_DEFAUT = {
   mode: 'tableau',
@@ -10,6 +10,10 @@ export const CONFIG_DEFAUT = {
   dev: false, devSecondes: 30,     // mode developpement : la carte ne dort pas
   // Mode nuit : reveils espaces (economie de batterie), la plage peut passer minuit
   nuit: { actif: false, debut: '23:00', fin: '07:00', intervalleMin: 60 },
+  // Heures creuses : plages (jours + heures) ou personne ne regarde le cadre ; reveils espaces, comme la nuit
+  creuses: { actif: false, creneaux: [], intervalleMin: 60 },
+  // Alertes sur l'iPhone (notifications ntfy, voir alertes.js) : sujet = nom du canal, long et au hasard
+  alertes: { actif: false, sujet: '', muet: true, batterie: true, bus: true, seuilBatterie: 20 },
   // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
   // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
   // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double (deux passes, pixels plus
@@ -115,6 +119,20 @@ export function preparerModif(modif, cfg, rapport = {}) {
       maxPartiels: [0, 3, 6, 12].includes(+r.maxPartiels) ? +r.maxPartiels : (actuel.maxPartiels || 0),
     };
   }
+  if (modif.creuses !== undefined) {
+    const c = modif.creuses || {}, actuel = cfg.creuses || CONFIG_DEFAUT.creuses;
+    modif.creuses = { actif: !!c.actif, creneaux: validerCreneaux(c.creneaux === undefined ? actuel.creneaux : c.creneaux),
+      intervalleMin: [30, 60, 120, 240].includes(+c.intervalleMin) ? +c.intervalleMin : (actuel.intervalleMin || 60) };
+  }
+  if (modif.alertes !== undefined) {
+    const a = modif.alertes || {}, actuel = cfg.alertes || CONFIG_DEFAUT.alertes;
+    const val = (k, defaut) => (a[k] === undefined ? defaut : a[k]);
+    const sujet = String(val('sujet', actuel.sujet) || '').trim();
+    const actif = !!val('actif', actuel.actif);
+    if (sujet ? !SUJET_ALERTES.test(sujet) : actif) return 'Alertes : le sujet ntfy doit faire 10 à 64 caractères (lettres sans accent, chiffres, - ou _)';
+    modif.alertes = { actif, sujet, muet: !!val('muet', actuel.muet), batterie: !!val('batterie', actuel.batterie), bus: !!val('bus', actuel.bus),
+      seuilBatterie: [10, 20, 30].includes(+a.seuilBatterie) ? +a.seuilBatterie : (actuel.seuilBatterie || 20) };
+  }
   if (modif.agenda && Array.isArray(modif.agenda.urls)) {
     modif.agenda.urls = modif.agenda.urls.map(u => String(u).trim()).filter(Boolean);
   }
@@ -153,5 +171,7 @@ function lireAnniversaires(texte) {
   }
   return { liste, ignorees };
 }
+// Sujet ntfy des alertes : il tient lieu de mot de passe, d'ou la longueur minimale (meme regle dans alertes.js)
+const SUJET_ALERTES = /^[A-Za-z0-9_-]{10,64}$/;
 // Methodes de mise a jour partielle et lettre du plan correspondant (la carte fait le reste)
 export const METHODES_PARTIEL = { simple: 'P', double: 'D', inversion: 'I' };

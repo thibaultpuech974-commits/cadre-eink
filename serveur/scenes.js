@@ -37,7 +37,7 @@ function dansNuit(n, maintenant) {
   const depuis = (min - d + 1440) % 1440, duree = (f - d + 1440) % 1440;
   return depuis < duree ? depuis : -1;
 }
-// Intervalle de reveil (s) : la nuit, reveil espace, et cale sur la fin de la nuit
+// Intervalle de reveil (s) : la nuit et pendant les heures creuses, reveil espace, et cale sur la fin de la periode
 export function reveilNuit(cfg, maintenant, normal) {
   const n = cfg.nuit, depuis = dansNuit(n, maintenant);
   if (depuis >= 0) {
@@ -45,6 +45,18 @@ export function reveilNuit(cfg, maintenant, normal) {
     const resteS = ((enMinutes(n.fin) - (w.hh * 60 + w.mi) + 1440) % 1440) * 60 - w.ss;
     const inter = Math.max(15, Math.min(240, n.intervalleMin || 60)) * 60;
     return Math.max(60, Math.min(inter, resteS + 5));
+  }
+  // Heures creuses : meme principe, sur des plages jours + heures (elles ne passent pas minuit) ;
+  // jamais plus souvent que le rythme normal
+  const c = cfg.creuses;
+  if (c && c.actif) {
+    const w = mural(maintenant), jour = (w.js + 6) % 7, min = w.hh * 60 + w.mi;
+    const plage = (c.creneaux || []).find(x => (x.jours || [])[jour] && min >= enMinutes(x.debut) && min < enMinutes(x.fin));
+    if (plage) {
+      const resteS = (enMinutes(plage.fin) - min) * 60 - w.ss;
+      const inter = Math.max(normal, Math.max(15, Math.min(240, c.intervalleMin || 60)) * 60);
+      return Math.max(60, Math.min(inter, resteS + 5));
+    }
   }
   return normal;
 }
@@ -56,7 +68,7 @@ export function texteCreneaux(o) {
 // --- Scenes ---
 const heureOK = h => (/^\d{1,2}:\d{2}$/.test(String(h)) ? String(h) : null);
 const dateOK = d => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d) : '');
-function validerCreneaux(liste) {
+export function validerCreneaux(liste) {
   return (Array.isArray(liste) ? liste : []).map(c => ({
     jours: [0, 1, 2, 3, 4, 5, 6].map(i => (c && c.jours || [])[i] ? 1 : 0),
     debut: heureOK(c && c.debut) || '07:00', fin: heureOK(c && c.fin) || '08:00',

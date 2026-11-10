@@ -93,9 +93,14 @@ function ajouterCreneau(c, conteneur) {
   heures.innerHTML = '<label>de <input type="time" class="cDebut" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><label>à <input type="time" class="cFin" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><button style="flex:0;padding:8px 12px" title="Supprimer ce créneau" aria-label="Supprimer ce créneau">✕</button>';
   heures.querySelector('.cDebut').value = heure2(c.debut);
   heures.querySelector('.cFin').value = heure2(c.fin);
-  heures.querySelector('button').onclick = function () { bloc.remove(); };
+  heures.querySelector('button').onclick = function () { bloc.remove(); $(conteneur).dispatchEvent(new Event('change', { bubbles: true })); };
   bloc.appendChild(jours); bloc.appendChild(heures);
   $(conteneur).appendChild(bloc);
+}
+// Bouton "+ Ajouter" : nouveau creneau (defaut : lun-ven 7 h-8 h), signale comme une modification
+function nouveauCreneau(conteneur, defaut) {
+  ajouterCreneau(defaut || null, conteneur);
+  $(conteneur).dispatchEvent(new Event('change', { bubbles: true }));
 }
 function lireCreneaux(conteneur) {
   var res = [], blocs = $(conteneur).querySelectorAll('.creneau');

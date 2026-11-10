@@ -24,6 +24,32 @@ async function lireIndexBus(env) {
   return indexBusCache;
 }
 export function oublierIndexBus() { indexBusCache = null; }
+// Dernier jour couvert par les horaires charges ("AAAAMMJJ"), '' s'il n'y en a pas
+export function finIndexBus(idx) {
+  let fin = '';
+  for (const s of (idx && idx.services) || []) {
+    if (!s) continue;
+    if (s.f && s.f > fin && /1/.test(s.j || '')) fin = s.f;
+    for (const d of s.plus || []) if (d > fin) fin = d;
+  }
+  return fin;
+}
+// Enregistre l'index des passages (prepare par la page web), et a part son dernier jour de validite :
+// les alertes le relisent chaque heure sans avoir a relire tout l'index
+export async function enregistrerIndexBus(env, texte, idx) {
+  await env.CADRE.put('bus', texte);
+  await env.CADRE.put('bus-fin', finIndexBus(idx));
+  oublierIndexBus();
+}
+export async function finValiditeBus(env) {
+  let fin = await env.CADRE.get('bus-fin');
+  if (fin === null) {              // index enregistre avant cette version : calcule une fois, puis retenu
+    const brut = await env.CADRE.get('bus');
+    fin = brut ? finIndexBus(JSON.parse(brut)) : '';
+    if (brut) { try { await env.CADRE.put('bus-fin', fin); } catch (e) { /* limite d'ecriture */ } }
+  }
+  return fin;
+}
 // --- Lecture minimale du format protobuf GTFS-RT (TripUpdate seulement) ---
 function lireProtobuf(octets) {
   let p = 0, bas32 = 0;

@@ -9,6 +9,7 @@ function charger() {
     afficherStatut(d.statut, d.maintenant, d.statut1);
     if ($('menu-batterie').open) chargerBatterie();     // menu reste ouvert depuis la derniere visite
     if ($('menu-jetons').open) chargerJetons();
+    if ($('menu-alertes').open) chargerEtatAlertes();
     if ($('menu-agenda').open) verifierCalendriers();
     chargerApercu();
   });
@@ -20,6 +21,11 @@ function remplirFormulaires() {
   var n = config.nuit || {};
   $('nuitActif').checked = !!n.actif; $('nuitDebut').value = heure2(n.debut) || '23:00'; $('nuitFin').value = heure2(n.fin) || '07:00';
   choisirValeur($('nuitIntervalle'), n.intervalleMin || 60);
+  var hc = config.creuses || {};
+  $('creusesActif').checked = !!hc.actif; choisirValeur($('creusesIntervalle'), hc.intervalleMin || 60);
+  $('creusesCreneaux').innerHTML = '';
+  (hc.creneaux || []).forEach(function (c) { ajouterCreneau(c, 'creusesCreneaux'); });
+  remplirAlertes();
   var rf = config.rafraich || {};
   $('partiel').checked = rf.partiel !== false;
   choisirValeur($('completH'), rf.completH || 24); choisirValeur($('seuilPartiel'), rf.seuil || 40);
@@ -75,6 +81,8 @@ function modificationsCourantes() {
     reveilMin: +$('reveil').value, dev: $('dev').checked, devSecondes: +$('devSecondes').value,
     nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
       intervalleMin: +$('nuitIntervalle').value },
+    creuses: { actif: $('creusesActif').checked, creneaux: lireCreneaux('creusesCreneaux'), intervalleMin: +$('creusesIntervalle').value },
+    alertes: lireAlertes(),
     rafraich: { partiel: $('partiel').checked, completH: +$('completH').value, seuil: +$('seuilPartiel').value,
       methode: $('methodePartiel').value, maxPartiels: +$('maxPartiels').value } };
 }
@@ -106,7 +114,7 @@ function prendreReference() { reference = JSON.stringify(modificationsCourantes(
 function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
 // Menus dont les reglages different de ceux enregistres
 var PARTIES = [['Scènes', ['disposition', 'dispositionPortrait', 'scenes']], ['Montage', ['ecrans', 'affichage']],
-  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Compte à rebours', ['rebours']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'rafraich']]];
+  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Compte à rebours', ['rebours']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'creuses', 'rafraich']], ['Alertes', ['alertes']]];
 function partiesModifiees() {
   var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes()));
   return PARTIES.filter(function (p) { return p[1].some(function (k) { return JSON.stringify(r[k]) !== JSON.stringify(c[k]); }); })
@@ -129,6 +137,7 @@ function remplirSansSignaler() { enChargement = true; try { remplirFormulaires()
 function toutEnregistrer() {
   var modif = modificationsCourantes();
   var avant = modif.scenes.map(function (sc) { return (sc.creneaux || []).length; });
+  var plagesAvant = modif.creuses.creneaux.length;
   var devAvant = !!config.dev;
   $('texteModifs').textContent = 'Enregistrement…';
   api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
@@ -142,6 +151,8 @@ function toutEnregistrer() {
       if (d.ignoreesRebours && d.ignoreesRebours.length) $('msgRebours').textContent = 'Lignes non comprises : ' + d.ignoreesRebours.join(' ; ') + ' (format attendu : Vacances 19/12/2026)';
       if ((config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; }))
         $('msgDispo').textContent = 'Un créneau a été ignoré : coche au moins un jour et mets une fin après le début.';
+      if ((config.creuses.creneaux || []).length < plagesAvant) $('msgReveil').textContent = 'Une plage d\'heures creuses a été ignorée : coche au moins un jour et mets une fin après le début.';
+      if ($('menu-alertes').open) chargerEtatAlertes();
       if (config.dev && !devAvant) $('msgReveil').textContent = "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).";
       var b = $('barreModifs');
       b.classList.add('fait'); b.classList.remove('cache');

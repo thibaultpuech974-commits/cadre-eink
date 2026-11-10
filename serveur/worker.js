@@ -28,6 +28,7 @@
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
 //   acces.js             droits des jetons de service Cloudflare Access (carte, raccourci)
+//   alertes.js           alertes sur l'iPhone (cadre muet, batterie faible, horaires de bus perimes)
 //   page.js              page web de reglage, assemblee a partir des fichiers du dossier page/
 // =====================================================================
 
@@ -40,11 +41,12 @@ import { JOURS_COURTS, MOIS, dateDuJour, deux, mural } from './temps.js';
 import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
 import { ROTATIONS } from './disposition.js';
 import { reveilNuit } from './scenes.js';
-import { GTFS_TANGO, oublierIndexBus, prochainsBus } from './bus.js';
+import { GTFS_TANGO, enregistrerIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
 import { construireTableau } from './tableau.js';
 import { empreinteImage, encoderPlan, planRafraichissement, resumePlan } from './rafraichissement.js';
 import { controlerAcces, routeEcrireJetons, routeLireJetons } from './acces.js';
+import { routeEssaiAlerte, routeEtatAlertes, verifierAlertes } from './alertes.js';
 
 // ---------------------------------------------------------------------
 //  Point d'entree
@@ -82,6 +84,8 @@ export default {
         if (m === 'GET') return await routeLireJetons(env);
         if (m === 'POST') return await routeEcrireJetons(req, env);
       }
+      if (chemin === '/api/alertes' && m === 'GET') return await routeEtatAlertes(env);
+      if (chemin === '/api/alertes/essai' && m === 'POST') return await routeEssaiAlerte(req, env);
       if (chemin === '/api/session' && m === 'GET') return await routeSession(access);
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
@@ -110,6 +114,12 @@ export default {
       console.error('Erreur', req.method, chemin, ':', e && e.stack ? e.stack : e);
       return texte('Erreur : ' + (e && e.message ? e.message : e), 500);
     }
+  },
+  // Declencheur planifie (une fois par heure, "triggers" de wrangler.jsonc) : alertes sur l'iPhone
+  async scheduled(evenement, env, ctx) {
+    const travail = verifierAlertes(env).catch(e => console.error('Alertes :', e && e.message ? e.message : e));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(travail);
+    return travail;
   },
 };
 // Comment la page web est connectee : par Cloudflare Access (avec l'adresse email) ou par mot de passe
@@ -345,7 +355,7 @@ async function routeRestaurer(req, env) {
   for (const k of ['photo', 'pochette', 'firmware']) if (actuel[k]) cfg[k] = actuel[k];
   cfg.version = actuel.version + 1;
   await ecrireConfig(env, cfg);
-  if (s.bus && Array.isArray(s.bus.passages)) { await env.CADRE.put('bus', JSON.stringify(s.bus)); oublierIndexBus(); }
+  if (s.bus && Array.isArray(s.bus.passages)) await enregistrerIndexBus(env, JSON.stringify(s.bus), s.bus);
   return json({ config: cfg });
 }
 async function routeEnvoyerPhoto(req, url, env) {
@@ -394,8 +404,7 @@ async function routeIndexBus(req, env) {
   if (t.length > 3000000) return texte('Index trop gros : choisis moins d\'arrets', 400);
   const idx = JSON.parse(t);
   if (!Array.isArray(idx.passages)) return texte('Index invalide', 400);
-  await env.CADRE.put('bus', t);
-  oublierIndexBus();
+  await enregistrerIndexBus(env, t, idx);
   return json({ ok: true, passages: idx.passages.length });
 }
 async function routeBinaire(env, cle, type) {
