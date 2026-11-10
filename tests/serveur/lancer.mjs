@@ -48,6 +48,7 @@ const ATTENDU = {
     /inversion +: I \| zones 96,200 64x40 \| 330 octets \| écran juste : true/, /méthode double +: N /,
     /double +: D \| zones 160,300 16x2 \| 14 octets \| écran juste : true/, /après 3 partielles +: C /,
     /ancienne carte : ok/, /en-tête x-plan : P;1;1/,
+    /après une image non envoyée +: P \| zones 240,400 16x2 \| 14 octets \| écran juste : true/, /méthode changée, après saut +: N /,
     /réglages invalides ignorés : \{"partiel":true,"completH":24,"seuil":40,"methode":"simple","maxPartiels":0\}/,
     /réglages : \{"partiel":true,"completH":12,"seuil":60,"methode":"simple","maxPartiels":0\} \| cp envoyé à la carte : 43200/],
   'jetons.mjs': [/personne : config 200 \| jetons 200/, /carte : état 200 \| aperçu 200 \| programme 404/,

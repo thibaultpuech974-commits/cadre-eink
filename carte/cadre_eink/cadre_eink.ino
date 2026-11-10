@@ -3,8 +3,9 @@
 //
 //  A chaque reveil :
 //   1. connexion Wi-Fi, puis demande au serveur ce qu'il faut afficher
-//   2. si quelque chose a change : dessin, affichage sur l'ecran,
-//      envoi d'une copie de l'image au serveur (apercu web)
+//   2. si quelque chose a change : dessin, envoi d'une copie de l'image au serveur (apercu web),
+//      qui repond comment rafraichir l'ecran, puis affichage. Tout passe par une seule connexion
+//      securisee, et une image identique a celle de l'ecran n'est ni envoyee ni reaffichee
 //   3. veille profonde jusqu'au prochain reveil
 //
 //  Ce fichier : reglages, Wi-Fi, ecran, veille. Dans le meme dossier (autres onglets de l'IDE) :
@@ -94,6 +95,7 @@ RTC_DATA_ATTR uint32_t reveilSecondes = 600;
 RTC_DATA_ATTR bool     alerteBatterieAffichee = false;
 // Rafraichissement commande par le serveur et temps d'eveil (envoyes au serveur a chaque reveil)
 RTC_DATA_ATTR uint32_t empreinteAffichee = 0;       // image vraiment a l'ecran (0 = inconnue)
+RTC_DATA_ATTR uint32_t empreinteEnvoyee = 0;        // derniere image recue par le serveur (apercu de la page web)
 RTC_DATA_ATTR uint32_t secondesDepuisComplet = 0;   // depuis le dernier rafraichissement complet
 RTC_DATA_ATTR uint32_t partielsDepuisComplet = 0;   // mises a jour partielles depuis le dernier complet
 RTC_DATA_ATTR uint32_t eveilTotalMs = 0;            // temps passe hors veille, cumule
@@ -230,6 +232,23 @@ void securiser(WiFiClientSecure& client) {
 #endif
 }
 
+// ---------------------------------------------------------------------
+//  Une seule connexion securisee par reveil
+//
+//  Ouvrir une connexion securisee (TLS) coute environ une seconde d'eveil. Un reveil ou l'image change
+//  fait deux ou trois requetes (etat, photo, envoi de l'apercu) : elles passent toutes par la meme
+//  connexion, ouverte a la premiere et fermee apres la derniere (ou avant un travail gourmand en
+//  memoire : decodage d'une pochette, mise a jour du programme, rafraichissement de l'ecran).
+//  Ces deux objets vivent donc tout le long du programme, et non le temps d'une requete.
+// ---------------------------------------------------------------------
+WiFiClientSecure clientServeur;
+HTTPClient httpServeur;
+
+void fermerConnexion() {
+  httpServeur.end();
+  clientServeur.stop();
+}
+
 // Identifie la carte aupres du serveur : jeton de service Cloudflare Access s'il est rempli,
 // et mot de passe CLE (utilise seulement si Access n'est pas active).
 // (static : les tests sur ordinateur, sans HTTPClient, ne generent pas son prototype)
@@ -319,6 +338,7 @@ void mettreAJourProgramme(const char* version) {
     return;
   }
   Serial.printf("Mise a jour du programme : %s -> %s\n", versionCarte, version);
+  fermerConnexion();             // la mise a jour ouvre sa propre connexion : on lui laisse la memoire
   WiFiClientSecure client;
   securiser(client);
   client.setTimeout(30);
@@ -342,8 +362,6 @@ void mettreAJourProgramme(const char* version) {
   echecsMaj++;
 }
 
-// Telecharge une ressource du serveur. Renvoie la taille lue (0 si erreur).
-// Si 'dest' est fourni, on y ecrit au plus 'max' octets ; sinon on alloue en PSRAM.
 // Lit le corps d'une reponse (sa taille doit etre annoncee). Renvoie la taille lue (0 si erreur).
 // Si 'dest' est fourni, on y ecrit au plus 'max' octets ; sinon on alloue en PSRAM.
 static int lireCorps(HTTPClient& http, uint8_t** dest, int max) {
@@ -362,24 +380,45 @@ static int lireCorps(HTTPClient& http, uint8_t** dest, int max) {
   return lu == taille ? taille : 0;
 }
 
+// Telecharge une ressource du serveur. Renvoie la taille lue (0 si erreur).
+// Si 'dest' est fourni, on y ecrit au plus 'max' octets ; sinon on alloue en PSRAM.
 // Cause du dernier echec de telecharger() : 'S' serveur injoignable ou en erreur, 'A' acces refuse,
 // 'C' certificat du serveur refuse
 char causeEchec = 'S';
 
+// Envoie une requete au serveur par la connexion du reveil : GET, ou POST si 'corps' est fourni.
+// Renvoie le code HTTP (negatif : pas de reponse ; 0 : adresse du serveur invalide).
+// Si la connexion gardee ne repond plus (coupee entre deux requetes), un second essai en ouvre une neuve.
+static int requete(const String& chemin, uint8_t* corps, size_t taille) {
+  int code = 0;
+  for (int essai = 0; essai < 2; essai++) {
+    bool gardee = clientServeur.connected();
+    if (!gardee) securiser(clientServeur);
+    httpServeur.setReuse(true);
+    if (!httpServeur.begin(clientServeur, String(SERVEUR) + chemin)) return 0;
+    identifier(&httpServeur);
+    httpServeur.setTimeout(20000);
+    if (corps) {
+      httpServeur.addHeader("Content-Type", "application/octet-stream");
+      code = httpServeur.POST(corps, taille);
+    } else {
+      code = httpServeur.GET();
+    }
+    if (code > 0 || !gardee) break;
+    Serial.printf("Connexion gardee perdue (%s) : nouvel essai sur une connexion neuve\n", httpServeur.errorToString(code).c_str());
+    fermerConnexion();
+  }
+  return code;
+}
+
 int telecharger(const String& chemin, uint8_t** dest, int max) {
-  WiFiClientSecure client;
-  securiser(client);
-  HTTPClient http;
   causeEchec = 'S';
-  if (!http.begin(client, String(SERVEUR) + chemin)) return 0;
-  identifier(&http);
-  http.setTimeout(20000);
-  int code = http.GET();
+  int code = requete(chemin, nullptr, 0);
   if (code != 200) {
     Serial.printf("GET %s : HTTP %d\n", chemin.c_str(), code);
     if (code == 401 || code == 403) causeEchec = 'A';
     if (code < 0) {   // pas de reponse du serveur : on detaille la cause
-      Serial.printf("  erreur : %s\n", http.errorToString(code).c_str());
+      Serial.printf("  erreur : %s\n", httpServeur.errorToString(code).c_str());
       Serial.printf("  Wi-Fi : IP %s, passerelle %s, DNS %s, signal %d dBm\n",
                     WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
                     WiFi.dnsIP().toString().c_str(), WiFi.RSSI());
@@ -391,15 +430,16 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
       if (WiFi.hostByName(hote.c_str(), ip)) Serial.printf("  %s -> %s\n", hote.c_str(), ip.toString().c_str());
       else Serial.printf("  %s : nom introuvable (DNS)\n", hote.c_str());
       char e[120] = "";
-      int n = client.lastError(e, sizeof e);
+      int n = clientServeur.lastError(e, sizeof e);
       Serial.printf("  connexion securisee : %d %s\n", n, e);
       if (strstr(e, "X509") || strstr(e, "erif")) causeEchec = 'C';
     }
-    http.end();
+    fermerConnexion();              // reponse d'erreur non lue : on ne reutilise pas cette connexion
     return 0;
   }
-  int lu = lireCorps(http, dest, max);
-  http.end();
+  int lu = lireCorps(httpServeur, dest, max);
+  httpServeur.end();                // reponse lue en entier : la connexion reste ouverte pour la suite
+  if (!lu) fermerConnexion();       // reponse incomplete : la suivante ne serait plus lisible
   return lu;
 }
 
@@ -407,26 +447,21 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
 // 'R' rien (image identique), 'P', 'D' ou 'I' partiel (zones dans *plan, voir afficherZones),
 // 'C' complet, 'N' complet avec nettoyage.
 // Sans reponse lisible (serveur ancien, erreur) : 'C', sans risque.
+// C'est la derniere requete d'un reveil : la connexion est fermee ensuite.
 static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   *plan = nullptr;
   *taillePlan = 0;
   char chemin[160];
   snprintf(chemin, sizeof chemin, "/api/apercu?r=%d&plan=1&crc=%08lx&dc=%lu&pr=%lu&np=%lu", rotation, (unsigned long)empreinteAffichee,
            (unsigned long)secondesDepuisComplet, (unsigned long)reveilSecondes, (unsigned long)partielsDepuisComplet);
-  WiFiClientSecure client;
-  securiser(client);
-  HTTPClient http;
-  if (!http.begin(client, String(SERVEUR) + chemin)) return 'C';
-  identifier(&http);
-  http.setTimeout(20000);
-  http.addHeader("Content-Type", "application/octet-stream");
-  int code = http.POST(canvas.getBuffer(), OCTETS);
+  int code = requete(chemin, canvas.getBuffer(), OCTETS);
   char type = 'C';
   if (code == 200) {
-    int t = lireCorps(http, plan, 60000);
+    int t = lireCorps(httpServeur, plan, 60000);
     if (t >= 1 && (*plan)[0] && strchr("RPDICN", (*plan)[0])) { type = (char)(*plan)[0]; *taillePlan = t; }
+    empreinteEnvoyee = empreinteImage(canvas.getBuffer(), OCTETS);   // le serveur a cette image
   }
-  http.end();
+  fermerConnexion();
   if (!strchr("PDI", type)) { free(*plan); *plan = nullptr; *taillePlan = 0; }
   Serial.printf("Apercu envoye : HTTP %d, plan %c (%d octets)\n", code, type, *taillePlan);
   return type;
@@ -518,6 +553,7 @@ unsigned long dernierAffichageMs = 0;  // pour respecter 3 min entre deux rafrai
 bool ecranEnAttente = false;
 
 void dormir(uint32_t secondes) {
+  fermerConnexion();
   if (WiFi.getMode() != WIFI_OFF) { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
   Serial.printf("Veille profonde pendant %u s\n", secondes);
   Serial.flush();
@@ -530,6 +566,7 @@ void dormir(uint32_t secondes) {
 // L'ecran demande au moins 3 minutes entre deux rafraichissements : en mode developpement, l'apercu web
 // est a jour tout de suite, mais l'ecran attend si besoin le cycle suivant (rafraichissement complet alors).
 void mettreEcranAJour(char type, const uint8_t* plan, int taille) {
+  fermerConnexion();                            // plus de requete avant la veille : memoire rendue a l'ecran
   if (empreinteAffichee == 0) type = 'N';       // image a l'ecran inconnue (demarrage) : nettoyage
   if (type == 'R') { ecranEnAttente = false; Serial.println("Ecran : image identique, rien a rafraichir"); return; }
   bool demandePartiel = strchr("PDI", type) != nullptr;
@@ -608,6 +645,7 @@ uint32_t echecContact(char cause) {
                          cause == 'C' ? "Certificat du serveur refusé" : cause == 'R' ? "Réponse du serveur illisible" :
                          "Serveur injoignable";
     Serial.printf("Hors ligne depuis %u min : %s\n", secondesSansContact / 60, raison);
+    fermerConnexion();
     canvas.setRotation(rotationEcran);
     dessinerHorsLigne(raison, dernieresNouvelles);
     afficherComplet(false);
@@ -713,6 +751,7 @@ uint32_t cycle() {
   } else if (strcmp(mode, "pochette") == 0) {
     uint8_t* jpg = nullptr;
     int t = telecharger("/api/pochette.jpg", &jpg, 3000000);
+    fermerConnexion();           // le decodage de la pochette a besoin de la memoire de la connexion
     ok = t && dessinerPochette(jpg, t, etat["titre"] | "", etat["artiste"] | "", etat["album"] | "");
     free(jpg);
   } else if (strcmp(mode, "blanc") == 0) {
@@ -722,7 +761,19 @@ uint32_t cycle() {
   }
   if (!ok) { Serial.println("Echec du telechargement / decodage"); return reveilSecondes; }
 
-  // 4. Apercu web, plan du serveur, puis ecran
+  // 4. Image identique a celle de l'ecran, que le serveur a deja : seule une donnee invisible a change
+  //    (le vent quand le bloc meteo est etroit, un evenement au-dela des lignes affichees...).
+  //    Ni envoi (81 600 octets), ni rafraichissement. Sauf si le rafraichissement complet du jour est du :
+  //    c'est le serveur qui le commande.
+  uint32_t empreinte = empreinteImage(canvas.getBuffer(), OCTETS);
+  if (empreinte == empreinteAffichee && empreinte == empreinteEnvoyee && !rafraichirQuandMeme) {
+    Serial.println("Image identique a celle de l'ecran : pas d'envoi");
+    strncpy(derniereSig, sig, sizeof derniereSig - 1);
+    ecranEnAttente = false;
+    return reveilSecondes;
+  }
+
+  // 5. Apercu web, plan du serveur, puis ecran
   uint8_t* plan = nullptr;
   int taillePlan = 0;
   char type = envoyerApercu(rotation, &plan, &taillePlan);
@@ -750,7 +801,7 @@ void setup() {
   // Valeurs gardees pendant la veille : remises a zero si elles viennent d'un autre programme (apres une
   // mise a jour, leur place en memoire a pu changer). L'ecran sera alors nettoye au prochain affichage.
   if (strncmp(versionRtc, versionCarte, sizeof versionRtc) != 0) {
-    empreinteAffichee = 0; secondesDepuisComplet = 0; partielsDepuisComplet = 0; eveilTotalMs = 0; ecranTotalMs = 0;
+    empreinteAffichee = 0; empreinteEnvoyee = 0; secondesDepuisComplet = 0; partielsDepuisComplet = 0; eveilTotalMs = 0; ecranTotalMs = 0;
     secondesSansContact = 0; echecsDAffilee = 0; horsLigneAffiche = false; dernieresNouvelles[0] = 0;
     rotationEcran = 0; dernierMode = 0;
     strncpy(versionRtc, versionCarte, sizeof versionRtc - 1);
@@ -786,6 +837,7 @@ void setup() {
   while (true) {
     armerGardeFou();
     uint32_t s = cycle();
+    fermerConnexion();                   // (deja fermee, sauf si le cycle s'est arrete en route)
     desarmerGardeFou();
     gf.dAffilee = 0;                     // cycle termine sans plantage
     eveilTotalMs += millis() - compte;   // envoye au serveur au reveil suivant

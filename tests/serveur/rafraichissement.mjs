@@ -81,6 +81,15 @@ console.log('ancienne carte :', await (await req('/api/apercu?r=0', { method: 'P
 affichee = base;
 await envoyer(temp);
 console.log('en-tête x-plan :', (await req('/api/apercu')).headers.get('x-plan'));
+// La carte n'envoie plus une image identique à celle de l'écran : le serveur garde la sienne, et la
+// mise à jour suivante reste partielle. Un changement de méthode entre-temps nettoie bien l'écran ensuite.
+affichee = temp;
+horloge('2026-11-07T18:00:00+01:00');            // un réveil où seule une donnée invisible change : rien n'est envoyé
+await etape('après une image non envoyée', avec(temp, 30, 400, 2, 2, 0x77));
+await post({ rafraich: { methode: 'double' } });
+horloge('2026-11-07T19:00:00+01:00');            // méthode changée, puis un réveil sans envoi
+await etape('méthode changée, après saut', avec(affichee, 30, 400, 2, 2, 0x78));
+await post({ rafraich: { methode: 'simple' } });
 // Réglages : valeurs inconnues ignorées ; intervalle des complets transmis à la carte
 await post({ rafraich: { completH: 7, seuil: 99 } });
 let cfg = (await (await req('/api/config')).json()).config.rafraich;
