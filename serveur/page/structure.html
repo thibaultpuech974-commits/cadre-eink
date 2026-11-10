@@ -238,7 +238,7 @@
   <summary>Accès des jetons</summary>
   <div id="listeJetons"><p class="aide">Chargement…</p></div>
   <div class="msg" id="msgJetons"></div>
-  <p class="aide repliable">La carte et le raccourci iPhone passent Cloudflare Access avec un jeton de service. Chacun n'a droit qu'à ce dont il a besoin : la carte lit son état, la photo, la pochette et le programme, et envoie son aperçu ; le raccourci envoie la pochette. Un jeton volé ne peut donc ni changer les réglages, ni lire la sauvegarde, ni envoyer un programme à la carte. Le rôle d'un jeton est deviné à sa première requête. Un jeton sans rôle garde tous les droits, comme une personne connectée : choisis-lui un rôle. Un changement s'applique tout de suite. « Oublier » retire un jeton de la liste : son rôle sera deviné à nouveau à sa prochaine requête.</p>
+  <p class="aide repliable">La carte et le raccourci iPhone passent Cloudflare Access avec un jeton de service. Chacun n'a droit qu'à ce dont il a besoin : la carte lit son état, la photo, la pochette et le programme, et envoie son aperçu ; le raccourci envoie la pochette. Un jeton volé ne peut donc ni changer les réglages, ni lire la sauvegarde, ni envoyer un programme à la carte. Le rôle d'un jeton est deviné à ce qu'il demande : la carte demande son état, le raccourci envoie une pochette. Un jeton dont le rôle n'a pas pu être deviné n'a aucun droit tant que tu ne lui en as pas choisi un ; « Tous les droits » existe, mais revient à donner les clés de la page. Un changement s'applique tout de suite. « Oublier » retire un jeton de la liste : son rôle sera deviné à nouveau à sa prochaine requête.</p>
 </details>
 
 <details class="menu" id="menu-sauvegarde">

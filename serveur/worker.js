@@ -105,6 +105,8 @@ export default {
       if (chemin === '/api/bus-test' && m === 'GET') return json(await prochainsBus((await lireConfig(env)).bus, Date.now(), env, true));
       return texte('Route inconnue', 404);
     } catch (e) {
+      // Garde une trace dans les journaux du Worker (voir "observability" dans wrangler.jsonc)
+      console.error('Erreur', req.method, chemin, ':', e && e.stack ? e.stack : e);
       return texte('Erreur : ' + (e && e.message ? e.message : e), 500);
     }
   },

@@ -7,8 +7,9 @@
 // iPhone que l'envoi de la pochette. Un jeton vole ne peut donc ni changer les reglages, ni lire la
 // sauvegarde, ni envoyer un programme a la carte.
 //
-// Le role d'un jeton est devine a sa premiere requete (la carte demande /api/etat avec sa version, le
-// raccourci envoie une pochette) et se change dans la page web (menu Accès des jetons).
+// Le role d'un jeton est devine a ce qu'il demande (la carte demande /api/etat avec sa version, le
+// raccourci envoie une pochette) et se change dans la page web (menu Accès des jetons). Un jeton dont
+// le role n'est ni devine ni choisi n'a aucun droit : il apparait dans la page, ou on lui en donne un.
 import { json, texte } from './commun.js';
 
 // Routes permises a chaque role ('tout' : aucune limite)
@@ -21,7 +22,7 @@ export const ROLES = {
 function deviner(route, url) {
   if (route === 'GET /api/etat' && url.searchParams.has('fw')) return 'carte';
   if (route === 'POST /api/pochette') return 'raccourci';
-  return null;        // role a choisir dans la page ; en attendant, tous les droits (comme avant)
+  return null;        // role a choisir dans la page ; en attendant, aucun droit
 }
 
 // --- Verification du jeton JWT (RS256, cles publiques de l'equipe Cloudflare) ---
@@ -81,11 +82,19 @@ export async function controlerAcces(req, access, env, url) {
   const id = String(p.common_name).slice(0, 120);
   const route = req.method + ' ' + url.pathname;
   const jetons = JSON.parse((await env.CADRE.get('jetons')) || '{}');
-  if (!jetons[id]) {
-    jetons[id] = { role: deviner(route, url), vu: Date.now(), route };
-    try { await env.CADRE.put('jetons', JSON.stringify(jetons)); } catch (e) { /* limite d'ecriture : reessaye au prochain appel */ }
+  // Jeton jamais vu, ou encore sans role : on essaie de le deviner a cette requete
+  if (!jetons[id] || !jetons[id].role) {
+    const devine = deviner(route, url);
+    if (!jetons[id] || devine) {
+      jetons[id] = { role: devine, vu: (jetons[id] && jetons[id].vu) || Date.now(), route: (jetons[id] && jetons[id].route) || route };
+      try { await env.CADRE.put('jetons', JSON.stringify(jetons)); } catch (e) { /* limite d'ecriture : reessaye au prochain appel */ }
+    }
   }
-  const role = jetons[id].role || 'tout';
+  const role = jetons[id].role;
+  // Sans role : aucun droit (et non tous, comme avant), jusqu'a ce qu'on lui en choisisse un dans la page
+  if (!role || !(role in ROLES)) {
+    return { refus: texte('Ce jeton n\'a pas encore de rôle : choisis-le dans la page web (menu Accès des jetons)', 403) };
+  }
   if (!ROLES[role] || ROLES[role].includes(route)) return { personne: false };
   return { refus: texte('Ce jeton (rôle « ' + role + ' ») n\'a pas accès à ' + route, 403) };
 }

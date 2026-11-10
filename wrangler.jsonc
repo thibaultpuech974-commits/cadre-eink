@@ -10,6 +10,10 @@
   ],
   // garde les variables saisies dans le tableau de bord
   "keep_vars": true,
+  // Journaux du Worker (Workers & Pages -> cadre -> Observabilite) : les messages du serveur (source
+  // en panne, copie de secours utilisee, erreur d'une route, alerte envoyee) sont gardes 3 jours,
+  // au lieu d'etre perdus si personne ne regarde en direct. Gratuit jusqu'a 200 000 lignes par jour.
+  "observability": { "enabled": true },
   // les morceaux de la page web (serveur/page/*.html) sont importes comme du texte
   // et le dessin de la carte en WebAssembly (serveur/apercu.wasm) comme des octets, envoyes tels quels a la page
   "rules": [

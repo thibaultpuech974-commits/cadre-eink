@@ -16,7 +16,7 @@ function afficherJetons(jetons) {
     var nom = document.createElement('div'); nom.style.wordBreak = 'break-all'; nom.textContent = id;
     var ligne = document.createElement('div'); ligne.className = 'ligne'; ligne.style.marginTop = '4px';
     var sel = document.createElement('select');
-    if (!j.role) { var o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Sans rôle : tous les droits'; sel.appendChild(o0); }
+    if (!j.role) { var o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Sans rôle : aucun droit'; sel.appendChild(o0); }
     Object.keys(NOMS_ROLES).forEach(function (r) { var o = document.createElement('option'); o.value = r; o.textContent = NOMS_ROLES[r]; sel.appendChild(o); });
     sel.value = j.role || '';
     sel.onchange = function () { if (sel.value) ecrireJeton({ id: id, role: sel.value }, 'Rôle enregistré : il s\'applique tout de suite.'); };
