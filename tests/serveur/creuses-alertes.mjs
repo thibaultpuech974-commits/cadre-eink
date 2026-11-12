@@ -24,15 +24,26 @@ await post({ reveilMin: 10, creuses: { actif: false }, scenes: [] });
 //        ou par le serveur public de Bark en secours
 const notifs = [], jwts = [];
 const ancien = globalThis.fetch;
-let applePanne = 0, barkPanne = false;
+let applePanne = 0, barkPanne = false, depot = 'ok';
+// Dépôt open source de Bark simulé : mêmes fichiers que sur GitHub, clé identique, changée ou fichiers déplacés
+const SOURCE = (await import('fs')).readFileSync(new URL('../../serveur/bark.js', import.meta.url), 'utf8');
+const CLE_APPLE = SOURCE.match(/APNS_CLE = '([^']+)'/)[1];
+const lectures = [];
 globalThis.fetch = async (u, o) => {
   u = String(u);
   if (u.startsWith('https://api.push.apple.com/3/device/')) {
     const h = o.headers, jwt = h.authorization.replace('bearer ', '');
     if (!jwts.includes(jwt)) jwts.push(jwt);
-    if (applePanne) return new Response(JSON.stringify({ reason: applePanne === 410 ? 'Unregistered' : applePanne === 403 ? 'ExpiredProviderToken' : 'InternalServerError' }), { status: applePanne });
+    if (applePanne) return new Response(JSON.stringify({ reason: { 410: 'Unregistered', 403: 'ExpiredProviderToken', 4031: 'InvalidProviderToken' }[applePanne] || 'InternalServerError' }), { status: applePanne === 4031 ? 403 : applePanne });
     const b = JSON.parse(o.body);
     notifs.push({ title: b.aps.alert.title, message: b.aps.alert.body, level: b.level, via: 'apple:' + u.slice(36, 42) + ':' + h['apns-topic'] }); return new Response('');
+  }
+  if (u.startsWith('https://raw.githubusercontent.com/Finb/bark-server/master/apns/')) {
+    lectures.push(u.split('/').pop());
+    if (depot === '404') return new Response('404: Not Found', { status: 404 });
+    if (u.endsWith('apns_certs.go')) return new Response('package apns\n\n// Bark push private key\nconst apnsPrivateKey = `-----BEGIN PRIVATE KEY-----\n' +
+      (depot === 'change' ? 'MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgNOUVELLE' : CLE_APPLE).match(/.{1,64}/g).join('\n') + '\n-----END PRIVATE KEY-----\n`\n');
+    return new Response('const (\n\ttopic          = "me.fin.bark"\n\tkeyID          = "' + (depot === 'change' ? 'ZZ9ZZ9ZZ9Z' : 'LH4T9V5U4R') + '"\n\tteamID         = "5U8LBRXG3A"\n)\n');
   }
   if (u === 'https://api.day.app/push') {
     if (barkPanne) return new Response(JSON.stringify({ code: 400, message: 'failed to get device token' }), { status: 400 });
@@ -43,6 +54,7 @@ globalThis.fetch = async (u, o) => {
 };
 const cron = async (iso) => { if (iso) horloge(iso); const avant = notifs.length; await w.scheduled({}, env, {}); return notifs.slice(avant).map(n => n.title + ' [' + n.via + ' ' + n.level + ']').join(' + ') || 'rien'; };
 const TOKEN = 'ab12'.repeat(16), CLE = 'Kq7pLmZx3RtYvBn8Wc2HdF';
+const suivi = () => { const m = JSON.parse(kv.get('alertes').v); delete m.cleApple; return JSON.stringify(m); };
 const statut = async corps => (await req('/api/config', { method: 'POST', body: JSON.stringify(corps) })).status;
 console.log('token invalide :', await statut({ alertes: { token: 'pas-un-token' } }), '| clé invalide :', await statut({ alertes: { cle: 'x' } }),
   '| actif sans destinataire :', await statut({ alertes: { actif: true } }));
@@ -66,7 +78,7 @@ await vu('2026-11-11T20:00:00+01:00', 'bat=3.66&pct=21'); const h1 = await cron(
 await vu('2026-11-11T21:00:00+01:00', 'bat=3.64&pct=19'); const h2 = await cron('2026-11-11T21:07:00+01:00');
 console.log('seuil hésitant :', h1, '/', h2, '| suivi gardé :', 'batterie' in JSON.parse(kv.get('alertes').v));
 await vu('2026-11-11T22:00:00+01:00', 'bat=3.9&pct=22&crate=12.5');
-console.log('en charge :', await cron('2026-11-11T22:07:00+01:00'), '| suivi :', kv.get('alertes').v);
+console.log('en charge :', await cron('2026-11-11T22:07:00+01:00'), '| suivi :', suivi());
 // Cadre rangé (écran blanc) : pas d'alerte « muet »
 await post({ mode: 'blanc' });
 console.log('écran blanc, 2 jours sans nouvelles :', await cron('2026-11-13T08:07:00+01:00'));
@@ -88,7 +100,7 @@ console.log('3 jours après, périmés :', await cron('2026-11-17T10:07:00+01:00
 // Ancien index (enregistré avant cette version, sans date retenue) : la fin est calculée une fois
 kv.delete('bus-fin');
 const e = await (await req('/api/alertes')).json();
-console.log('état pour la page :', e.etats.map(x => x.cle + (x.probleme ? ' ! ' : ' : ') + x.info).join(' | '), '| fin recalculée :', kv.get('bus-fin').v);
+console.log('état pour la page :', e.etats.filter(x => x.cle !== 'cleApple').map(x => x.cle + (x.probleme ? ' ! ' : ' : ') + x.info).join(' | '), '| fin recalculée :', kv.get('bus-fin').v);
 // Notification d'essai depuis la page (champs non enregistrés), alerte critique, secours, erreurs
 const essai = async corps => { const r = await req('/api/alertes/essai', { method: 'POST', body: JSON.stringify(corps) }); return r.status + ' ' + (r.ok ? (await r.json()).chemin : await r.text()); };
 let avant = notifs.length;
@@ -115,7 +127,61 @@ await post({ alertes: { critique: false, token: TOKEN, cle: '' } });
 await vu('2026-11-17T15:30:00+01:00', 'bat=4.1&pct=94');
 console.log('retour :', await cron('2026-11-17T16:07:00+01:00'));
 await post({ alertes: { bus: false } });
-console.log('alerte bus décochée :', await cron('2026-11-17T17:07:00+01:00'), '| suivi :', kv.get('alertes').v);
+console.log('alerte bus décochée :', await cron('2026-11-17T17:07:00+01:00'), '| suivi :', suivi());
+
+// --- 3. Vérifications de l'envoi direct (déclencheur de 12:07, heure de Paris)
+await post({ alertes: { bus: true, cle: CLE } });
+await post({ scenes: [] });
+const memoA = () => JSON.parse(kv.get('alertes').v);
+const page = async () => (await (await req('/api/alertes')).json());
+// Envoi direct raté, le secours prend le relais et le signale dans la notification et sur la page
+await vu('2026-11-18T08:00:00+01:00', 'bat=4.1&pct=94');
+applePanne = 410; // le cadre se tait 5 h : alerte « muet »
+console.log('direct raté, secours :', await cron('2026-11-18T13:07:00+01:00'), '|', notifs.at(-1).message.split('\n')[1], '| page :', (await page()).erreur.m);
+applePanne = 0;
+await vu('2026-11-18T13:30:00+01:00', 'bat=4.1&pct=94');
+console.log('direct rétabli :', await cron('2026-11-18T14:07:00+01:00'), '| erreur effacée :', (await page()).erreur === null);
+// Clé Apple refusée par Apple : cause « clé » (et non Device Token)
+applePanne = 4031;
+console.log('clé Apple refusée :', await essai({ token: TOKEN, cle: CLE }), '|', notifs.at(-1).message.split('\n')[1]);
+applePanne = 0;
+// Clé Apple : vérifiée chaque jour à 12 h seulement, identique au dépôt
+lectures.length = 0;
+await vu('2026-11-19T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('11 h : ', await cron('2026-11-19T11:07:00+01:00'), lectures.length, 'lecture(s) | 12 h :', await cron('2026-11-19T12:07:00+01:00'), lectures.join(','),
+  '| page :', (await page()).etats.find(e => e.cle === 'cleApple').info);
+// L'auteur de Bark change de clé : alerte, pas de nouvelle alerte le lendemain, rappel 7 jours après
+depot = 'change';
+await vu('2026-11-20T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('clé changée :', await cron('2026-11-20T12:07:00+01:00'), '|', notifs.at(-1).message);
+await vu('2026-11-21T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('le lendemain :', await cron('2026-11-21T12:07:00+01:00'), '| page :', (await page()).etats.find(e => e.cle === 'cleApple').info);
+await vu('2026-11-27T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('7 jours après :', await cron('2026-11-27T12:07:00+01:00'));
+depot = 'ok';
+await vu('2026-11-28T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('clé de nouveau identique :', await cron('2026-11-28T12:07:00+01:00'), '| suivi :', JSON.stringify(memoA().cleApple));
+// Dépôt illisible : pas d'alerte, la page le dit
+depot = '404';
+await vu('2026-12-01T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('dépôt illisible :', await cron('2026-12-01T12:07:00+01:00'), '| page :', (await page()).etats.find(e => e.cle === 'cleApple').info);
+depot = 'ok';
+// Dimanche 12 h : notification discrète ; refusée sans secours : erreur sur la page
+await vu('2026-11-29T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('dimanche 12 h :', await cron('2026-11-29T12:07:00+01:00'), '| dimanche 13 h :', await cron('2026-11-29T13:07:00+01:00'));
+await post({ alertes: { cle: '' } });
+applePanne = 410;
+await vu('2026-12-06T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('dimanche, token périmé sans secours :', await cron('2026-12-06T12:07:00+01:00'), '| page :', (await page()).erreur.m);
+applePanne = 0;
+await post({ alertes: { hebdo: false } });
+await vu('2026-12-13T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('vérification décochée :', await cron('2026-12-13T12:07:00+01:00'));
+// Sans Device Token (clé seule) : rien à vérifier
+await post({ alertes: { token: '', cle: CLE, hebdo: true } });
+lectures.length = 0;
+await vu('2026-12-20T11:00:00+01:00', 'bat=4.1&pct=94');
+console.log('clé seule, dimanche 12 h :', await cron('2026-12-20T12:07:00+01:00'), lectures.length, 'lecture(s) | ligne clé Apple :', (await page()).etats.some(e => e.cle === 'cleApple'));
 
 // Jeton d'authentification d'Apple : un JWT ES256 valide pour la clé de Bark (en-tête kid, émetteur team)
 const [h64, c64, s64] = jwts[0].split('.');

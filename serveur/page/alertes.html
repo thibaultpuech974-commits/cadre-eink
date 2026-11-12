@@ -5,12 +5,12 @@ function remplirAlertes() {
   var a = config.alertes || {};
   $('alActif').checked = !!a.actif; $('alToken').value = a.token || ''; $('alCle').value = a.cle || '';
   $('alMuet').checked = a.muet !== false; $('alCritique').checked = !!a.critique;
-  $('alBatterie').checked = a.batterie !== false; $('alBus').checked = a.bus !== false;
+  $('alBatterie').checked = a.batterie !== false; $('alBus').checked = a.bus !== false; $('alHebdo').checked = a.hebdo !== false;
   choisirValeur($('alSeuil'), a.seuilBatterie || 20);
 }
 function lireAlertes() {
   return { actif: $('alActif').checked, token: $('alToken').value.trim(), cle: $('alCle').value.trim(), critique: $('alCritique').checked,
-    muet: $('alMuet').checked, batterie: $('alBatterie').checked, bus: $('alBus').checked, seuilBatterie: +$('alSeuil').value };
+    muet: $('alMuet').checked, batterie: $('alBatterie').checked, bus: $('alBus').checked, hebdo: $('alHebdo').checked, seuilBatterie: +$('alSeuil').value };
 }
 // Essai avec les champs tels qu'ils sont (enregistres ou non). critique : alerte qui sonne meme en silencieux
 function essayerAlerte(critique) {
@@ -21,12 +21,12 @@ function essayerAlerte(critique) {
     .then(function (r) { return r.json(); })
     .then(function (d) {
       message('msgAlertes', (critique ? 'Alerte critique' : "Notification d'essai") + ' envoyée ' + (d.chemin === 'bark' ? 'par le serveur de secours de Bark' : 'directement à Apple') +
-        " : elle doit arriver sur l'iPhone en quelques secondes.");
+        " : elle doit arriver sur l'iPhone en quelques secondes." + (d.direct ? ' Envoi direct raté : ' + d.direct : ''));
     })
     .catch(function (e) { message('msgAlertes', 'Erreur : ' + e.message); });
 }
 // Ce que le serveur voit en ce moment pour chaque surveillance
-var NOMS_ALERTES = { muet: 'Cadre', batterie: 'Batterie', bus: 'Bus' };
+var NOMS_ALERTES = { muet: 'Cadre', batterie: 'Batterie', bus: 'Bus', cleApple: 'Clé Apple de Bark' };
 function chargerEtatAlertes() {
   api('/api/alertes').then(function (r) { return r.json(); }).then(function (d) {
     var z = $('etatAlertes'); z.innerHTML = '';
@@ -39,7 +39,7 @@ function chargerEtatAlertes() {
     });
     // Dernier envoi rate (Device Token perime, par exemple) : efface au prochain envoi reussi
     var err = $('erreurAlertes');
-    err.textContent = d.erreur ? 'Dernier envoi raté le ' + new Date(d.erreur.t).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' : ' + d.erreur.m : '';
+    err.textContent = d.erreur ? "Problème d'envoi le " + new Date(d.erreur.t).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' : ' + d.erreur.m : '';
     err.classList.toggle('cache', !d.erreur);
   }).catch(function (e) { $('etatAlertes').textContent = 'État indisponible : ' + e.message; });
 }

@@ -15,8 +15,8 @@ export const CONFIG_DEFAUT = {
   creuses: { actif: false, creneaux: [], intervalleMin: 60 },
   // Alertes sur l'iPhone (application Bark, voir alertes.js et bark.js) : token = Device Token de Bark
   // (envoi direct a Apple), cle = cle du serveur public de Bark (secours, facultative) ; critique : le
-  // cadre muet sonne meme en mode silencieux
-  alertes: { actif: false, token: '', cle: '', critique: false, muet: true, batterie: true, bus: true, seuilBatterie: 20 },
+  // cadre muet sonne meme en mode silencieux ; hebdo : notification discrete le dimanche pour verifier le Device Token
+  alertes: { actif: false, token: '', cle: '', critique: false, hebdo: true, muet: true, batterie: true, bus: true, seuilBatterie: 20 },
   // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
   // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
   // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double, triple ou quadruple (2 a 4
@@ -136,7 +136,7 @@ export function preparerModif(modif, cfg, rapport = {}) {
     if (token && !TOKEN_VALIDE.test(token)) return 'Alertes : Device Token invalide (copie-le dans Bark, Settings → Device Token)';
     if (cle && !CLE_VALIDE.test(cle)) return 'Alertes : clé Bark invalide (copie-la dans Bark, Service → Copy Key)';
     if (actif && !token && !cle) return 'Alertes : colle le Device Token de Bark avant de les activer';
-    modif.alertes = { actif, token, cle, critique: !!val('critique', actuel.critique),
+    modif.alertes = { actif, token, cle, critique: !!val('critique', actuel.critique), hebdo: val('hebdo', actuel.hebdo) !== false,
       muet: !!val('muet', actuel.muet), batterie: !!val('batterie', actuel.batterie), bus: !!val('bus', actuel.bus),
       seuilBatterie: [10, 20, 30].includes(+a.seuilBatterie) ? +a.seuilBatterie : (actuel.seuilBatterie || 20) };
   }

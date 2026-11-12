@@ -50,12 +50,18 @@ async function jetonApple(env, maintenant, neuf) {
 }
 
 // Raisons d'Apple traduites (https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)
+// type : « token » (a recopier depuis Bark), « cle » (cle Apple de Bark a mettre a jour ici)
 const RAISONS = {
-  BadDeviceToken: 'Device Token refusé par Apple : recopie-le depuis Bark (Settings → Device Token)',
-  Unregistered: 'Device Token périmé (Bark désinstallée ou réinstallée ?) : recopie-le depuis Bark',
-  DeviceTokenNotForTopic: 'ce Device Token n\'est pas celui de l\'application Bark',
-  TooManyRequests: 'trop de notifications vers cet iPhone, Apple demande d\'attendre',
+  BadDeviceToken: ['token', 'Device Token refusé par Apple : recopie-le depuis Bark (Settings → Device Token)'],
+  Unregistered: ['token', 'Device Token périmé (Bark désinstallée ou réinstallée ?) : recopie-le depuis Bark'],
+  DeviceTokenNotForTopic: ['token', 'ce Device Token n\'est pas celui de l\'application Bark'],
+  InvalidProviderToken: ['cle', 'clé Apple de Bark refusée (l\'auteur de Bark l\'a sans doute changée) : à mettre à jour dans serveur/bark.js'],
+  ExpiredProviderToken: ['cle', 'clé Apple de Bark refusée (jeton expiré même refait) : à mettre à jour dans serveur/bark.js'],
+  TooManyRequests: ['autre', 'trop de notifications vers cet iPhone, Apple demande d\'attendre'],
 };
+// Phrase courte ajoutee a une notification passee par le secours, pour que le probleme se voie sur l'iPhone
+const AVERTISSEMENTS = { token: 'Device Token à recopier depuis Bark', cle: 'clé Apple de Bark à mettre à jour (serveur/bark.js)', autre: 'Apple injoignable' };
+const erreurTypee = (type, message) => Object.assign(new Error(message), { type });
 
 async function envoiApple(env, token, notif, maintenant) {
   // Charge utile au format de Bark : son extension lit level, volume et group (en texte)
@@ -72,7 +78,8 @@ async function envoiApple(env, token, notif, maintenant) {
     try { raison = (await r.json()).reason || ''; } catch (e) { /* pas de JSON */ }
     // Jeton d'authentification refuse ou expire : on en refait un, une seule fois
     if (!neuf && r.status === 403 && /ProviderToken/.test(raison)) continue;
-    throw new Error(RAISONS[raison] || 'Apple a répondu HTTP ' + r.status + (raison ? ' (' + raison + ')' : ''));
+    if (RAISONS[raison]) throw erreurTypee(...RAISONS[raison]);
+    throw erreurTypee('autre', 'Apple a répondu HTTP ' + r.status + (raison ? ' (' + raison + ')' : ''));
   }
 }
 
@@ -86,17 +93,45 @@ async function envoiBarkPublic(cle, notif) {
 }
 
 // Envoie une notification : directement a Apple si un Device Token est enregistre, sinon (ou en cas
-// d'echec) par le serveur public de Bark si une cle l'est. Rend le chemin utilise ; leve une erreur
-// qui explique chaque echec.
+// d'echec) par le serveur public de Bark si une cle l'est. Rend { chemin, direct } : chemin = 'apple' ou
+// 'bark', direct = l'echec de l'envoi direct quand le secours a pris le relais ({ type, message }), pour
+// que la page et la notification le signalent. Leve une erreur qui explique chaque echec.
 // notif : { titre, message, niveau } ; niveau = passive | active | timeSensitive | critical
 export async function notifierBark(env, dest, notif, maintenant = Date.now()) {
   const token = nettoyerToken(dest.token), cle = nettoyerCle(dest.cle);
   const erreurs = [];
+  let direct = null;
   if (TOKEN_VALIDE.test(token)) {
-    try { await envoiApple(env, token, notif, maintenant); return 'apple'; } catch (e) { erreurs.push('direct : ' + e.message); }
+    try { await envoiApple(env, token, notif, maintenant); return { chemin: 'apple', direct: null }; }
+    catch (e) { direct = { type: e.type || 'autre', message: e.message }; erreurs.push('direct : ' + e.message); }
   }
   if (CLE_VALIDE.test(cle)) {
-    try { await envoiBarkPublic(cle, notif); return 'bark'; } catch (e) { erreurs.push('secours : ' + e.message); }
+    // Le secours previent lui-meme que l'envoi direct a rate, et ne reste pas discret dans ce cas
+    const n = direct ? { ...notif, message: notif.message + '\n⚠ Envoi direct raté : ' + AVERTISSEMENTS[direct.type] + '.',
+      niveau: notif.niveau === 'passive' ? 'active' : notif.niveau } : notif;
+    try { await envoiBarkPublic(cle, n); return { chemin: 'bark', direct }; } catch (e) { erreurs.push('secours : ' + e.message); }
   }
-  throw new Error(erreurs.join(' ; ') || 'ni Device Token ni clé Bark valide');
+  throw Object.assign(new Error(erreurs.join(' ; ') || 'ni Device Token ni clé Bark valide'), { direct });
+}
+
+// --- Surveillance de la cle Apple de Bark : comparee a celle du depot open source (une fois par jour) ---
+const DEPOT = 'https://raw.githubusercontent.com/Finb/bark-server/master/apns/';
+// Rend { etat: 'ok' | 'change' | 'impossible', m } ; ne leve jamais d'erreur
+export async function verifierCleApple() {
+  try {
+    const lire = async f => {
+      const r = await fetch(DEPOT + f, { signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'cadre-eink' } });
+      if (!r.ok) throw new Error(f + ' : HTTP ' + r.status);
+      return r.text();
+    };
+    const [certs, apns] = await Promise.all([lire('apns_certs.go'), lire('apns.go')]);
+    const pem = certs.match(/-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/);
+    const keyId = apns.match(/keyID\s*=\s*"([^"]+)"/), teamId = apns.match(/teamID\s*=\s*"([^"]+)"/);
+    if (!pem || !keyId || !teamId) return { etat: 'impossible', m: 'fichiers du dépôt de Bark réorganisés : clé introuvable' };
+    const differences = [];
+    if (pem[1].replace(/\s/g, '') !== APNS_CLE) differences.push('clé');
+    if (keyId[1] !== APNS_KEY_ID) differences.push('Key ID ' + keyId[1]);
+    if (teamId[1] !== APNS_TEAM_ID) differences.push('Team ID ' + teamId[1]);
+    return differences.length ? { etat: 'change', m: 'nouvelle clé Apple dans le dépôt de Bark (' + differences.join(', ') + ')', d: differences.join(', ') } : { etat: 'ok', m: '' };
+  } catch (e) { return { etat: 'impossible', m: 'dépôt de Bark illisible (' + e.message + ')' }; }
 }
