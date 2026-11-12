@@ -9,6 +9,7 @@ const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0',
   ...ev('c', '20261111T100000', 'Cours de maths\\, salle B12', 'Salle B12'),
   ...ev('d', '20261111T140000', 'Anglais'),
   ...ev('e', '20261112T090000', 'Visite', '🏛 Musée de la Romanité\\, un lieu au nom vraiment très long pour un écran'),
+  ...ev('f', '20261112T180000', 'FORMULA 1 LAS VEGAS GRAND PRIX 2026 - Practice 1', 'Las Vegas Strip Circuit'),
   'END:VCALENDAR'].join('\r\n');
 const ancien = globalThis.fetch;
 globalThis.fetch = async (u, o) => (String(u).includes('cal.test') ? new Response(ics) : ancien(u, o));
