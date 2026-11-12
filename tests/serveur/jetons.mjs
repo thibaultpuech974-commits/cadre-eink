@@ -49,14 +49,19 @@ console.log('carte refusée : config', await req('GET', '/api/config', carte), '
   '| jetons', await req('GET', '/api/jetons', carte));
 console.log('raccourci : pochette', await req('POST', '/api/pochette?titre=So%20What', raccourci, new Uint8Array(5000)),
   '| refusé : config', await req('GET', '/api/config', raccourci), '| état', await req('GET', '/api/etat?fw=20261107-120000', raccourci));
-// Jeton inconnu dont le role ne se devine pas : tous les droits jusqu'a ce qu'on en choisisse un
-console.log('autre jeton : config', await req('GET', '/api/config', autre));
+// Jeton inconnu dont le role ne se devine pas : aucun droit jusqu'a ce qu'on lui en choisisse un
+console.log('autre jeton : config', await req('GET', '/api/config', autre), '| sauvegarde', await req('GET', '/api/sauvegarde', autre), '| aperçu', await req('GET', '/api/apercu', autre));
 let liste = JSON.parse(kv.get('jetons').v);
 console.log('rôles devinés :', Object.entries(liste).map(([id, j]) => id + '=' + j.role).join(' '));
+console.log('tous les droits choisis :', await req('POST', '/api/jetons', moi, JSON.stringify({ id: 'zzz999.access', role: 'tout' })), '| puis config', await req('GET', '/api/config', autre));
 console.log('choix du rôle :', await req('POST', '/api/jetons', moi, JSON.stringify({ id: 'zzz999.access', role: 'raccourci' })),
   '| puis config', await req('GET', '/api/config', autre), '| rôle inconnu', await req('POST', '/api/jetons', moi, JSON.stringify({ id: 'zzz999.access', role: 'admin' })),
   '| par un jeton', await req('POST', '/api/jetons', autre, JSON.stringify({ id: 'zzz999.access', role: 'tout' })));
 console.log('oublier :', await req('POST', '/api/jetons', moi, JSON.stringify({ id: 'zzz999.access', oublier: true })), Object.keys(JSON.parse(kv.get('jetons').v)).join(' '));
+// Un jeton reste sans role tant qu'il ne fait rien de reconnaissable ; des qu'il se comporte comme la carte, il en a le role
+const tardif = await jeton({ common_name: 'tard42.access', sub: '', type: 'app' });
+console.log('rôle deviné plus tard : aperçu', await req('POST', '/api/apercu?r=0', tardif, new Uint8Array(81600)), '| état', await req('GET', '/api/etat?bat=4.0&fw=20261107-120000', tardif),
+  '| aperçu', await req('POST', '/api/apercu?r=0', tardif, new Uint8Array(81600)), '| config', await req('GET', '/api/config', tardif), '| rôle', JSON.parse(kv.get('jetons').v)['tard42.access'].role);
 // Jetons invalides
 console.log('signature pirate', await req('GET', '/api/config', await jeton({ email: 'moi@exemple.fr' }, pirate.privateKey)),
   '| autre application', await req('GET', '/api/config', await jeton({ email: 'moi@exemple.fr', aud: ['autre'] })),

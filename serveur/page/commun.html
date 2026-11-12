@@ -1,0 +1,114 @@
+<!-- Page web du cadre : outils communs (connexion, appels au serveur, petites fonctions, créneaux jours + heures) -->
+<script>
+var LARG = 960, HAUT = 680, OCTETS = 81600;
+var cle = '';
+var config = null;
+var image = null;
+try { cle = localStorage.getItem('cadre-cle') || ''; } catch (e) {}
+function $(id) { return document.getElementById(id); }
+// Connexion : par Cloudflare Access (cookie envoye automatiquement par le navigateur)
+// ou, en secours sans Access, par le mot de passe CLE
+var session = { access: false, email: '' };
+function api(chemin, options) {
+  options = options || {};
+  options.headers = options.headers || {};
+  if (cle) options.headers['X-Cle'] = cle;
+  // Session Access expiree : Access repond par une redirection vers sa page de connexion,
+  // qu'un fetch ne peut pas suivre. On recharge la page pour se reconnecter.
+  options.redirect = 'manual';
+  return fetch(chemin, options).then(function (r) {
+    if (r.type === 'opaqueredirect') { location.reload(); throw new Error('Session expirée, reconnexion…'); }
+    if (r.status === 401) { afficherConnexion(cle ? 'Mot de passe incorrect' : ''); throw new Error('cle'); }
+    if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+    return r;
+  });
+}
+function message(id, t) { $(id).textContent = t; if (t) setTimeout(function () { $(id).textContent = ''; }, 6000); }
+
+function afficherConnexion(t) { $('app').classList.add('cache'); $('connexion').classList.remove('cache'); $('msgCle').textContent = t || ''; }
+function seConnecter() { cle = $('champCle').value.trim(); try { localStorage.setItem('cadre-cle', cle); } catch (e) {} demarrer(); }
+function deconnexion() {
+  try { localStorage.removeItem('cadre-cle'); } catch (e) {}
+  cle = '';
+  if (session.access) { location.href = '/cdn-cgi/access/logout'; return false; }   // ferme la session Access
+  afficherConnexion(''); return false;
+}
+
+// Sans mot de passe enregistre, on essaie quand meme : avec Access, la session suffit
+function demarrer() {
+  api('/api/session').then(function (r) { return r.json(); }).then(function (s) {
+    session = s;
+    $('lienDeconnexion').textContent = s.access && s.email ? 'Se déconnecter (' + s.email + ')' : 'Se déconnecter';
+    return charger();
+  }).then(function () {
+    $('connexion').classList.add('cache'); $('app').classList.remove('cache');
+  }).catch(function () {});
+}
+// Met a jour l'etat et l'apercu sans toucher aux formulaires en cours d'edition
+function rafraichir() {
+  return api('/api/config').then(function (r) { return r.json(); }).then(function (d) {
+    config = d.config;
+    afficherStatut(d.statut, d.maintenant, d.statut1);
+    chargerApercu();
+  });
+}
+function cleOri(r) { return (r === 1 || r === 3) ? 1 : 0; }
+function copie(o) { return JSON.parse(JSON.stringify(o)); }
+function pct(v, total) { return (v / total * 100) + '%'; }
+// Donne une valeur a une liste deroulante ; si elle n'est pas dans la liste, on l'ajoute (sinon Safari
+// choisit tout seul le premier element un peu plus tard, et la page croirait a une modification)
+function choisirValeur(el, v) {
+  v = String(v);
+  if (![].some.call(el.options, function (o) { return o.value === v; })) {
+    var o = document.createElement('option'); o.value = v; o.textContent = v; el.appendChild(o);
+  }
+  el.value = v;
+}
+// Heure "7:5" ou "7:05" -> "07:05" (les champs heure n'acceptent que ce format)
+function heure2(h) { var m = /^(\d{1,2}):(\d{1,2})/.exec(h || ''); return m ? ('0' + m[1]).slice(-2) + ':' + ('0' + m[2]).slice(-2) : ''; }
+function duree(ms) {
+  var m = Math.round(ms / 60000);
+  if (m < 1) return "à l'instant";
+  if (m < 60) return 'il y a ' + m + ' min';
+  var h = Math.round(m / 60);
+  if (h < 48) return 'il y a ' + h + ' h';
+  return 'il y a ' + Math.round(h / 24) + ' jours';
+}
+var NOMS_JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+function ajouterCreneau(c, conteneur) {
+  c = c && c.jours ? c : { jours: [1, 1, 1, 1, 1, 0, 0], debut: '07:00', fin: '08:00' };
+  var bloc = document.createElement('div');
+  bloc.className = 'creneau';
+  bloc.style.cssText = 'border:1px solid var(--trait);border-radius:10px;padding:6px 10px;margin-top:6px';
+  var jours = document.createElement('div');
+  jours.className = 'puces';
+  NOMS_JOURS.forEach(function (n, i) {
+    var l = document.createElement('label'), cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = !!c.jours[i];
+    l.appendChild(cb); l.appendChild(document.createTextNode(n));
+    jours.appendChild(l);
+  });
+  var heures = document.createElement('div');
+  heures.className = 'ligne';
+  heures.innerHTML = '<label>de <input type="time" class="cDebut" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><label>à <input type="time" class="cFin" style="width:auto;min-width:0;flex:1;padding:8px 6px"></label><button style="flex:0;padding:8px 12px" title="Supprimer ce créneau" aria-label="Supprimer ce créneau">✕</button>';
+  heures.querySelector('.cDebut').value = heure2(c.debut);
+  heures.querySelector('.cFin').value = heure2(c.fin);
+  heures.querySelector('button').onclick = function () { bloc.remove(); $(conteneur).dispatchEvent(new Event('change', { bubbles: true })); };
+  bloc.appendChild(jours); bloc.appendChild(heures);
+  $(conteneur).appendChild(bloc);
+}
+// Bouton "+ Ajouter" : nouveau creneau (defaut : lun-ven 7 h-8 h), signale comme une modification
+function nouveauCreneau(conteneur, defaut) {
+  ajouterCreneau(defaut || null, conteneur);
+  $(conteneur).dispatchEvent(new Event('change', { bubbles: true }));
+}
+function lireCreneaux(conteneur) {
+  var res = [], blocs = $(conteneur).querySelectorAll('.creneau');
+  for (var i = 0; i < blocs.length; i++) {
+    var j = [], cases = blocs[i].querySelectorAll('.puces input');
+    for (var k = 0; k < cases.length; k++) j.push(cases[k].checked ? 1 : 0);
+    res.push({ jours: j, debut: blocs[i].querySelector('.cDebut').value, fin: blocs[i].querySelector('.cFin').value });
+  }
+  return res;
+}
+</script>

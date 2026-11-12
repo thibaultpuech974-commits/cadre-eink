@@ -1,0 +1,185 @@
+<!-- Page web du cadre : prévisualisation (dessin de la carte en WebAssembly, panneau flottant) -->
+<script>
+// --- Previsualisation : le code de dessin de la carte, compile en WebAssembly, tourne dans la page ---
+var moteur = null;
+function chargerMoteur() {
+  if (moteur) return Promise.resolve(moteur);
+  return api('/api/apercu.wasm').then(function (r) { return r.arrayBuffer(); }).then(function (octets) {
+    var mem = null;
+    var vue = function () { return new DataView(mem.buffer); };
+    var wasi = {                                   // le strict minimum : le dessin n'utilise ni fichiers ni horloge
+      fd_prestat_get: function () { return 8; }, fd_prestat_dir_name: function () { return 8; },
+      fd_close: function () { return 0; }, fd_fdstat_get: function () { return 0; }, fd_seek: function () { return 0; },
+      fd_write: function (fd, iovs, n, pEcrits) {
+        var t = 0; for (var i = 0; i < n; i++) t += vue().getUint32(iovs + 8 * i + 4, true);
+        vue().setUint32(pEcrits, t, true); return 0;
+      },
+      clock_time_get: function (id, prec, p) { vue().setBigUint64(p, BigInt(0), true); return 0; },
+      poll_oneoff: function () { return 52; },     // attente de verrou de la libc : jamais appelee (dessin sur un seul fil)
+      proc_exit: function (c) { throw new Error('arrêt ' + c); }
+    };
+    // Toute autre fonction systeme demandee par une future version de la libc : on repond
+    // « non disponible » (52) au lieu de refuser de charger la previsualisation
+    var wasiComplet = new Proxy(wasi, {
+      get: function (o, nom) { return nom in o ? o[nom] : function () { return 52; }; }
+    });
+    return WebAssembly.instantiate(octets, { wasi_snapshot_preview1: wasiComplet }).then(function (res) {
+      var ex = res.instance.exports;
+      mem = ex.memory; ex._initialize();
+      moteur = {
+        dessiner: function (etat, vBat) {
+          var b = new TextEncoder().encode(JSON.stringify(etat));
+          var p = ex.zone(b.length);
+          new Uint8Array(mem.buffer, p, b.length).set(b);
+          var img = ex.dessiner(b.length, vBat);
+          if (!img) throw new Error('état illisible');
+          return new Uint8Array(mem.buffer, img, OCTETS).slice();
+        }
+      };
+      return moteur;
+    });
+  });
+}
+var previsuActive = false, minuteurPrevisu = null, numPrevisu = 0, scenePrevisu = -1;
+function boutonsPrevisu(visibles) {
+  var b = document.querySelectorAll('.boutonPrevisu');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('cache', !visibles);
+}
+function previsualiser() {
+  previsuActive = true;
+  scenePrevisu = sceneCourante;
+  $('panneauPrevisu').classList.remove('cache', 'reduit');
+  $('reduirePrevisu').textContent = '–';
+  boutonsPrevisu(false);
+  remplirScenesPrevisu();
+  placerPanneau();
+  majPrevisu();
+}
+// Texte sous l'image de la prevision (le paragraphe repliable garde son lien "plus")
+function texteInfoPrevisu(t) { preparerRepliable($('infoPrevisu')).textContent = t; }
+function fermerPrevisu() {
+  previsuActive = false; numPrevisu++;
+  clearTimeout(minuteurPrevisu);
+  $('panneauPrevisu').classList.add('cache');
+  boutonsPrevisu(true);
+  document.body.style.paddingBottom = '';
+}
+function reduirePrevisu() {
+  var r = $('panneauPrevisu').classList.toggle('reduit');
+  $('reduirePrevisu').textContent = r ? '+' : '–';
+  $('reduirePrevisu').title = r ? 'Agrandir' : 'Réduire';
+  placerPanneau();
+}
+// Position et largeur du panneau : on le deplace en le tirant par sa barre de titre, on l'agrandit
+// par son coin en bas a droite ; retenues sur cet appareil. Double-clic sur la barre : position de depart.
+var posPrevisu = null;
+try { posPrevisu = JSON.parse(localStorage.getItem('cadre-previsu') || 'null'); } catch (e) {}
+function hauteurBarre() { var b = $('barreModifs'); return b.classList.contains('cache') ? 0 : b.offsetHeight + 16; }
+function placerPanneau() {
+  var p = $('panneauPrevisu'), W = window.innerWidth, H = window.innerHeight - hauteurBarre();
+  var l = Math.max(240, Math.min(posPrevisu && posPrevisu.l ? posPrevisu.l : 460, W - 8));
+  p.style.width = l + 'px';
+  var h = p.offsetHeight;
+  var x = posPrevisu ? posPrevisu.x : W - l - 12, y = posPrevisu ? posPrevisu.y : H - h - 12;
+  x = Math.max(4, Math.min(x, W - l - 4));
+  y = Math.max(4, Math.min(y, H - h - 4));                    // toujours entierement visible si possible
+  p.style.left = x + 'px'; p.style.top = y + 'px';
+  ajusterMarge();
+}
+function memoriserPanneau() {
+  var p = $('panneauPrevisu');
+  posPrevisu = { x: p.offsetLeft, y: p.offsetTop, l: p.offsetWidth };
+  try { localStorage.setItem('cadre-previsu', JSON.stringify(posPrevisu)); } catch (e) {}
+}
+// Glisser (souris ou doigt) : f recoit le deplacement depuis le debut du geste
+function glisser(el, debut, f, fin) {
+  el.addEventListener('pointerdown', function (ev) {
+    if (ev.target.closest('select, button')) return;
+    ev.preventDefault();
+    var x0 = ev.clientX, y0 = ev.clientY, etat = debut();
+    el.setPointerCapture(ev.pointerId);
+    var bouge = function (e) { f(etat, e.clientX - x0, e.clientY - y0); };
+    var lache = function () { el.removeEventListener('pointermove', bouge); el.removeEventListener('pointerup', lache); el.removeEventListener('pointercancel', lache); fin(); };
+    el.addEventListener('pointermove', bouge); el.addEventListener('pointerup', lache); el.addEventListener('pointercancel', lache);
+  });
+}
+glisser(document.querySelector('#panneauPrevisu .tete'),
+  function () { var p = $('panneauPrevisu'); return { x: p.offsetLeft, y: p.offsetTop }; },
+  function (e, dx, dy) {
+    var p = $('panneauPrevisu');
+    p.style.left = Math.max(4, Math.min(e.x + dx, window.innerWidth - p.offsetWidth - 4)) + 'px';
+    p.style.top = Math.max(4, Math.min(e.y + dy, window.innerHeight - p.offsetHeight - 4)) + 'px';
+  },
+  function () { memoriserPanneau(); ajusterMarge(); });
+glisser($('poigneePrevisu'),
+  function () { return { l: $('panneauPrevisu').offsetWidth }; },
+  function (e, dx) {
+    var p = $('panneauPrevisu');
+    p.style.width = Math.max(240, Math.min(e.l + dx, window.innerWidth - p.offsetLeft - 4)) + 'px';
+  },
+  function () { memoriserPanneau(); placerPanneau(); });
+document.querySelector('#panneauPrevisu .tete').addEventListener('dblclick', function () {
+  posPrevisu = null;
+  try { localStorage.removeItem('cadre-previsu'); } catch (e) {}
+  placerPanneau();
+});
+window.addEventListener('resize', function () { if (previsuActive) placerPanneau(); });
+// Laisse de la place en bas de la page quand le panneau est dans la moitie basse de l'ecran,
+// pour qu'il ne cache pas les derniers reglages
+function ajusterMarge() {
+  var p = $('panneauPrevisu');
+  var m = previsuActive && p.offsetTop > window.innerHeight / 2 ? window.innerHeight - p.offsetTop + 12 : 0;
+  m = Math.max(m, hauteurBarre() + 12);
+  document.body.style.paddingBottom = m > 12 ? m + 'px' : '';
+}
+// Liste des scenes dans le panneau (choix de la scene prevue)
+function remplirScenesPrevisu() {
+  var sel = $('scenePrevisu'), noms = ['Par défaut'].concat(scenes.map(function (sc) { return sc.nom; }));
+  sel.innerHTML = '';
+  noms.forEach(function (n, i) { var o = document.createElement('option'); o.value = String(i - 1); o.textContent = n; sel.appendChild(o); });
+  if (scenePrevisu >= scenes.length) scenePrevisu = -1;
+  sel.value = String(scenePrevisu);
+}
+$('scenePrevisu').onchange = function () { scenePrevisu = +this.value; majPrevisu(); };
+// Tout reglage modifie dans ces menus met la prevision a jour
+['input', 'change'].forEach(function (ev) {
+  document.addEventListener(ev, function (e) {
+    if (e.target.closest && e.target.closest('#menu-meteo, #menu-agenda, #menu-rebours, #menu-bus, #menu-dispo, #menu-montage')) demanderPrevisu();
+  });
+});
+function demanderPrevisu() {
+  if (!previsuActive) return;
+  clearTimeout(minuteurPrevisu);
+  minuteurPrevisu = setTimeout(majPrevisu, 600);
+}
+function majPrevisu() {
+  if (!previsuActive) return;
+  lireFormScene(); ranger();
+  remplirScenesPrevisu();
+  var n = ++numPrevisu;
+  // Tous les reglages des formulaires, enregistres ou non
+  var modif = { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
+    affichage: { traits: $('traits').checked, rotation: rot }, meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), bus: lireBus() };
+  texteInfoPrevisu('Préparation…');
+  Promise.all([chargerMoteur(), api('/api/previsualiser', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modif: modif, scene: scenePrevisu }) }).then(function (r) { return r.json(); })])
+    .then(function (r) {
+      if (n !== numPrevisu) return;                // une demande plus recente est en cours
+      var m = r[0], d = r[1], g = grilleUI(rot);
+      var vBat = dernierStatut && dernierStatut.bat > 2.5 ? dernierStatut.bat : 4.0;
+      var cv = $('previsu'); cv.width = g.VLE; cv.height = g.VHE; formeEcran(cv, rot, g.VLE, g.VHE);
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#2a2927'; ctx.fillRect(0, 0, g.VLE, g.VHE);
+      d.ecrans.forEach(function (etat, k) {
+        var l = physVersLog(m.dessiner(etat, vBat), rot);
+        dessinerBitsA(ctx, l.bits, l.w, l.h, g.nx > 1 ? k * (g.L + g.JE) : 0, g.ny > 1 ? k * (g.H + g.JE) : 0);
+      });
+      texteInfoPrevisu("Dessinée comme sur le cadre, avec les données actuelles et tes réglages (même non enregistrés). " +
+        "Rien n'est envoyé au cadre tant que tu n'as pas cliqué sur Enregistrer.");
+      placerPanneau();
+    })
+    .catch(function (e) { if (n === numPrevisu) texteInfoPrevisu('Prévisualisation impossible : ' + e.message); });
+}
+$('traits').addEventListener('change', demanderPrevisu);
+$('reglagesScene').addEventListener('change', demanderPrevisu);
+</script>

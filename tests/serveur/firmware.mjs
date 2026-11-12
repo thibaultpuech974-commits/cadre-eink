@@ -15,8 +15,7 @@ await req('/api/config', { method: 'POST', body: JSON.stringify({ mode: 'blanc' 
 const bin = new Uint8Array(300000); bin[0] = 0xE9;
 const marque = 'CADRE_FW:Oct  4 2026 14:03:22'; for (let i = 0; i < marque.length; i++) bin[5000 + i] = marque.charCodeAt(i);
 // fonction versionDans de l'interface
-const page = await (await w.fetch(new Request('https://cadre.test/'), env)).text();
-const src = page.split('<script>')[1].split('</script>')[0];
+const src = await (await w.fetch(new Request('https://cadre.test/'), env)).text();
 const versionDans = new Function(src.slice(src.indexOf('function versionDans'), src.indexOf('function envoyerFirmware')) + 'return versionDans;')();
 const v = versionDans(bin); console.log('version lue :', v);
 console.log('envoi mauvais fichier :', (await req('/api/firmware?v=' + v, { method: 'POST', body: new Uint8Array(200000) })).status);

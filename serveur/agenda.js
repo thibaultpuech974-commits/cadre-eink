@@ -35,7 +35,12 @@ export async function agenda(o, maintenant, env) {
     let h = '';
     if (!e.journee) h = enCours ? 'en cours' : deux(w.hh) + ':' + deux(w.mi);
     const t = pourEcran(titreF1(e.titre));
-    return { j, h, t: t.length > 60 ? t.slice(0, 57) + '...' : t };
+    // 100 caracteres au plus : la carte met un titre long sur 2 ou 3 lignes quand le bloc a de la place
+    const ligne = { j, h, t: t.length > 100 ? t.slice(0, 97) + '...' : t };
+    // Lieu (salle, adresse...) : affiche apres le titre, sauf s'il y figure deja ou si l'option est decochee
+    const l = o.lieu !== false && e.lieu ? pourEcran(e.lieu) : '';
+    if (l && !t.toLowerCase().includes(l.toLowerCase())) ligne.l = l.length > 32 ? l.slice(0, 29) + '...' : l;
+    return ligne;
   });
 }
 // Prochaine occurrence de chaque anniversaire (evenement "journee entiere")
@@ -111,10 +116,12 @@ export function evenementsICS(texte, debutFenetre, finFenetre) {
     if (!e.DTSTART) continue;
     if (e.STATUS && e.STATUS.v.toUpperCase() === 'CANCELLED') continue;
     const titre = e.SUMMARY ? e.SUMMARY.v.replace(/\\n/gi, ' ').replace(/\\([,;\\])/g, '$1').trim() : '(sans titre)';
+    // Lieu : la premiere ligne du champ LOCATION (l'iPhone met le nom, puis l'adresse sur les lignes suivantes)
+    const lieu = e.LOCATION ? (e.LOCATION.v.replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1').split('\n').map(x => x.trim()).filter(Boolean)[0] || '') : '';
     const estSurcharge = !!e['RECURRENCE-ID'];
     for (const o of occurrences(e, debutFenetre, finFenetre)) {
       if (!estSurcharge && e.UID && surcharges.has(e.UID.v + '|' + o.debut)) continue;
-      res.push({ debut: o.debut, journee: o.journee, titre });
+      res.push({ debut: o.debut, journee: o.journee, titre, lieu });
     }
   }
   return res;

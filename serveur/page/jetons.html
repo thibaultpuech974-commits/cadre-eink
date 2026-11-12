@@ -1,0 +1,42 @@
+<!-- Page web du cadre : menu Accès des jetons (rôles des jetons de service) -->
+<script>
+// --- Acces des jetons de service (roles carte / raccourci / tous les droits) ---
+var NOMS_ROLES = { carte: 'Carte du cadre', raccourci: 'Raccourci iPhone', tout: 'Tous les droits' };
+function afficherJetons(jetons) {
+  var z = $('listeJetons'), ids = Object.keys(jetons || {});
+  z.innerHTML = '';
+  if (!ids.length) {
+    var vide = document.createElement('p'); vide.className = 'aide';
+    vide.textContent = 'Aucun jeton de service vu pour l\'instant (Cloudflare Access désactivé, ou ni la carte ni le raccourci ne se sont encore connectés).';
+    z.appendChild(vide); return;
+  }
+  ids.forEach(function (id) {
+    var j = jetons[id];
+    var bloc = document.createElement('div'); bloc.style.margin = '6px 0 12px';
+    var nom = document.createElement('div'); nom.style.wordBreak = 'break-all'; nom.textContent = id;
+    var ligne = document.createElement('div'); ligne.className = 'ligne'; ligne.style.marginTop = '4px';
+    var sel = document.createElement('select');
+    if (!j.role) { var o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Sans rôle : aucun droit'; sel.appendChild(o0); }
+    Object.keys(NOMS_ROLES).forEach(function (r) { var o = document.createElement('option'); o.value = r; o.textContent = NOMS_ROLES[r]; sel.appendChild(o); });
+    sel.value = j.role || '';
+    sel.onchange = function () { if (sel.value) ecrireJeton({ id: id, role: sel.value }, 'Rôle enregistré : il s\'applique tout de suite.'); };
+    var oublier = document.createElement('button'); oublier.textContent = 'Oublier'; oublier.style.flex = '0 0 auto';
+    oublier.onclick = function () { ecrireJeton({ id: id, oublier: true }, 'Jeton retiré de la liste.'); };
+    ligne.appendChild(sel); ligne.appendChild(oublier);
+    var info = document.createElement('div'); info.className = 'aide';
+    info.textContent = 'Vu pour la première fois le ' + new Date(j.vu).toLocaleString('fr-FR') + ' (' + j.route + ')' + (j.role ? '' : '. Choisis-lui un rôle.');
+    bloc.appendChild(nom); bloc.appendChild(ligne); bloc.appendChild(info);
+    z.appendChild(bloc);
+  });
+}
+function chargerJetons() {
+  api('/api/jetons').then(function (r) { return r.json(); }).then(function (d) { afficherJetons(d.jetons); })
+    .catch(function (e) { $('listeJetons').textContent = 'Liste indisponible : ' + e.message; });
+}
+function ecrireJeton(modif, ok) {
+  api('/api/jetons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
+    .then(function (r) { return r.json(); }).then(function (d) { afficherJetons(d.jetons); message('msgJetons', ok); })
+    .catch(function (e) { message('msgJetons', 'Erreur : ' + e.message); chargerJetons(); });
+}
+$('menu-jetons').addEventListener('toggle', function () { if (this.open && config) chargerJetons(); });
+</script>

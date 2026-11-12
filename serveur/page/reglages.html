@@ -1,0 +1,246 @@
+<!-- Page web du cadre : formulaires (météo, agenda, réveil), enregistrement et barre « Non enregistré » -->
+<script>
+function charger() {
+  return api('/api/config').then(function (r) { return r.json(); }).then(function (d) {
+    config = d.config;
+    remplirSansSignaler();
+    prendreReference();
+    viderHistorique();
+    afficherStatut(d.statut, d.maintenant, d.statut1);
+    if ($('menu-batterie').open) chargerBatterie();     // menu reste ouvert depuis la derniere visite
+    if ($('menu-jetons').open) chargerJetons();
+    if ($('menu-alertes').open) chargerEtatAlertes();
+    if ($('menu-agenda').open) verifierCalendriers();
+    chargerApercu();
+  });
+}
+function remplirFormulaires() {
+  remplirMeteo(); remplirAgenda(); remplirRebours(); remplirDispo(); remplirBus();
+  choisirValeur($('reveil'), config.reveilMin);
+  $('dev').checked = !!config.dev; choisirValeur($('devSecondes'), config.devSecondes || 30);
+  var n = config.nuit || {};
+  $('nuitActif').checked = !!n.actif; $('nuitDebut').value = heure2(n.debut) || '23:00'; $('nuitFin').value = heure2(n.fin) || '07:00';
+  choisirValeur($('nuitIntervalle'), n.intervalleMin || 60);
+  var hc = config.creuses || {};
+  $('creusesActif').checked = !!hc.actif; choisirValeur($('creusesIntervalle'), hc.intervalleMin || 60);
+  $('creusesCreneaux').innerHTML = '';
+  (hc.creneaux || []).forEach(function (c) { ajouterCreneau(c, 'creusesCreneaux'); });
+  remplirAlertes();
+  var rf = config.rafraich || {};
+  $('partiel').checked = rf.partiel !== false;
+  choisirValeur($('completH'), rf.completH || 24); choisirValeur($('seuilPartiel'), rf.seuil || 40);
+  $('methodePartiel').value = rf.methode || 'simple'; $('maxPartiels').value = String(rf.maxPartiels || 0);
+  $('bordure').value = String(config.affichage.bordureApercu); appliquerBordure();
+  var p = config.pochette;
+  if (p.version) $('pochetteActuelle').textContent = 'Dernière pochette : ' + (p.titre || '?') + ' — ' + (p.artiste || '?') + ' (' + new Date(p.t).toLocaleString('fr-FR') + ')';
+  // Avec Access, le raccourci s'identifie par son jeton de service (en-tetes), pas par l'adresse
+  $('urlPochette').textContent = location.origin + '/api/pochette?' + (session.access ? '' : 'cle=' + encodeURIComponent(cle));
+  $('aidePochetteAccess').classList.toggle('cache', !session.access);
+}
+function remplirMeteo() {
+  var m = config.meteo;
+  $('villeChoisie').textContent = 'Ville actuelle : ' + m.ville + ' (' + m.lat + ', ' + m.lon + ')';
+  $('mVent').checked = m.vent; $('mDetails').checked = m.details; $('mSoleil').checked = m.soleil;
+  choisirValeur($('mPas'), m.pasHeures); choisirValeur($('mNbJours'), m.nbJours); choisirValeur($('mNbHeures'), m.nbHeures || 6);
+  choisirValeur($('mCourbe'), m.courbeHeures || 24);
+
+}
+function remplirAgenda() {
+  $('aUrls').value = config.agenda.urls.join('\n');
+  choisirValeur($('aNb'), config.agenda.nb);
+  $('aLieu').checked = config.agenda.lieu !== false;
+  $('aAnniv').value = (config.agenda.anniversaires || []).map(function (a) {
+    return a.nom + ' ' + String(a.j).padStart(2, '0') + '/' + String(a.m).padStart(2, '0') + (a.a ? '/' + a.a : '');
+  }).join('\n');
+}// Compte a rebours : "Nom JJ/MM/AAAA", une date par ligne (l'annee est facultative)
+function remplirRebours() {
+  $('rTexte').value = ((config.rebours && config.rebours.liste) || []).map(function (d) {
+    return d.nom + ' ' + String(d.j).padStart(2, '0') + '/' + String(d.m).padStart(2, '0') + (d.a ? '/' + d.a : '');
+  }).join('\n');
+}
+function lireRebours() { return { texte: $('rTexte').value }; }
+
+function enregistrer(modif, idMsg) {
+  return api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { config = d.config; return rafraichir(); })
+    .then(function () { if (idMsg) message(idMsg, 'Enregistré. Le cadre se mettra à jour à son prochain réveil.'); })
+    .catch(function (e) { if (idMsg) message(idMsg, 'Erreur : ' + e.message); });
+}
+function changerMode(mode) { enregistrer({ mode: mode }); }
+// ---------------------------------------------------------------------
+// Un seul bouton Enregistrer : la barre en bas apparait des qu'un reglage differe de ce qui est enregistre
+// ---------------------------------------------------------------------
+var reference = null, enChargement = false;
+// Tous les reglages des formulaires (disposition, montage, meteo, agenda, bus, reveil)
+function modificationsCourantes() {
+  lireFormScene(); ranger();
+  return { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
+    affichage: { traits: $('traits').checked, rotation: rot },
+    meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), bus: lireBus(),
+    reveilMin: +$('reveil').value, dev: $('dev').checked, devSecondes: +$('devSecondes').value,
+    nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
+      intervalleMin: +$('nuitIntervalle').value },
+    creuses: { actif: $('creusesActif').checked, creneaux: lireCreneaux('creusesCreneaux'), intervalleMin: +$('creusesIntervalle').value },
+    alertes: lireAlertes(),
+    rafraich: { partiel: $('partiel').checked, completH: +$('completH').value, seuil: +$('seuilPartiel').value,
+      methode: $('methodePartiel').value, maxPartiels: +$('maxPartiels').value } };
+}
+// Detail des differences (reglage : enregistre -> actuel), pour comprendre ce que la page croit modifie
+function detailModifs() {
+  var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes())), d = [];
+  var cmp = function (a, b, ch) {
+    if (JSON.stringify(a) === JSON.stringify(b)) return;
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      Object.keys(Object.assign({}, a, b)).forEach(function (k) { cmp(a[k], b[k], ch ? ch + '.' + k : k); });
+    } else d.push(ch + ' : ' + JSON.stringify(a) + ' → ' + JSON.stringify(b));
+  };
+  cmp(r, c, '');
+  return d;
+}
+function basculerDetailModifs() {
+  var z = $('detailModifs');
+  if (!z.classList.contains('cache') || !reference) { z.classList.add('cache'); return; }
+  var d = detailModifs();
+  z.textContent = d.length ? 'Différences avec les réglages enregistrés :\n' + d.slice(0, 12).join('\n') : 'Aucune différence.';
+  z.style.whiteSpace = 'pre-line';
+  z.classList.remove('cache');
+}
+function texteBarre() {
+  var p = reference ? partiesModifiees() : [];
+  return (window.innerWidth < 480 ? 'Modifié' : 'Non enregistré') + (p.length ? ' : ' + p.join(', ') : '');
+}
+function prendreReference() { reference = JSON.stringify(modificationsCourantes()); verifierModifs(); }
+function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
+// Menus dont les reglages different de ceux enregistres
+var PARTIES = [['Scènes', ['disposition', 'dispositionPortrait', 'scenes']], ['Montage', ['ecrans', 'affichage']],
+  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Compte à rebours', ['rebours']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'creuses', 'rafraich']], ['Alertes', ['alertes']]];
+function partiesModifiees() {
+  var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes()));
+  return PARTIES.filter(function (p) { return p[1].some(function (k) { return JSON.stringify(r[k]) !== JSON.stringify(c[k]); }); })
+    .map(function (p) { return p[0]; });
+}
+var minuteurModifs = null;
+function verifierModifs() {
+  if (enChargement || reference === null) return;
+  clearTimeout(minuteurModifs);
+  minuteurModifs = setTimeout(function () {
+    var b = $('barreModifs');
+    if (b.classList.contains('fait')) return;
+    $('texteModifs').textContent = texteBarre();
+    b.classList.toggle('cache', !modifie());
+    if (b.classList.contains('cache')) $('detailModifs').classList.add('cache');
+    if (previsuActive) placerPanneau(); else ajusterMarge();
+  }, 120);
+}
+// Message a ne pas manquer apres un enregistrement : il reste affiche, et son menu s'ouvre (meme dans un autre groupe)
+function signaler(idMsg, t) { $(idMsg).textContent = t; montrerMenu($(idMsg).closest('details.menu').id); }
+function remplirSansSignaler() { enChargement = true; try { remplirFormulaires(); } finally { enChargement = false; } }
+function toutEnregistrer() {
+  var modif = modificationsCourantes();
+  var avant = modif.scenes.map(function (sc) { return (sc.creneaux || []).length; });
+  var plagesAvant = modif.creuses.creneaux.length;
+  var devAvant = !!config.dev;
+  $('texteModifs').textContent = 'Enregistrement…';
+  api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      config = d.config; villeTemp = null;
+      remplirSansSignaler();
+      reference = JSON.stringify(modificationsCourantes());
+      // Ce que le serveur n'a pas pu garder
+      if (d.ignorees && d.ignorees.length) signaler('msgAgenda', 'Anniversaires non compris : ' + d.ignorees.join(' ; ') + ' (format attendu : Prénom 14/03/2005)');
+      if (d.ignoreesRebours && d.ignoreesRebours.length) signaler('msgRebours', 'Lignes non comprises : ' + d.ignoreesRebours.join(' ; ') + ' (format attendu : Vacances 19/12/2026)');
+      if ((config.scenes || []).some(function (sc, i) { return sc.creneaux.length < avant[i]; }))
+        signaler('msgDispo', 'Un créneau a été ignoré : coche au moins un jour et mets une fin après le début.');
+      if ((config.creuses.creneaux || []).length < plagesAvant) signaler('msgReveil', 'Une plage d\'heures creuses a été ignorée : coche au moins un jour et mets une fin après le début.');
+      if ($('menu-alertes').open) chargerEtatAlertes();
+      if (config.dev && !devAvant) signaler('msgReveil', "Mode développement activé : il prendra effet au prochain réveil normal de la carte (ou appuie sur son bouton R pour la redémarrer tout de suite).");
+      var b = $('barreModifs');
+      b.classList.add('fait'); b.classList.remove('cache');
+      $('texteModifs').textContent = window.innerWidth < 480 ? 'Enregistré ✓' : 'Enregistré : le cadre se mettra à jour à son prochain réveil.';
+      setTimeout(function () { b.classList.remove('fait'); $('texteModifs').textContent = texteBarre(); b.classList.add('cache'); verifierModifs(); }, 2500);
+      return rafraichir();
+    })
+    .catch(function (e) { $('texteModifs').textContent = 'Erreur : ' + e.message + ' — réessaie'; });
+}
+function annulerModifs() {
+  villeTemp = null;
+  remplirSansSignaler();
+  prendreReference();
+  viderHistorique();
+  demanderPrevisu();
+}
+window.addEventListener('beforeunload', function (e) { if (modifie()) { e.preventDefault(); e.returnValue = ''; } });
+['input', 'change'].forEach(function (ev) { document.addEventListener(ev, verifierModifs); });
+function ecranBlanc() {
+  if (confirm("Effacer l'écran (tout blanc) ? À faire avant de débrancher la batterie pour une longue absence.")) enregistrer({ mode: 'blanc' });
+}
+var villeTemp = null;
+function chercherVille() {
+  var q = $('ville').value.trim(); if (!q) return;
+  fetch('https://geocoding-api.open-meteo.com/v1/search?count=5&language=fr&name=' + encodeURIComponent(q))
+    .then(function (r) { return r.json(); }).then(function (d) {
+      var zone = $('resultatsVille'); zone.innerHTML = '';
+      (d.results || []).forEach(function (v) {
+        var div = document.createElement('div');
+        div.textContent = v.name + ' — ' + [v.admin1, v.country].filter(Boolean).join(', ');
+        div.onclick = function () {
+          villeTemp = { ville: v.name, lat: Math.round(v.latitude * 100) / 100, lon: Math.round(v.longitude * 100) / 100 };
+          $('villeChoisie').textContent = 'Ville choisie : ' + v.name + ' (pense à enregistrer)';
+          zone.innerHTML = '';
+          demanderPrevisu(); verifierModifs();
+        };
+        zone.appendChild(div);
+      });
+      if (!d.results) zone.textContent = 'Aucune ville trouvée';
+    });
+}
+// Reglages tels qu'ils sont dans les formulaires (enregistres ou non)
+function lireMeteo() {
+  var m = { vent: $('mVent').checked, details: $('mDetails').checked, soleil: $('mSoleil').checked,
+    pasHeures: +$('mPas').value, nbHeures: +$('mNbHeures').value, nbJours: +$('mNbJours').value, courbeHeures: +$('mCourbe').value };
+  if (villeTemp) { m.ville = villeTemp.ville; m.lat = villeTemp.lat; m.lon = villeTemp.lon; }
+  return m;
+}
+function lireAgenda() { return { urls: $('aUrls').value.split('\n'), nb: +$('aNb').value, lieu: $('aLieu').checked, anniversairesTexte: $('aAnniv').value }; }
+function lireBus() {
+  var cases = $('busLignes').querySelectorAll('input'), choisies = [], toutes = true;
+  for (var i = 0; i < cases.length; i++) { if (cases[i].checked) choisies.push(cases[i].value); else toutes = false; }
+  return { lignes: toutes ? null : choisies, nb: +$('busNb').value, horizon: +$('busHorizon').value, sourceRT: $('busSource').value.trim() };
+}
+function tester() {
+  $('donnees').classList.remove('cache'); $('donnees').textContent = 'Chargement…';
+  api('/api/etat?ui=1').then(function (r) { return r.json(); })
+    .then(function (d) { $('donnees').textContent = JSON.stringify(d, null, 2); })
+    .catch(function (e) { $('donnees').textContent = 'Erreur : ' + e.message; });
+}
+// --- Etat de chaque calendrier de l'agenda : accessible ? combien d'evenements ? ---
+var minuteurCal = null, numCal = 0;
+function verifierCalendriers() {
+  var urls = $('aUrls').value.split('\n').map(function (u) { return u.trim(); }).filter(Boolean);
+  var z = $('etatCalendriers'), n = ++numCal;
+  if (!urls.length) { z.innerHTML = ''; return; }
+  z.textContent = 'Vérification des calendriers…';
+  api('/api/agenda-etat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls: urls }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (n !== numCal) return;
+      z.innerHTML = '';
+      d.calendriers.forEach(function (c) {
+        var l = document.createElement('div'); l.className = c.ok ? 'bon' : 'mauvais';
+        var court = c.url.replace(/^(webcal|https?):\/\//i, '');
+        court = court.length > 34 ? court.slice(0, 22) + '…' + court.slice(-10) : court;
+        var signe = document.createElement('span'); signe.className = 'signe'; signe.textContent = c.ok ? '✓' : '✗';
+        var t = document.createElement('span');
+        t.textContent = c.ok ? (c.nom || court) + ' — ' + (c.n ? c.n + ' évènement' + (c.n > 1 ? 's' : '') : 'aucun évènement') + ' dans les ' + d.jours + ' prochains jours'
+          : court + ' — ' + c.erreur;
+        t.title = c.url;
+        l.appendChild(signe); l.appendChild(t); z.appendChild(l);
+      });
+    })
+    .catch(function (e) { if (n === numCal) z.textContent = 'Vérification impossible : ' + e.message; });
+}
+$('aUrls').addEventListener('input', function () { clearTimeout(minuteurCal); minuteurCal = setTimeout(verifierCalendriers, 1200); });
+$('menu-agenda').addEventListener('toggle', function () { if (this.open && config) verifierCalendriers(); });
+</script>

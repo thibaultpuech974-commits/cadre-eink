@@ -23,26 +23,31 @@
 //   bus.js               horaires et temps reel des bus
 //   meteo.js             Open-Meteo
 //   agenda.js            calendriers ICS et anniversaires
+//   rebours.js           compte a rebours (jours restants avant une date)
 //   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
 //   acces.js             droits des jetons de service Cloudflare Access (carte, raccourci)
+//   alertes.js           alertes sur l'iPhone (cadre muet, batterie faible, horaires de bus perimes)
+//   page.js              page web de reglage, assemblee a partir des fichiers du dossier page/
 // =====================================================================
 
-// Page web de reglage : fichier a part, integre par Cloudflare au deploiement (regle "Text" de wrangler.jsonc)
-import INTERFACE from './interface.html';
+// Page web de reglage : assemblee par page.js a partir des fichiers du dossier page/
+import { PAGE } from './page.js';
 // Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
 import APERCU_WASM from './apercu.wasm';
 import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.js';
-import { JOURS_COURTS, MOIS, dateDuJour, deux, mural } from './temps.js';
+import { JOURS_COURTS, MOIS, TZ, dateDuJour, deux, mural, versUTC } from './temps.js';
 import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
 import { ROTATIONS } from './disposition.js';
-import { reveilNuit } from './scenes.js';
-import { GTFS_TANGO, oublierIndexBus, prochainsBus } from './bus.js';
+import { friseScenes, reveilNuit } from './scenes.js';
+import { grandPrix } from './f1.js';
+import { GTFS_TANGO, enregistrerIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
 import { construireTableau } from './tableau.js';
 import { empreinteImage, encoderPlan, planRafraichissement, resumePlan } from './rafraichissement.js';
 import { controlerAcces, routeEcrireJetons, routeLireJetons } from './acces.js';
+import { routeEssaiAlerte, routeEtatAlertes, verifierAlertes } from './alertes.js';
 
 // ---------------------------------------------------------------------
 //  Point d'entree
@@ -55,7 +60,7 @@ export default {
     if (chemin === '/' || chemin === '/index.html') {
       // no-cache : le navigateur revalide la page a chaque visite, pour qu'elle reste
       // accordee a la previsualisation (apercu.wasm) apres un deploiement
-      return new Response(INTERFACE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
+      return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
     }
     if (!chemin.startsWith('/api/')) return new Response('Introuvable', { status: 404 });
     // Cloudflare Access : ctx.access n'existe que si Access a authentifie la requete
@@ -80,12 +85,15 @@ export default {
         if (m === 'GET') return await routeLireJetons(env);
         if (m === 'POST') return await routeEcrireJetons(req, env);
       }
+      if (chemin === '/api/alertes' && m === 'GET') return await routeEtatAlertes(env);
+      if (chemin === '/api/alertes/essai' && m === 'POST') return await routeEssaiAlerte(req, env);
       if (chemin === '/api/session' && m === 'GET') return await routeSession(access);
       if (chemin === '/api/etat' && m === 'GET') return await routeEtat(url, env);
       if (chemin === '/api/config' && m === 'GET') return await routeLireConfig(env);
       if (chemin === '/api/config' && m === 'POST') return await routeEcrireConfig(req, env);
       if (chemin === '/api/agenda-etat' && m === 'POST') return await routeEtatAgenda(req, env);
       if (chemin === '/api/previsualiser' && m === 'POST') return await routePrevisualiser(req, env);
+      if (chemin === '/api/frise' && m === 'POST') return await routeFrise(req, env);
       if (chemin === '/api/apercu.wasm' && m === 'GET') return new Response(APERCU_WASM, { headers: { 'content-type': 'application/wasm', 'cache-control': 'private, max-age=3600' } });
       if (chemin === '/api/batterie' && m === 'GET') return texte((await env.CADRE.get('batterie' + (url.searchParams.get('ecran') === '1' ? '1' : ''))) || '{"pts":[]}');
       if (chemin === '/api/sauvegarde' && m === 'GET') return await routeSauvegarde(env);
@@ -104,8 +112,16 @@ export default {
       if (chemin === '/api/bus-test' && m === 'GET') return json(await prochainsBus((await lireConfig(env)).bus, Date.now(), env, true));
       return texte('Route inconnue', 404);
     } catch (e) {
+      // Garde une trace dans les journaux du Worker (voir "observability" dans wrangler.jsonc)
+      console.error('Erreur', req.method, chemin, ':', e && e.stack ? e.stack : e);
       return texte('Erreur : ' + (e && e.message ? e.message : e), 500);
     }
+  },
+  // Declencheur planifie (une fois par heure, "triggers" de wrangler.jsonc) : alertes sur l'iPhone
+  async scheduled(evenement, env, ctx) {
+    const travail = verifierAlertes(env).catch(e => console.error('Alertes :', e && e.message ? e.message : e));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(travail);
+    return travail;
   },
 };
 // Comment la page web est connectee : par Cloudflare Access (avec l'adresse email) ou par mot de passe
@@ -140,7 +156,7 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    for (const id of ['agenda', 'bus', 'f1']) if (!ici.has(id)) delete contenu[id];
+    for (const id of ['agenda', 'bus', 'f1', 'rebours']) if (!ici.has(id)) delete contenu[id];
     Object.assign(etat, contenu);
     // Scene affichee : son rythme (ou le rythme normal / de nuit), et reveil cale sur le prochain changement de scene
     const sc = contenu.scene;
@@ -202,6 +218,10 @@ async function routeEtat(url, env) {
     const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null, hb: (ancien && ancien.hb) || 0 };
+    // Version des reglages que la carte vient de recevoir, et depuis quand : la page affiche "en attente"
+    // tant que la carte n'a pas vu les derniers reglages, puis "appliques a 14:12"
+    nouveau.cv = cfg.version;
+    nouveau.cvt = ancien && ancien.cv === cfg.version && ancien.cvt ? ancien.cvt : maintenant;
     if (pct !== null) nouveau.pct = pct;
     if (crate !== null) nouveau.crate = crate;
     if (ev !== null) { nouveau.ev = ev; nouveau.ee = ee || 0; }
@@ -231,7 +251,7 @@ async function routeEtat(url, env) {
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
-      ancien.fwko !== nouveau.fwko ||
+      ancien.fwko !== nouveau.fwko || ancien.cv !== nouveau.cv ||
       // carte redemarree (bouton RESET, nouveau programme...) : son compteur d'eveil repart de zero
       (ev !== null && typeof ancien.ev === 'number' && ev < ancien.ev) || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
       // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
@@ -252,12 +272,16 @@ async function routeLireConfig(env) {
 async function routeEcrireConfig(req, env) {
   const modif = await req.json();
   const cfg = await lireConfig(env);
-  const ignorees = preparerModif(modif, cfg);
+  const rapport = {};
+  const ignorees = preparerModif(modif, cfg, rapport);
   if (typeof ignorees === 'string') return texte(ignorees, 400);
+  // Le contour de l'apercu ne concerne que la page web : la carte n'a rien a appliquer
+  const cles = Object.keys(modif);
+  const pourLaPage = cles.length === 1 && cles[0] === 'affichage' && Object.keys(modif.affichage).join() === 'bordureApercu';
   fusionner(cfg, modif);
-  cfg.version++;
+  if (!pourLaPage) cfg.version++;
   await ecrireConfig(env, cfg);
-  return json({ config: cfg, ignorees });
+  return json({ config: cfg, ignorees, ignoreesRebours: rapport.rebours || [] });
 }
 // --- Etat de chaque calendrier de l'agenda (page web) : accessible ? combien d'evenements a venir ? ---
 async function routeEtatAgenda(req, env) {
@@ -312,6 +336,34 @@ async function routePrevisualiser(req, env) {
   }
   return json({ scene: contenu.scene.nom, ecrans });
 }
+// --- Frise des scenes : quelle scene s'affichera a chaque heure des 7 prochains jours, avec les scenes
+// des formulaires (meme pas encore enregistrees). Rien n'est enregistre.
+async function routeFrise(req, env) {
+  let demande;
+  try { demande = await req.json(); } catch (e) { return texte('Demande illisible', 400); }
+  const cfg = await lireConfig(env);
+  const modif = { scenes: (demande.modif || {}).scenes, ecrans: (demande.modif || {}).ecrans };
+  if (modif.scenes === undefined) delete modif.scenes;
+  if (modif.ecrans === undefined) delete modif.ecrans;
+  const err = preparerModif(modif, cfg);
+  if (typeof err === 'string') return texte(err, 400);
+  fusionner(cfg, modif);
+  const scenes = cfg.scenes || [];
+  const maintenant = Date.now(), w = mural(maintenant);
+  const jours = [];
+  for (let k = 0; k < 7; k++) {
+    const t0 = versUTC({ y: w.y, m: w.m, d: w.d + k }, TZ), t1 = versUTC({ y: w.y, m: w.m, d: w.d + k + 1 }, TZ);
+    jours.push({ t0, t1, nom: JOURS_COURTS[(w.js + k) % 7].toLowerCase() + '. ' + mural(t0 + 12 * 3600e3).d });
+  }
+  // Periodes du prochain Grand Prix, pour les scenes "semaine / week-end de GP" (lecture seule du KV)
+  let gp = null;
+  if (scenes.some(sc => sc.f1)) {
+    const kv = env.CADRE;
+    const lecture = { get: (...a) => kv.get(...a), getWithMetadata: (...a) => kv.getWithMetadata(...a), put: async () => {}, delete: async () => {} };
+    try { gp = await grandPrix(maintenant, Object.assign({}, env, { CADRE: lecture })); } catch (e) { console.log('Frise, F1 :', e.message); }
+  }
+  return json({ maintenant, jours, noms: scenes.map(sc => sc.nom), segments: friseScenes(scenes, jours[0].t0, jours[6].t1, gp) });
+}
 // --- Sauvegarde des reglages (fichier telecharge depuis la page web) et restauration ---
 async function routeSauvegarde(env) {
   const cfg = await lireConfig(env);
@@ -340,7 +392,7 @@ async function routeRestaurer(req, env) {
   for (const k of ['photo', 'pochette', 'firmware']) if (actuel[k]) cfg[k] = actuel[k];
   cfg.version = actuel.version + 1;
   await ecrireConfig(env, cfg);
-  if (s.bus && Array.isArray(s.bus.passages)) { await env.CADRE.put('bus', JSON.stringify(s.bus)); oublierIndexBus(); }
+  if (s.bus && Array.isArray(s.bus.passages)) await enregistrerIndexBus(env, JSON.stringify(s.bus), s.bus);
   return json({ config: cfg });
 }
 async function routeEnvoyerPhoto(req, url, env) {
@@ -389,8 +441,7 @@ async function routeIndexBus(req, env) {
   if (t.length > 3000000) return texte('Index trop gros : choisis moins d\'arrets', 400);
   const idx = JSON.parse(t);
   if (!Array.isArray(idx.passages)) return texte('Index invalide', 400);
-  await env.CADRE.put('bus', t);
-  oublierIndexBus();
+  await enregistrerIndexBus(env, t, idx);
   return json({ ok: true, passages: idx.passages.length });
 }
 async function routeBinaire(env, cle, type) {

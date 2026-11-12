@@ -1,6 +1,6 @@
-// Page web, menu Batterie : périodes de charge et estimation de l'autonomie (fonctions de interface.html)
+// Page web, menu Batterie : périodes de charge et estimation de l'autonomie (fonctions de serveur/page/batterie.html et etat.html)
 import fs from 'fs';
-const page = fs.readFileSync('../../serveur/interface.html', 'utf8');
+const page = ['etat', 'batterie'].map(f => fs.readFileSync('../../serveur/page/' + f + '.html', 'utf8')).join('\n');
 const extrait = nom => {
   const i = page.indexOf('function ' + nom + '(');
   for (let k = page.indexOf('{', i), n = 0; k < page.length; k++) {

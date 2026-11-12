@@ -8,9 +8,10 @@ function listeCreneaux(o) {
   if (Array.isArray(o.creneaux)) return o.creneaux;
   return o.jours ? [{ jours: o.jours, debut: o.debut, fin: o.fin }] : [];   // anciens reglages
 }
-export function dansCreneau(o, maintenant) {
+// (w : heure murale de 'maintenant', si elle est deja calculee)
+export function dansCreneau(o, maintenant, w = mural(maintenant)) {
   if (o.toujours) return true;
-  const w = mural(maintenant), jour = (w.js + 6) % 7, min = w.hh * 60 + w.mi;
+  const jour = (w.js + 6) % 7, min = w.hh * 60 + w.mi;
   return listeCreneaux(o).some(c => (c.jours || [])[jour] && min >= enMinutes(c.debut) && min < enMinutes(c.fin));
 }
 // Instant (ms) du debut du prochain creneau, ou null
@@ -37,7 +38,7 @@ function dansNuit(n, maintenant) {
   const depuis = (min - d + 1440) % 1440, duree = (f - d + 1440) % 1440;
   return depuis < duree ? depuis : -1;
 }
-// Intervalle de reveil (s) : la nuit, reveil espace, et cale sur la fin de la nuit
+// Intervalle de reveil (s) : la nuit et pendant les heures creuses, reveil espace, et cale sur la fin de la periode
 export function reveilNuit(cfg, maintenant, normal) {
   const n = cfg.nuit, depuis = dansNuit(n, maintenant);
   if (depuis >= 0) {
@@ -45,6 +46,18 @@ export function reveilNuit(cfg, maintenant, normal) {
     const resteS = ((enMinutes(n.fin) - (w.hh * 60 + w.mi) + 1440) % 1440) * 60 - w.ss;
     const inter = Math.max(15, Math.min(240, n.intervalleMin || 60)) * 60;
     return Math.max(60, Math.min(inter, resteS + 5));
+  }
+  // Heures creuses : meme principe, sur des plages jours + heures (elles ne passent pas minuit) ;
+  // jamais plus souvent que le rythme normal
+  const c = cfg.creuses;
+  if (c && c.actif) {
+    const w = mural(maintenant), jour = (w.js + 6) % 7, min = w.hh * 60 + w.mi;
+    const plage = (c.creneaux || []).find(x => (x.jours || [])[jour] && min >= enMinutes(x.debut) && min < enMinutes(x.fin));
+    if (plage) {
+      const resteS = (enMinutes(plage.fin) - min) * 60 - w.ss;
+      const inter = Math.max(normal, Math.max(15, Math.min(240, c.intervalleMin || 60)) * 60);
+      return Math.max(60, Math.min(inter, resteS + 5));
+    }
   }
   return normal;
 }
@@ -56,7 +69,7 @@ export function texteCreneaux(o) {
 // --- Scenes ---
 const heureOK = h => (/^\d{1,2}:\d{2}$/.test(String(h)) ? String(h) : null);
 const dateOK = d => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d) : '');
-function validerCreneaux(liste) {
+export function validerCreneaux(liste) {
   return (Array.isArray(liste) ? liste : []).map(c => ({
     jours: [0, 1, 2, 3, 4, 5, 6].map(i => (c && c.jours || [])[i] ? 1 : 0),
     debut: heureOK(c && c.debut) || '07:00', fin: heureOK(c && c.fin) || '08:00',
@@ -80,15 +93,15 @@ export function validerScenes(liste, ecrans) {
   });
 }
 // Une scene est active si toutes ses conditions sont remplies (sans condition : toujours active)
-export function sceneActive(sc, maintenant, gp) {
-  const jour = dateDuJour(mural(maintenant));
+export function sceneActive(sc, maintenant, gp, w = mural(maintenant)) {
+  const jour = dateDuJour(w);
   if (sc.du && jour < sc.du) return false;
   if (sc.au && jour > sc.au) return false;
   if (sc.f1) {
     const p = gp && gp.periodes && gp.periodes[sc.f1];
     if (!p || maintenant < p[0] || maintenant >= p[1]) return false;
   }
-  if ((sc.creneaux || []).length && !dansCreneau({ creneaux: sc.creneaux }, maintenant)) return false;
+  if ((sc.creneaux || []).length && !dansCreneau({ creneaux: sc.creneaux }, maintenant, w)) return false;
   return true;
 }
 // Prochain instant ou une scene peut commencer ou finir (pour que le cadre se reveille pile a ce moment)
@@ -109,4 +122,37 @@ export function prochainChangementScene(scenes, maintenant, gp) {
   }
   const futurs = t.filter(x => x && x > maintenant);
   return futurs.length ? Math.min(...futurs) : null;
+}
+// Frise : la scene affichee a chaque instant entre 'debut' (un minuit, heure de Paris) et 'fin'.
+// Renvoie les segments dans l'ordre : [{ t : debut du segment (ms), scene : numero dans la liste, -1 = Par defaut }].
+// On releve tous les instants ou quelque chose peut changer (debut et fin de chaque creneau, de chaque
+// periode de dates, du Grand Prix), puis on regarde quelle scene est active juste apres chacun.
+export function friseScenes(scenes, debut, fin, gp) {
+  const instants = new Set([debut]);
+  const w0 = mural(debut), nbJours = Math.ceil((fin - debut) / 86400e3) + 1;
+  for (const sc of scenes) {
+    for (const c of sc.creneaux || []) {
+      for (let k = 0; k < nbJours; k++) {
+        if (!(c.jours || [])[(w0.js + 6 + k) % 7]) continue;
+        for (const champ of ['debut', 'fin']) {
+          const m = enMinutes(c[champ]);
+          instants.add(versUTC({ y: w0.y, m: w0.m, d: w0.d + k, hh: Math.floor(m / 60), mi: m % 60 }, TZ));
+        }
+      }
+    }
+    const p = sc.f1 && gp && gp.periodes && gp.periodes[sc.f1];
+    if (p) { instants.add(p[0]); instants.add(p[1]); }
+    for (const [d, lendemain] of [[sc.du, 0], [sc.au, 1]]) {
+      if (!d) continue;
+      const [y, m, j] = d.split('-').map(Number);
+      instants.add(versUTC({ y, m, d: j + lendemain }, TZ));
+    }
+  }
+  const res = [];
+  for (const t of [...instants].filter(x => x >= debut && x < fin).sort((a, b) => a - b)) {
+    const w = mural(t);
+    const scene = scenes.findIndex(sc => sceneActive(sc, t, gp, w));
+    if (!res.length || res[res.length - 1].scene !== scene) res.push({ t, scene });
+  }
+  return res;
 }
