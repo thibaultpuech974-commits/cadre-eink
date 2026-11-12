@@ -48,6 +48,7 @@ void texte(int x, int y, const char* s);
 void texteDroite(int xDroite, int y, const char* s);
 void texteCentre(int xCentre, int y, const char* s);
 void texteTronque(int x, int y, const char* s, int largeurMax);
+void texteTronqueMot(int x, int y, const char* s, int largeurMax);
 int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax, bool dessiner);
 int texteMultiligne(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax);
 int compterLignes(const char* s, int largeurMax, int lignesMax);
@@ -119,6 +120,41 @@ void texteTronque(int x, int y, const char* s, int largeurMax) {
   texte(x, y, tampon);
 }
 
+// Comme texteTronque, mais coupe a la fin d'un mot ("GP de Las Vegas..." plutot que "GP de Las Veg..."),
+// sans laisser de separateur (" -", " ·", ",") avant les points. Un premier mot trop long pour la largeur
+// est coupe au caractere.
+void texteTronqueMot(int x, int y, const char* s, int largeurMax) {
+  if (largeurTexte(s) <= largeurMax) { texte(x, y, s); return; }
+  char t[200];
+  int n = strlen(s);
+  if (n > (int)sizeof t - 4) n = sizeof t - 4;
+  for (; n > 0; n--) {
+    if (s[n] != ' ') continue;                   // coupe devant chaque espace, du plus long au plus court
+    int k = n;
+    for (;;) {                                   // retire les espaces et separateurs en fin de morceau
+      if (k > 0 && strchr(" -,;:", s[k - 1])) k--;
+      else if (k > 1 && (uint8_t)s[k - 2] == 0xC2 && (uint8_t)s[k - 1] == 0xB7) k -= 2;   // "·"
+      else break;
+    }
+    if (k == 0) continue;
+    memcpy(t, s, k);
+    strcpy(t + k, "...");
+    if (largeurTexte(t) <= largeurMax) { texte(x, y, t); return; }
+  }
+  texteTronque(x, y, s, largeurMax);
+}
+
+// Separateur isole ("-", "·", "|") : quand il tombe sur une coupure de ligne, il disparait
+// ("GP de Las Vegas" / "EL1" plutot que "GP de Las Vegas -" / "EL1")
+static bool estSeparateur(const char* p, int n) {
+  return (n == 1 && strchr("-|", p[0])) || (n == 2 && (uint8_t)p[0] == 0xC2 && (uint8_t)p[1] == 0xB7);
+}
+static void retirerSeparateurFinal(char* ligne) {
+  int n = strlen(ligne);
+  const char* esp = strrchr(ligne, ' ');
+  if (esp && estSeparateur(esp + 1, ligne + n - esp - 1)) ligne[esp - ligne] = 0;
+}
+
 // Texte sur plusieurs lignes (coupure aux espaces). Renvoie le y de la ligne suivante.
 // dessiner = false : rien n'est trace, on mesure seulement la place prise (voir compterLignes).
 int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax, bool dessiner) {
@@ -129,6 +165,8 @@ int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int
     while (*p == ' ') p++;
     const char* fin = p;
     while (*fin && *fin != ' ') fin++;
+    if (!*p) break;
+    if (!ligne[0] && lignes > 0 && estSeparateur(p, fin - p)) { p = fin; continue; }   // en debut de ligne
     char essai[240];
     snprintf(essai, sizeof essai, "%s%s%.*s", ligne, ligne[0] ? " " : "", (int)(fin - p), p);
     if (ligne[0] && largeurTexte(essai) > largeurMax) {
@@ -136,9 +174,10 @@ int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int
       if (lignes == lignesMax) {
         char reste[280];
         snprintf(reste, sizeof reste, "%s %s", ligne, p);
-        if (dessiner) texteTronque(x, y, reste, largeurMax);
+        if (dessiner) texteTronqueMot(x, y, reste, largeurMax);
         return y + interligne;
       }
+      retirerSeparateurFinal(ligne);
       if (dessiner) texteTronque(x, y, ligne, largeurMax);   // tronque : un mot seul peut depasser la largeur
       y += interligne;
       ligne[0] = 0;
@@ -497,104 +536,99 @@ void widgetColonnes(JsonArray liste, Boite b, bool jours) {
   }
 }
 
-// Agenda : les evenements sont regroupes par jour (le jour n'est ecrit qu'une fois, avec un peu d'espace
-// avant le jour suivant), et le lieu suit le titre quand il y a la place ("Colle de maths · B12").
+// Agenda : une pastille par jour (numero du jour en grand, jour de la semaine en petit dessous), un filet
+// pointille entre deux jours, puis l'heure et le titre de chaque evenement de ce jour (lieu derriere).
+// On affiche autant d'evenements que possible avec une ligne chacun ; la place qui reste sert ensuite aux
+// titres trop longs : une 2e ligne pour chacun (les premiers servis d'abord), puis une 3e.
 void widgetAgenda(JsonVariant ag, Boite b) {
   if (ag.isNull()) return;
   policeT(20, false);
   if (ag["erreur"].is<const char*>()) { texteTronque(b.x, b.y + asc() + 6, ag["erreur"].as<const char*>(), b.w); return; }
   JsonArray evts = ag.as<JsonArray>();
   if (evts.size() == 0) { texte(b.x, b.y + asc() + 6, "Rien de prévu"); return; }
-  policeT(17, false);
-  int aE = asc();
-  int pas = aE * 17 / 10 + 1;
-  int ecartJour = pas / 3;                    // espace en plus entre deux jours
-  // Nombre de lignes qui tiennent, espaces entre les jours compris
-  int lignes = 0;
-  {
-    int yy = b.y + aE + 4;
-    const char* prec = nullptr;
-    for (JsonObject e : evts) {
-      const char* j = e["j"] | "";
-      if (prec && strcmp(j, prec) != 0) yy += ecartJour;
-      if (yy > b.y + b.h) break;
-      lignes++; yy += pas; prec = j;
-    }
+  const int MAXE = 14;
+  JsonObject ev[MAXE];
+  int total = 0;
+  for (JsonObject e : evts) { if (total >= MAXE) break; ev[total++] = e; }
+  // Serveur ancien (sans "n" ni "s") : le libelle du jour ("Ven 20") va dans la pastille, en petit
+  auto numero = [&](int k) -> const char* { return ev[k]["n"] | ""; };
+  auto semaine = [&](int k) -> const char* { return ev[k]["s"] | (ev[k]["j"] | ""); };
+  auto memeJour = [&](int k, int g) { return !strcmp(ev[k]["j"] | "", ev[g]["j"] | ""); };
+
+  // Pastille : aussi large que le plus grand numero ou jour de la semaine (25 % du bloc au plus)
+  policeT(25, true); int aN = asc(), colP = largeurTexte("28");
+  policeT(11, false); int aW = asc();
+  for (int k = 0; k < total; k++) {
+    if (numero(k)[0]) colP = max(colP, (int)largeurTexte(semaine(k)));
   }
-  lignes = max(1, lignes);
-  // Colonne des jours : aussi large que le libelle le plus long ("Aujourd'hui"...), dans la limite de 35 %
-  policeT(17, true);
-  int colJour = 0, kj = 0;
-  for (JsonObject e : evts) {
-    if (kj++ >= lignes) break;
-    colJour = max(colJour, (int)largeurTexte(e["j"] | ""));
-  }
-  colJour = min(colJour + 16, b.w * 35 / 100);
-  policeT(17, false);
-  // Colonne des heures assez large pour le texte le plus long affiche ("00:00", "en cours"...)
+  policeT(14, true);
+  for (int k = 0; k < total; k++) if (!numero(k)[0]) colP = max(colP, (int)largeurTexte(semaine(k)));
+  colP = min(colP + 16, b.w / 4);
+  int hP = aN + 6 + aW + 3;                      // hauteur de la pastille
+  // Colonne des heures, en plus petit que les titres ; devant le titre si le bloc est trop etroit
+  policeT(14, false);
   int largHeure = largeurTexte("00:00");
-  int k = 0;
-  for (JsonObject e : evts) {
-    if (k++ >= lignes) break;
-    largHeure = max(largHeure, (int)largeurTexte(e["h"] | ""));
-  }
-  largHeure = min(largHeure + 14, b.w * 3 / 10);
-  bool colHeure = b.w >= colJour + largHeure + 120;
-  int xHeure = b.x + colJour, xTitre = xHeure + largHeure;
-  // Nombre d'evenements affiches : comme avec une ligne chacun (un titre long ne chasse pas un evenement)
-  int n = min(min(lignes, (int)evts.size()), 14);
-  // La place qui reste en bas sert aux titres trop longs (lieu compris) : une 2e ligne pour chacun
-  // (les premiers evenements servis d'abord), puis une 3e s'il reste encore de la place
-  int inter = aE * 13 / 10 + 1;                  // lignes d'un meme titre plus serrees que deux evenements
+  for (int k = 0; k < total; k++) largHeure = max(largHeure, (int)largeurTexte(ev[k]["h"] | ""));
+  largHeure = min(largHeure + 12, b.w * 3 / 10);
+  bool colHeure = b.w - colP - largHeure >= 110;
+  int xH = b.x + colP, xT = colHeure ? xH + largHeure : xH, lT = b.x + b.w - xT;
+  policeT(17, false);
+  int aE = asc(), inter = aE * 13 / 10 + 1, pas = aE * 17 / 10 + 1, ecart = pas - aE, desc = aE / 4 + 1;
+  int sep = pas * 7 / 10;                        // entre deux jours, filet au milieu
+
+  // Texte d'un evenement : heure devant si elle n'a pas sa colonne, lieu derriere si demande
   char tampon[280];
-  // Texte d'un evenement (heure devant si elle n'a pas sa colonne, lieu derriere si demande) et son x
-  auto composer = [&](JsonObject e, bool avecLieu, int* x) -> const char* {
-    const char* h = e["h"] | "";
-    const char* titre = e["t"] | "";
-    const char* lieu = e["l"] | "";
-    bool separe = h[0] && colHeure;
-    *x = separe ? xTitre : xHeure;
-    if (!(h[0] && !separe) && !(avecLieu && lieu[0])) return titre;
-    snprintf(tampon, sizeof tampon, "%s%s%s%s%s", separe ? "" : h, h[0] && !separe ? " " : "", titre,
-             avecLieu && lieu[0] ? " · " : "", avecLieu ? lieu : "");
+  auto composer = [&](int k, bool avecLieu) -> const char* {
+    const char* h = ev[k]["h"] | "";
+    const char* titre = ev[k]["t"] | "";
+    const char* lieu = ev[k]["l"] | "";
+    bool hDevant = h[0] && !colHeure, l = avecLieu && lieu[0];
+    if (!hDevant && !l) return titre;
+    snprintf(tampon, sizeof tampon, "%s%s%s%s%s", hDevant ? h : "", hDevant ? " " : "", titre, l ? " · " : "", l ? lieu : "");
     return tampon;
   };
-  int voulu[14], nl[14];
-  int i = 0, yy = b.y + aE + 4;
-  const char* prec = nullptr;
-  for (JsonObject e : evts) {
-    if (i >= n) break;
-    const char* j = e["j"] | "";
-    if (prec && strcmp(j, prec) != 0) yy += ecartJour;
-    int x;
-    const char* t = composer(e, true, &x);
-    voulu[i] = compterLignes(t, b.x + b.w - x, 3);
-    nl[i++] = 1;
-    prec = j; yy += pas;
-  }
-  int reste = b.y + b.h - (yy - pas);            // sous la derniere ligne, si chacun n'en prend qu'une
+  int voulu[MAXE], nl[MAXE];
+  for (int k = 0; k < total; k++) { voulu[k] = compterLignes(composer(k, true), lT, 3); nl[k] = 1; }
+  // Hauteur prise par les m premiers evenements
+  auto hauteur = [&](int m) {
+    int h = 0;
+    for (int i = 0; i < m;) {
+      int g = i, ht = 0;
+      for (; i < m && memeJour(i, g); i++) ht += aE + (nl[i] - 1) * inter + (i + 1 < m && memeJour(i + 1, g) ? ecart : 0);
+      h += max(ht + desc, hP) + (i < m ? sep : 0);
+    }
+    return h;
+  };
+  int n = total;
+  while (n > 1 && hauteur(n) > b.h) n--;
   for (int tour = 2; tour <= 3; tour++)
-    for (i = 0; i < n; i++)
-      if (voulu[i] >= tour && reste >= inter) { nl[i] = tour; reste -= inter; }
-  i = 0; yy = b.y + aE + 4; prec = nullptr;
-  for (JsonObject e : evts) {
-    if (i >= n) break;
-    const char* j = e["j"] | "";
-    bool nouveauJour = !prec || strcmp(j, prec) != 0;
-    if (prec && nouveauJour) yy += ecartJour;
-    if (nouveauJour) { policeT(17, true); texteTronque(b.x, yy, j, colJour - 8); }
-    policeT(17, false);
-    const char* h = e["h"] | "";
-    if (h[0] && colHeure) texteTronque(xHeure, yy, h, largHeure - 8);
-    int x;
-    const char* t = composer(e, false, &x);
-    int larg = b.x + b.w - x;
-    // Le lieu suit le titre : sur plusieurs lignes s'il y a la place, sinon seulement s'il reste
-    // sur la ligne de quoi en lire le debut
-    const char* lieu = e["l"] | "";
-    if (lieu[0] && (nl[i] > 1 || largeurTexte(t) + largeurTexte(" · ") + 48 <= larg)) t = composer(e, true, &x);
-    texteMultiligne(x, yy, t, larg, inter, nl[i]);
-    prec = j; yy += pas + (nl[i] - 1) * inter; i++;
+    for (int k = 0; k < n; k++)
+      if (voulu[k] >= tour) { nl[k] = tour; if (hauteur(n) > b.h) nl[k] = tour - 1; }
+
+  int y = b.y;
+  for (int i = 0; i < n;) {
+    int g = i, yTop = y, cx = b.x + (colP - 12) / 2;
+    if (numero(g)[0]) {
+      policeT(25, true); texteCentre(cx, yTop + aN, numero(g));
+      policeT(11, false); texteCentre(cx, yTop + aN + 6 + aW, semaine(g));
+    } else {
+      policeT(14, true); texteTronque(b.x, yTop + aE, semaine(g), colP - 8);
+    }
+    int yy = yTop + aE;
+    for (; i < n && memeJour(i, g); i++) {
+      const char* h = ev[i]["h"] | "";
+      if (h[0] && colHeure) { policeT(14, false); texteTronque(xH, yy, h, largHeure - 8); }
+      policeT(17, false);
+      // Le lieu suit le titre : sur plusieurs lignes s'il y a la place, sinon seulement s'il reste
+      // sur la ligne de quoi en lire le debut
+      const char* t = composer(i, false);
+      const char* lieu = ev[i]["l"] | "";
+      if (lieu[0] && (nl[i] > 1 || largeurTexte(t) + largeurTexte(" · ") + 48 <= lT)) t = composer(i, true);
+      texteMultiligne(xT, yy, t, lT, inter, nl[i]);
+      yy += (nl[i] - 1) * inter + pas;
+    }
+    y = yTop + max(yy - pas - yTop + desc, hP);
+    if (i < n) { ligneHPointillee(b.x, b.x + b.w, y + sep / 2); y += sep; }
   }
 }
 
