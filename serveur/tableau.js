@@ -6,6 +6,7 @@ import { prochainsBus } from './bus.js';
 import { chargerMeteo, meteo } from './meteo.js';
 import { agenda } from './agenda.js';
 import { grandPrix } from './f1.js';
+import { compteARebours } from './rebours.js';
 
 // ---------------------------------------------------------------------
 //  Tableau de bord : date + meteo + agenda
@@ -65,6 +66,7 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
     }
   }
   if (presents.has('agenda')) res.agenda = avecAgenda ? resAgenda : { erreur: 'Aucun calendrier configuré' };
+  if (presents.has('rebours')) res.rebours = compteARebours(cfg.rebours, maintenant);
   if (presents.has('bus')) {
     res.bus = await pBus;
     // Les minutes restantes ne sont pas affichees : on les retire pour que la signature

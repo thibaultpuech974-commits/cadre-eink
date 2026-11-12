@@ -110,7 +110,7 @@ export function planRafraichissement(prec, metaPrec, nouv, p, cfg) {
   if (R.maxPartiels && p.np >= R.maxPartiels) return { type: 'C', raison: 'serie' };
   return { type: lettre, zones, part };
 }
-// Reponse binaire lue par la carte : 1 octet (R, C, N), ou la lettre de la methode partielle (P, D, I),
+// Reponse binaire lue par la carte : 1 octet (R, C, N), ou la lettre de la methode partielle (P, D, T, Q, I),
 // le nombre de zones, puis pour chaque zone x, y, largeur, hauteur (2 octets chacun, petit-boutiste) et
 // l'ancien contenu de la zone, ligne par ligne
 export function encoderPlan(plan, prec) {

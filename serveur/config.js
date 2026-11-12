@@ -1,7 +1,7 @@
 // Réglages : valeurs par défaut, lecture/écriture dans le KV, migration des anciens réglages, vérification d'une modification
 import { MODES, fusionner } from './commun.js';
 import { ROTATIONS, grille, validerDisposition } from './disposition.js';
-import { validerScenes } from './scenes.js';
+import { validerCreneaux, validerScenes } from './scenes.js';
 
 export const CONFIG_DEFAUT = {
   mode: 'tableau',
@@ -10,10 +10,15 @@ export const CONFIG_DEFAUT = {
   dev: false, devSecondes: 30,     // mode developpement : la carte ne dort pas
   // Mode nuit : reveils espaces (economie de batterie), la plage peut passer minuit
   nuit: { actif: false, debut: '23:00', fin: '07:00', intervalleMin: 60 },
+  // Heures creuses : plages (jours + heures) ou personne ne regarde le cadre ; reveils espaces, comme la nuit
+  creuses: { actif: false, creneaux: [], intervalleMin: 60 },
+  // Alertes sur l'iPhone (notifications ntfy, voir alertes.js) : sujet = nom du canal, long et au hasard
+  alertes: { actif: false, sujet: '', muet: true, batterie: true, bus: true, seuilBatterie: 20 },
   // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
   // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
-  // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double (deux passes, pixels plus
-  // francs) ou inversion (chaque zone passe en negatif puis revient : moins de traces, petit clignotement).
+  // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double, triple ou quadruple (2 a 4
+  // passes : les pixels qui changent recoivent plusieurs impulsions, traces mieux effacees, ~0,5 s par
+  // passe) ou inversion (chaque zone passe en negatif puis revient : moins de traces, petit clignotement).
   // maxPartiels : rafraichissement complet apres ce nombre de mises a jour partielles (0 = pas de limite)
   rafraich: { partiel: true, completH: 24, seuil: 40, methode: 'simple', maxPartiels: 0 },
   meteo: {
@@ -26,7 +31,10 @@ export const CONFIG_DEFAUT = {
   // Scenes : dispositions affichees pendant une periode (creneaux, Grand Prix, dates), par ordre de priorite.
   // Hors de toute scene, c'est la disposition "par defaut" (disposition / dispositionPortrait).
   scenes: [],
-  agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [] },
+  // lieu : affiche le lieu de chaque evenement (champ LOCATION du calendrier) apres son titre
+  agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [], lieu: true },
+  // Compte a rebours : dates a venir (nom, jour, mois, annee ou 0 = chaque annee), saisies sur la page web
+  rebours: { liste: [] },
   // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
   disposition: [
     { id: 'date', x: 0, y: 0, w: 12, h: 1 },
@@ -86,8 +94,9 @@ export function migrerScenes(cfg, lu) {
 export async function ecrireConfig(env, cfg) {
   await env.CADRE.put('config', JSON.stringify(cfg));
 }
-// Verifie et nettoie une modification des reglages (renvoie les anniversaires illisibles, ou un message d'erreur)
-export function preparerModif(modif, cfg) {
+// Verifie et nettoie une modification des reglages (renvoie les anniversaires illisibles, ou un message d'erreur).
+// rapport (facultatif) recoit les autres lignes non comprises : rapport.rebours (dates du compte a rebours)
+export function preparerModif(modif, cfg, rapport = {}) {
   delete modif.version; delete modif.photo; delete modif.pochette; delete modif.firmware;
   if (modif.mode && !MODES.includes(modif.mode)) return 'Mode inconnu';
   if (modif.ecrans) {
@@ -111,6 +120,20 @@ export function preparerModif(modif, cfg) {
       maxPartiels: [0, 3, 6, 12].includes(+r.maxPartiels) ? +r.maxPartiels : (actuel.maxPartiels || 0),
     };
   }
+  if (modif.creuses !== undefined) {
+    const c = modif.creuses || {}, actuel = cfg.creuses || CONFIG_DEFAUT.creuses;
+    modif.creuses = { actif: !!c.actif, creneaux: validerCreneaux(c.creneaux === undefined ? actuel.creneaux : c.creneaux),
+      intervalleMin: [30, 60, 120, 240].includes(+c.intervalleMin) ? +c.intervalleMin : (actuel.intervalleMin || 60) };
+  }
+  if (modif.alertes !== undefined) {
+    const a = modif.alertes || {}, actuel = cfg.alertes || CONFIG_DEFAUT.alertes;
+    const val = (k, defaut) => (a[k] === undefined ? defaut : a[k]);
+    const sujet = String(val('sujet', actuel.sujet) || '').trim();
+    const actif = !!val('actif', actuel.actif);
+    if (sujet ? !SUJET_ALERTES.test(sujet) : actif) return 'Alertes : le sujet ntfy doit faire 10 à 64 caractères (lettres sans accent, chiffres, - ou _)';
+    modif.alertes = { actif, sujet, muet: !!val('muet', actuel.muet), batterie: !!val('batterie', actuel.batterie), bus: !!val('bus', actuel.bus),
+      seuilBatterie: [10, 20, 30].includes(+a.seuilBatterie) ? +a.seuilBatterie : (actuel.seuilBatterie || 20) };
+  }
   if (modif.agenda && Array.isArray(modif.agenda.urls)) {
     modif.agenda.urls = modif.agenda.urls.map(u => String(u).trim()).filter(Boolean);
   }
@@ -121,9 +144,22 @@ export function preparerModif(modif, cfg) {
     ignorees = r.ignorees;
     delete modif.agenda.anniversairesTexte;
   }
+  // Compte a rebours : texte saisi sur la page ("Vacances de Noël 19/12/2026", une date par ligne),
+  // ou liste deja prete (restauration d'une sauvegarde)
+  if (modif.rebours !== undefined) {
+    const r = modif.rebours || {};
+    let liste = Array.isArray(r.liste) ? r.liste : [];
+    if (typeof r.texte === 'string') {
+      const lu = lireAnniversaires(r.texte);
+      liste = lu.liste;
+      rapport.rebours = lu.ignorees;
+    }
+    modif.rebours = { liste: liste.filter(d => d && String(d.nom || '').trim() && d.j >= 1 && d.j <= 31 && d.m >= 1 && d.m <= 12)
+      .map(d => ({ nom: String(d.nom).trim().slice(0, 40), j: d.j | 0, m: d.m | 0, a: d.a >= 2000 && d.a <= 2100 ? d.a | 0 : 0 })).slice(0, 12) };
+  }
   return ignorees;
 }
-// Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative)
+// Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative) : anniversaires, compte a rebours
 function lireAnniversaires(texte) {
   const liste = [], ignorees = [];
   for (const brut of texte.split(/\r?\n/)) {
@@ -136,5 +172,7 @@ function lireAnniversaires(texte) {
   }
   return { liste, ignorees };
 }
+// Sujet ntfy des alertes : il tient lieu de mot de passe, d'ou la longueur minimale (meme regle dans alertes.js)
+const SUJET_ALERTES = /^[A-Za-z0-9_-]{10,64}$/;
 // Methodes de mise a jour partielle et lettre du plan correspondant (la carte fait le reste)
-export const METHODES_PARTIEL = { simple: 'P', double: 'D', inversion: 'I' };
+export const METHODES_PARTIEL = { simple: 'P', double: 'D', triple: 'T', quadruple: 'Q', inversion: 'I' };

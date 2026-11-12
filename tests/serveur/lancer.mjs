@@ -46,13 +46,15 @@ const ATTENDU = {
     /moitié de l'écran +: C /, /empreinte fausse +: C /, /24 h sans complet +: N /, /orientation changée +: C /,
     /partiel désactivé +: C /, /mode photo +: C /, /mise en route +: P /, /méthode changée +: N /,
     /inversion +: I \| zones 96,200 64x40 \| 330 octets \| écran juste : true/, /méthode double +: N /,
-    /double +: D \| zones 160,300 16x2 \| 14 octets \| écran juste : true/, /après 3 partielles +: C /,
+    /double +: D \| zones 160,300 16x2 \| 14 octets \| écran juste : true/, /après 3 partielles +: C /, /méthode quadruple +: N /, /quadruple +: Q \| zones 240,400 16x2 \| 14 octets \| écran juste : true/,
     /ancienne carte : ok/, /en-tête x-plan : P;1;1/,
+    /après une image non envoyée +: P \| zones 240,400 16x2 \| 14 octets \| écran juste : true/, /méthode changée, après saut +: N /,
     /réglages invalides ignorés : \{"partiel":true,"completH":24,"seuil":40,"methode":"simple","maxPartiels":0\}/,
     /réglages : \{"partiel":true,"completH":12,"seuil":60,"methode":"simple","maxPartiels":0\} \| cp envoyé à la carte : 43200/],
   'jetons.mjs': [/personne : config 200 \| jetons 200/, /carte : état 200 \| aperçu 200 \| programme 404/,
     /carte refusée : config 403 \| réglages 403 \| sauvegarde 403 \| envoi programme 403 \| jetons 403/,
-    /raccourci : pochette 200 \| refusé : config 403 \| état 403/, /autre jeton : config 200/,
+    /raccourci : pochette 200 \| refusé : config 403 \| état 403/, /autre jeton : config 403 \| sauvegarde 403 \| aperçu 403/,
+    /tous les droits choisis : 200 \| puis config 200/, /rôle deviné plus tard : aperçu 403 \| état 200 \| aperçu 200 \| config 403 \| rôle carte/,
     /rôles devinés : abc123.access=carte def456.access=raccourci zzz999.access=null/,
     /choix du rôle : 200 \| puis config 403 \| rôle inconnu 400 \| par un jeton 403/, /oublier : 200 abc123.access def456.access$/m,
     /signature pirate 403 \| autre application 403 \| autre équipe 403 \| expiré 403 \| clé inconnue 403 \| abîmé 403/,
@@ -61,6 +63,27 @@ const ATTENDU = {
     /mensuel : Mar 10 18:00 2e mardi \| Ven 27 19:00 Dernier vendredi \| Lun 30 09:00 Fin de mois \| Mar 1 07:00 1er jour ouvré \| Mar 8 18:00 2e mardi \| Ven 25 19:00 Dernier vendredi \| Jeu 31 09:00 Fin de mois \| Ven 1 07:00 1er jour ouvré$/m,
     /divers : Aujourd'hui 18:00 Footing \| Aujourd'hui 20:00 Projet \| Demain 18:00 Footing \| Demain 20:00 Projet \| Lun 9 20:00 Projet \| Jeu 12 14:00 Code de la route \| Sam 14 18:00 Footing \| Dim 15 18:00 Footing \| Mer 18 17:00 Club \| Jeu 19 14:00 Code de la route$/m,
     /gros calendrier \(\d+ octets\) : calcul rapide \(< 25 ms\) : true/],
+  'agenda-rebours.mjs': [/lieux : Aujourd'hui 17:30 Colle de maths @ C104 \| Demain 08:00 Dentiste @ Cabinet du Dr Martin \| Demain 10:00 Cours de maths, salle B12 \| Demain 14:00 Anglais \| Jeu 12 09:00 Visite @ Musée de la Romanité, un lieu\.\.\.$/m,
+    /option décochée : aucun lieu/, /enregistré : Vacances de Noël=19\/12\/2026 Concours blanc=14\/1\/2027 Rentrée=2\/9\/0 .* \| ignorées : pas une date/,
+    /rebours : J-0 Aujourd'hui \(mar\. 10 novembre\) \| J-39 Vacances de Noël \(sam\. 19 décembre\) \| J-52 Nouvel an \(ven\. 1 janvier 2027\) \| J-65 Concours blanc \(jeu\. 14 janvier 2027\)$/m,
+    /même jour : signature identique true \| lendemain : 38 Vacances de Noël \| signature changée true/, /avant le changement d'heure : 2 jours/,
+    /sans le bloc : rien/, /liste vide : \[\]/, /restauration : 200 Lundi/],
+  'creuses-alertes.mjs': [/plages gardées : 08:00-17:00 \| intervalle 120/,
+    /réveils : mar 7h50 600 \| mar 9h00 7200 \| mar 11h00 3605 \| mar 12h30 300 \| mar 16h30 1805 \| mar 17h10 600 \| sam 10h00 600/,
+    /décochées : 600 \| plages gardées 1/, /jamais plus souvent que le rythme normal : 3600/, /sujet trop court : 400 \| actif sans sujet : 400/,
+    /alertes désactivées : rien/, /tout va bien : rien \| 2 h après : rien/, /5 h sans nouvelles : Cadre : plus de nouvelles \[cadre-Ab12Cd34Ef56Gh78\] \| Sans nouvelles depuis 5 h \(dernier contact mar\. 10 novembre à 12:00\)/,
+    /une heure après : rien \| rappel le lendemain : Cadre : plus de nouvelles/, /ntfy en panne : rien/,
+    /retour, batterie à 15 % : Cadre : de retour \[[^\]]+\] \+ Cadre : batterie à 15 %/, /seuil hésitant : rien \/ rien \| suivi gardé : true/, /en charge : rien \| suivi : \{\}/,
+    /écran blanc, 2 jours sans nouvelles : rien/, /bloc bus absent : rien \| fin retenue : 20261116/, /3 jours avant la fin : rien/,
+    /2 jours avant la fin : Cadre : horaires de bus bientôt périmés .* s'arrêtent le 16\/11\/2026/, /le lendemain : rien/, /3 jours après, périmés : Cadre : horaires de bus périmés/,
+    /état pour la page : muet : dernier contact mar\. 17 novembre à 10:00 \| batterie : batterie à 94 % \| bus ! horaires périmés depuis le 16\/11\/2026 \| fin recalculée : 20261116/,
+    /essai : 200 1 Cadre : essai \| sujet invalide : 400/, /alerte bus décochée : rien \| suivi : \{\}/],
+  'frise-applique.mjs': [/jours : mar\. 10 \| mer\. 11 \| jeu\. 12 \| ven\. 13 \| sam\. 14 \| dim\. 15 \| lun\. 16/,
+    /frise : mar 00:00 défaut \| mar 07:00 Bus \| mar 08:00 défaut \| .*ven 18:00 Bus \| ven 20:00 défaut \| sam 00:00 Vacances \| dim 00:00 défaut \| dim 09:00 Week-end \| dim 22:00 défaut \| lun 07:00 Bus \| lun 08:00 défaut$/m,
+    /week-end prioritaire : sam 00:00 Vacances \| sam 09:00 Week-end \| sam 22:00 Vacances \| dim 00:00 défaut \| dim 09:00 Week-end/,
+    /sans scène : 1 segment défaut \| rien enregistré : true/, /demande illisible : 400/, /changement d'heure : dimanche de 25 h \| dim 09:00 Week-end \| dim 22:00 défaut/,
+    /avant le premier réveil : inconnu/, /^réveil : appliqué à mar 12:00/m, /changement de mode : en attente/, /réveil suivant : appliqué à mar 12:10/,
+    /10 min après, heure gardée : appliqué à mar 12:10/, /contour de l'aperçu : appliqué à mar 12:10 \| version inchangée : true/, /contour et traits : en attente/],
   'batterie-page.mjs': [/captures : charge ven\. 22:00 -> sam\. 00:00 \| autonomie attente$/m,
     /deux jours après : charge ven\. 22:00 -> sam\. 00:00 \| autonomie 1\.0 %\/jour/, /charge lente : mar\. 08:00 -> mer\. 03:00$/m,
     /sans charge : aucune/, /après un trou : 1\.9 %\/jour/, /jauge : charge lun\. 23:00 -> mar\. 01:00 \| autonomie 1\.0 %\/jour/,
@@ -69,15 +92,19 @@ const ATTENDU = {
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
 let echecs = 0;
-// La page web : son script doit etre du JavaScript valide (sinon la page entiere ne marche plus)
+// La page web : chaque script doit etre du JavaScript valide (sinon ce morceau de la page ne marche plus)
 try {
-  const { readFileSync } = await import('fs');
-  const page = readFileSync(ici + '/../../serveur/interface.html', 'utf8');
-  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-  if (!scripts.length) throw new Error('aucun script trouvé');
-  scripts.forEach(js => new Function(js));
-  console.log('ok   interface.html (script valide)');
-} catch (e) { echecs++; console.log('ÉCHEC interface.html : ' + e.message); }
+  const { readFileSync, readdirSync } = await import('fs');
+  const dossier = ici + '/../../serveur/page/';
+  let n = 0;
+  for (const f of readdirSync(dossier).filter(f => f.endsWith('.html')).sort()) {
+    for (const m of readFileSync(dossier + f, 'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+      try { new Function(m[1]); n++; } catch (e) { throw new Error(f + ' : ' + e.message); }
+    }
+  }
+  if (!n) throw new Error('aucun script trouvé');
+  console.log('ok   page web (' + n + ' scripts valides)');
+} catch (e) { echecs++; console.log('ÉCHEC page web : ' + e.message); }
 for (const [fichier, motifs] of Object.entries(ATTENDU)) {
   let sortie = '';
   try {

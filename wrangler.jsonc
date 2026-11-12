@@ -10,7 +10,14 @@
   ],
   // garde les variables saisies dans le tableau de bord
   "keep_vars": true,
-  // la page web (serveur/interface.html) est importee comme du texte
+  // Journaux du Worker (Workers & Pages -> cadre -> Observabilite) : les messages du serveur (source
+  // en panne, copie de secours utilisee, erreur d'une route, alerte envoyee) sont gardes 3 jours,
+  // au lieu d'etre perdus si personne ne regarde en direct. Gratuit jusqu'a 200 000 lignes par jour.
+  "observability": { "enabled": true },
+  // Une fois par heure (a la minute 7) : le serveur verifie s'il doit envoyer une alerte sur l'iPhone
+  // (cadre muet, batterie faible, horaires de bus perimes ; voir serveur/alertes.js)
+  "triggers": { "crons": ["7 * * * *"] },
+  // les morceaux de la page web (serveur/page/*.html) sont importes comme du texte
   // et le dessin de la carte en WebAssembly (serveur/apercu.wasm) comme des octets, envoyes tels quels a la page
   "rules": [
     { "type": "Text", "globs": ["**/*.html"], "fallthrough": true },

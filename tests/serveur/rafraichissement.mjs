@@ -36,7 +36,7 @@ const appliquer = (plan, nouv, ecran) => {
     for (const z of zones) { const [x, y, w, h] = z.split(/[ ,x]/).map(Number);
       for (let r = 0; r < h; r++) for (let c = 0; c < w / 8; c++) { const k = (y + r) * L + x / 8 + c; neg[k] = ~nouv[k] & 0xFF; } }
     passe(e, nouv, neg); passe(e, neg, nouv);
-  } else { passe(e, prec, nouv); if (t === 'D') passe(e, prec, nouv); }
+  } else { const n = { P: 1, D: 2, T: 3, Q: 4 }[t]; for (let k = 0; k < n; k++) passe(e, prec, nouv); }
   return { t, ecran: e, zones, octets: plan.length };
 };
 const etape = async (nom, img, opts) => {
@@ -74,6 +74,9 @@ await post({ rafraich: { methode: 'double', maxPartiels: 3 } });
 await etape('méthode double', avec(affichee, 20, 300, 2, 2, 0x11));
 await etape('double', avec(affichee, 20, 300, 2, 2, 0x22));
 await etape('après 3 partielles', avec(affichee, 20, 300, 2, 2, 0x44), { np: 3 });
+await post({ rafraich: { methode: 'quadruple', maxPartiels: 0 } });
+await etape('méthode quadruple', avec(affichee, 30, 400, 2, 2, 0x11));
+await etape('quadruple', avec(affichee, 30, 400, 2, 2, 0x66));
 await post({ rafraich: { methode: 'simple', maxPartiels: 0 } });
 // Ancienne carte (sans ?plan=1) : réponse texte inchangée
 console.log('ancienne carte :', await (await req('/api/apercu?r=0', { method: 'POST', body: base })).text());
@@ -81,6 +84,15 @@ console.log('ancienne carte :', await (await req('/api/apercu?r=0', { method: 'P
 affichee = base;
 await envoyer(temp);
 console.log('en-tête x-plan :', (await req('/api/apercu')).headers.get('x-plan'));
+// La carte n'envoie plus une image identique à celle de l'écran : le serveur garde la sienne, et la
+// mise à jour suivante reste partielle. Un changement de méthode entre-temps nettoie bien l'écran ensuite.
+affichee = temp;
+horloge('2026-11-07T18:00:00+01:00');            // un réveil où seule une donnée invisible change : rien n'est envoyé
+await etape('après une image non envoyée', avec(temp, 30, 400, 2, 2, 0x77));
+await post({ rafraich: { methode: 'double' } });
+horloge('2026-11-07T19:00:00+01:00');            // méthode changée, puis un réveil sans envoi
+await etape('méthode changée, après saut', avec(affichee, 30, 400, 2, 2, 0x78));
+await post({ rafraich: { methode: 'simple' } });
 // Réglages : valeurs inconnues ignorées ; intervalle des complets transmis à la carte
 await post({ rafraich: { completH: 7, seuil: 99 } });
 let cfg = (await (await req('/api/config')).json()).config.rafraich;
