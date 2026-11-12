@@ -146,6 +146,7 @@ bool  vitesseLue = false;
 // Renvoie la tension (V) et met a jour pctMesure, pctJauge et vitesseJauge. 0 si la jauge ne repond pas.
 float lireBatterie() {
 #ifdef PIN_I2C_POWER
+  gpio_hold_dis((gpio_num_t)PIN_I2C_POWER);   // tenue a LOW pendant la veille (voir dormir)
   pinMode(PIN_I2C_POWER, OUTPUT);   // alimente les resistances de tirage du bus I2C
   digitalWrite(PIN_I2C_POWER, HIGH);
   delay(10);
@@ -564,6 +565,16 @@ bool ecranEnAttente = false;
 void dormir(uint32_t secondes) {
   fermerConnexion();
   if (WiFi.getMode() != WIFI_OFF) { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
+#ifdef PIN_I2C_POWER
+  // Bus I2C (resistances de tirage, prise STEMMA QT) coupe pendant la veille. Sans cela, la broche
+  // restait a HIGH, et gpio_deep_sleep_hold_en (voir eteindreEcran) pouvait la figer ainsi toute la nuit.
+  // La jauge MAX17048 n'en depend pas : elle est alimentee directement par la batterie.
+  Wire.end();
+  pinMode(PIN_I2C_POWER, OUTPUT);
+  digitalWrite(PIN_I2C_POWER, LOW);
+  gpio_hold_en((gpio_num_t)PIN_I2C_POWER);
+  gpio_deep_sleep_hold_en();
+#endif
   Serial.printf("Veille profonde pendant %u s\n", secondes);
   Serial.flush();
   memoWifi.age += secondes;
