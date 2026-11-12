@@ -7,7 +7,7 @@
 // Une notification par problème, puis un rappel tant qu'il dure (une fois par jour ; tous les 3 jours
 // pour les bus).
 import { json, texte } from './commun.js';
-import { notifierBark, nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
+import { notifierBark, verifierCleApple, nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
 import { lireConfig } from './config.js';
 import { finValiditeBus } from './bus.js';
 import { JOURS_COURTS, MOIS, deux, mural } from './temps.js';
@@ -84,8 +84,13 @@ function niveau(cle, a) {
   return cle === 'batterie' ? 'timeSensitive' : 'active';
 }
 
+// Heure des verifications de l'envoi (cle Apple chaque jour, Device Token le dimanche) : le declencheur de
+// 12:07, heure de Paris. Pas besoin de retenir la date de la derniere verification.
+const HEURE_VERIF = 12;
+
 // Appelee une fois par heure : envoie les alertes nouvelles et les rappels. Le KV ("alertes") retient la
-// date du dernier envoi de chaque alerte en cours ; il n'est ecrit que lorsqu'une alerte part ou cesse.
+// date du dernier envoi de chaque alerte en cours, le dernier echec d'envoi (erreur) et le resultat de la
+// verification de la cle Apple (cleApple) ; il n'est ecrit que lorsque l'un d'eux change.
 export async function verifierAlertes(env, maintenant = Date.now()) {
   const cfg = await lireConfig(env);
   const a = cfg.alertes || {};
@@ -94,24 +99,57 @@ export async function verifierAlertes(env, maintenant = Date.now()) {
   const memo = JSON.parse((await env.CADRE.get('alertes')) || '{}');
   const envoyees = [];
   let change = false;
+  // Retient le resultat d'un envoi pour la page : un envoi direct rate est signale meme quand le secours
+  // a pris le relais (Device Token ou cle Apple a mettre a jour) ; un envoi direct reussi efface l'erreur
+  const retenir = (m) => {
+    if (!m) { if (memo.erreur) { delete memo.erreur; change = true; } return; }
+    if (!memo.erreur || memo.erreur.m !== m) { memo.erreur = { t: maintenant, m }; change = true; }
+  };
+  const envoyer = async (notif) => {
+    const r = await notifierBark(env, destinataire(a), notif, maintenant);
+    retenir(r.direct ? 'envoi direct raté, secours utilisé : ' + r.direct.message : null);
+    console.log('Notification envoyée (' + r.chemin + ') :', notif.titre);
+  };
   for (const e of etats) {
     const surveille = a[e.cle] !== false;
     try {
       if (surveille && e.probleme) {
         if (memo[e.cle] && maintenant - memo[e.cle] < RAPPEL_H[e.cle] * 3600e3) continue;
-        const chemin = await notifierBark(env, destinataire(a), { titre: e.titre, message: e.message, niveau: niveau(e.cle, a) }, maintenant);
-        console.log('Alerte envoyée (' + chemin + ') :', e.titre);
+        await envoyer({ titre: e.titre, message: e.message, niveau: niveau(e.cle, a) });
         memo[e.cle] = maintenant; change = true; envoyees.push(e.cle);
-        if (memo.erreur) { delete memo.erreur; change = true; }
       } else if (memo[e.cle] && (!surveille || e.probleme || e.retabli !== false)) {
         // Le probleme a cesse (ou n'est plus surveille) ; pour le cadre muet, on previent de son retour
-        if (surveille && e.cle === 'muet') await notifierBark(env, destinataire(a), { titre: 'Cadre : de retour', message: 'Le cadre répond à nouveau (' + e.info + ').', niveau: 'active' }, maintenant);
+        if (surveille && e.cle === 'muet') await envoyer({ titre: 'Cadre : de retour', message: 'Le cadre répond à nouveau (' + e.info + ').', niveau: 'active' });
         delete memo[e.cle]; change = true;
       }
     } catch (err) {
       console.log('Alerte « ' + e.cle + ' » non envoyée :', err.message);
-      // Retenue pour la page web (Device Token perime, par exemple) ; ecrite seulement si elle change
-      if (!memo.erreur || memo.erreur.m !== err.message) { memo.erreur = { t: maintenant, m: err.message }; change = true; }
+      retenir(err.message);
+    }
+  }
+  // Verifications de l'envoi direct, seulement s'il est utilise (Device Token enregistre)
+  const w = mural(maintenant);
+  if (TOKEN_VALIDE.test(nettoyerToken(a.token)) && w.hh === HEURE_VERIF) {
+    // 1. Chaque jour : la cle Apple de Bark est-elle toujours celle du depot open source ? Si l'auteur l'a
+    //    changee, une alerte (rappel toutes les semaines) avant meme que l'envoi direct echoue
+    const v = await verifierCleApple();
+    const avant = memo.cleApple || {};
+    if (v.etat !== avant.etat || v.m !== avant.m) { memo.cleApple = { etat: v.etat, m: v.m, alerte: avant.alerte || 0 }; change = true; }
+    if (v.etat === 'impossible') console.log('Clé Apple de Bark non vérifiée :', v.m);
+    if (v.etat === 'change' && (!memo.cleApple.alerte || maintenant - memo.cleApple.alerte >= 7 * 86400e3)) {
+      try {
+        await envoyer({ titre: 'Cadre : clé Apple de Bark changée', niveau: 'timeSensitive',
+          message: 'L\'auteur de Bark a publié une nouvelle clé Apple (' + v.d + '). Mets à jour serveur/bark.js, sinon les alertes ne passeront bientôt plus que par la clé Bark de secours.' });
+        memo.cleApple.alerte = maintenant; change = true; envoyees.push('cleApple');
+      } catch (err) { console.log('Alerte « cleApple » non envoyée :', err.message); retenir(err.message); }
+    } else if (v.etat === 'ok' && memo.cleApple.alerte) { memo.cleApple.alerte = 0; change = true; }
+    // 2. Le dimanche : notification discrete (sans allumer l'ecran) pour verifier le Device Token. S'il
+    //    est refuse, la page l'affiche, et le secours previent sur l'iPhone
+    if (w.js === 0 && a.hebdo !== false) {
+      try {
+        await envoyer({ titre: 'Cadre : vérification', message: 'Les alertes du cadre arrivent bien (vérification du dimanche).', niveau: 'passive' });
+        envoyees.push('verification');
+      } catch (err) { console.log('Vérification du dimanche non envoyée :', err.message); retenir(err.message); }
     }
   }
   if (change) { try { await env.CADRE.put('alertes', JSON.stringify(memo)); } catch (e) { /* limite d'ecriture : renvoyee dans une heure */ } }
@@ -123,7 +161,16 @@ export async function routeEtatAlertes(env) {
   const cfg = await lireConfig(env);
   const etats = await etatAlertes(cfg, env, Date.now());
   const memo = JSON.parse((await env.CADRE.get('alertes')) || '{}');
-  return json({ etats: etats.map(e => ({ cle: e.cle, probleme: e.probleme, info: e.info, envoyee: memo[e.cle] || 0 })), erreur: memo.erreur || null });
+  const liste = etats.map(e => ({ cle: e.cle, probleme: e.probleme, info: e.info, envoyee: memo[e.cle] || 0 }));
+  // Cle Apple de Bark (seulement si l'envoi direct est utilise)
+  const a = cfg.alertes || {};
+  if (TOKEN_VALIDE.test(nettoyerToken(a.token))) {
+    const c = memo.cleApple || {};
+    liste.push({ cle: 'cleApple', probleme: c.etat === 'change', envoyee: c.alerte || 0,
+      info: c.etat === 'change' ? c.m + ' : serveur/bark.js à mettre à jour' : c.etat === 'impossible' ? 'pas vérifiée : ' + c.m
+        : c.etat === 'ok' ? 'identique à celle du dépôt de Bark (vérifiée chaque jour à 12 h)' : 'vérifiée chaque jour à 12 h' });
+  }
+  return json({ etats: liste, erreur: memo.erreur || null });
 }
 // Essai avec les champs de la page, enregistres ou non. critique : essai d'une alerte critique
 export async function routeEssaiAlerte(req, env) {
@@ -133,9 +180,9 @@ export async function routeEssaiAlerte(req, env) {
   if (dest.token && !TOKEN_VALIDE.test(dest.token)) return texte('Device Token invalide : copie-le dans Bark, Settings → Device Token (64 caractères 0-9 et a-f)', 400);
   if (dest.cle && !CLE_VALIDE.test(dest.cle)) return texte('Clé Bark invalide : copie-la dans Bark, Service → Copy Key', 400);
   if (!dest.token && !dest.cle) return texte('Colle d\'abord le Device Token de Bark', 400);
-  let chemin;
+  let r;
   try {
-    chemin = await notifierBark(env, dest, { titre: 'Cadre : essai', message: 'Les alertes du cadre arrivent bien sur cet appareil.', niveau: d.critique ? 'critical' : 'active' });
+    r = await notifierBark(env, dest, { titre: 'Cadre : essai', message: 'Les alertes du cadre arrivent bien sur cet appareil.', niveau: d.critique ? 'critical' : 'active' });
   } catch (e) { return texte('Envoi impossible : ' + e.message, 502); }
-  return json({ ok: true, chemin });
+  return json({ ok: true, chemin: r.chemin, direct: r.direct ? r.direct.message : '' });
 }
