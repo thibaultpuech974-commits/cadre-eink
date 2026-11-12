@@ -1,4 +1,4 @@
-// Heures creuses (réveils espacés sur des plages jours + heures) et alertes sur l'iPhone (ntfy)
+// Heures creuses (réveils espacés sur des plages jours + heures) et alertes sur l'iPhone (Bark)
 import w from '../../serveur/worker.js';
 import { kv, KV, req, post, etat, horloge } from './simu.mjs';
 const env = { CLE: 'secret', CADRE: KV };
@@ -20,32 +20,46 @@ await post({ reveilMin: 60, creuses: { actif: true, intervalleMin: 30 } });
 console.log('jamais plus souvent que le rythme normal :', (await etat('2026-11-10T09:00:00+01:00')).reveil);
 await post({ reveilMin: 10, creuses: { actif: false }, scenes: [] });
 
-// --- 2. Alertes : notifications ntfy envoyées par le déclencheur planifié
-const notifs = [];
+// --- 2. Alertes : notifications Bark envoyées par le déclencheur planifié, directement à Apple (APNs)
+//        ou par le serveur public de Bark en secours
+const notifs = [], jwts = [];
 const ancien = globalThis.fetch;
-let ntfyEnPanne = false;
+let applePanne = 0, barkPanne = false;
 globalThis.fetch = async (u, o) => {
-  if (String(u) !== 'https://ntfy.sh/') return ancien(u, o);
-  if (ntfyEnPanne) return new Response('panne', { status: 503 });
-  notifs.push(JSON.parse(o.body)); return new Response('{}');
+  u = String(u);
+  if (u.startsWith('https://api.push.apple.com/3/device/')) {
+    const h = o.headers, jwt = h.authorization.replace('bearer ', '');
+    if (!jwts.includes(jwt)) jwts.push(jwt);
+    if (applePanne) return new Response(JSON.stringify({ reason: applePanne === 410 ? 'Unregistered' : applePanne === 403 ? 'ExpiredProviderToken' : 'InternalServerError' }), { status: applePanne });
+    const b = JSON.parse(o.body);
+    notifs.push({ title: b.aps.alert.title, message: b.aps.alert.body, level: b.level, via: 'apple:' + u.slice(36, 42) + ':' + h['apns-topic'] }); return new Response('');
+  }
+  if (u === 'https://api.day.app/push') {
+    if (barkPanne) return new Response(JSON.stringify({ code: 400, message: 'failed to get device token' }), { status: 400 });
+    const b = JSON.parse(o.body);
+    notifs.push({ title: b.title, message: b.body, level: b.level, via: 'bark:' + b.device_key.slice(0, 4) }); return new Response('{"code":200,"message":"success"}');
+  }
+  return ancien(u, o);
 };
-const cron = async (iso) => { if (iso) horloge(iso); const avant = notifs.length; await w.scheduled({}, env, {}); return notifs.slice(avant).map(n => n.title + ' [' + n.topic + ']').join(' + ') || 'rien'; };
-const SUJET = 'cadre-Ab12Cd34Ef56Gh78';
-console.log('sujet trop court :', (await req('/api/config', { method: 'POST', body: JSON.stringify({ alertes: { actif: true, sujet: 'cadre' } }) })).status,
-  '| actif sans sujet :', (await req('/api/config', { method: 'POST', body: JSON.stringify({ alertes: { actif: true } }) })).status);
+const cron = async (iso) => { if (iso) horloge(iso); const avant = notifs.length; await w.scheduled({}, env, {}); return notifs.slice(avant).map(n => n.title + ' [' + n.via + ' ' + n.level + ']').join(' + ') || 'rien'; };
+const TOKEN = 'ab12'.repeat(16), CLE = 'Kq7pLmZx3RtYvBn8Wc2HdF';
+const statut = async corps => (await req('/api/config', { method: 'POST', body: JSON.stringify(corps) })).status;
+console.log('token invalide :', await statut({ alertes: { token: 'pas-un-token' } }), '| clé invalide :', await statut({ alertes: { cle: 'x' } }),
+  '| actif sans destinataire :', await statut({ alertes: { actif: true } }));
 horloge('2026-11-10T12:00:00+01:00');
 await req('/api/etat?bat=4.05&pct=85&fw=20261108-101500');
 console.log('alertes désactivées :', await cron('2026-11-10T20:00:00+01:00'));
-await post({ alertes: { actif: true, sujet: SUJET } });
+await post({ alertes: { actif: true, token: '<' + TOKEN.toUpperCase().match(/.{8}/g).join(' ') + '>' } });
+console.log('token nettoyé :', (await (await req('/api/config')).json()).config.alertes.token === TOKEN);
 horloge('2026-11-10T12:00:00+01:00');
 await req('/api/etat?bat=4.05&pct=85&fw=20261108-101500');
 console.log('tout va bien :', await cron('2026-11-10T12:07:00+01:00'), '| 2 h après :', await cron('2026-11-10T14:07:00+01:00'));
 console.log('5 h sans nouvelles :', await cron('2026-11-10T17:07:00+01:00'), '|', notifs.at(-1).message);
 console.log('une heure après :', await cron('2026-11-10T18:07:00+01:00'), '| rappel le lendemain :', await cron('2026-11-11T17:07:00+01:00'));
-ntfyEnPanne = true; await req('/api/etat?bat=3.62&pct=15&fw=20261108-101500');
-console.log('ntfy en panne :', await cron('2026-11-11T18:07:00+01:00'));
-ntfyEnPanne = false;
-console.log('retour, batterie à 15 % :', await cron('2026-11-11T19:07:00+01:00'), '|', notifs.at(-1).message);
+applePanne = 500; await req('/api/etat?bat=3.62&pct=15&fw=20261108-101500');
+console.log('Apple en panne, pas de clé :', await cron('2026-11-11T18:07:00+01:00'), '| erreur retenue :', JSON.parse(kv.get('alertes').v).erreur.m);
+applePanne = 0;
+console.log('retour, batterie à 15 % :', await cron('2026-11-11T19:07:00+01:00'), '|', notifs.at(-1).message, '| erreur effacée :', !('erreur' in JSON.parse(kv.get('alertes').v)));
 // Le pourcentage hésite autour du seuil : pas de nouvelle notification ; en charge : l'alerte repart de zéro
 const vu = async (iso, q) => { horloge(iso); await req('/api/etat?fw=20261108-101500&' + q); };
 await vu('2026-11-11T20:00:00+01:00', 'bat=3.66&pct=21'); const h1 = await cron('2026-11-11T20:07:00+01:00');
@@ -75,9 +89,41 @@ console.log('3 jours après, périmés :', await cron('2026-11-17T10:07:00+01:00
 kv.delete('bus-fin');
 const e = await (await req('/api/alertes')).json();
 console.log('état pour la page :', e.etats.map(x => x.cle + (x.probleme ? ' ! ' : ' : ') + x.info).join(' | '), '| fin recalculée :', kv.get('bus-fin').v);
-// Notification d'essai depuis la page, alerte décochée
-const avant = notifs.length;
-console.log('essai :', (await req('/api/alertes/essai', { method: 'POST', body: JSON.stringify({ sujet: SUJET }) })).status, notifs.length - avant, notifs.at(-1).title,
-  '| sujet invalide :', (await req('/api/alertes/essai', { method: 'POST', body: JSON.stringify({ sujet: 'x y' }) })).status);
+// Notification d'essai depuis la page (champs non enregistrés), alerte critique, secours, erreurs
+const essai = async corps => { const r = await req('/api/alertes/essai', { method: 'POST', body: JSON.stringify(corps) }); return r.status + ' ' + (r.ok ? (await r.json()).chemin : await r.text()); };
+let avant = notifs.length;
+console.log('essai :', await essai({ token: TOKEN }), notifs.length - avant, notifs.at(-1).title, notifs.at(-1).level,
+  '| critique :', await essai({ token: TOKEN, critique: true }), notifs.at(-1).level);
+console.log('token invalide :', await essai({ token: 'zz' }), '| rien :', await essai({}));
+applePanne = 410;
+console.log('token périmé, sans clé :', await essai({ token: TOKEN }));
+console.log('token périmé, avec clé :', await essai({ token: TOKEN, cle: 'https://api.day.app/' + CLE + '/' }), notifs.at(-1).via);
+barkPanne = true;
+console.log('les deux en panne :', await essai({ token: TOKEN, cle: CLE }));
+applePanne = 0; barkPanne = false;
+console.log('clé seule :', await essai({ cle: CLE }), notifs.at(-1).via);
+// Jeton d'authentification d'Apple expiré : refait une fois, puis gardé
+applePanne = 403; avant = jwts.length;
+const r403 = await essai({ token: TOKEN });
+applePanne = 0;
+console.log('jeton Apple refusé :', r403, '| nouveau jeton essayé :', jwts.length - avant);
+// Cadre muet en alerte critique, par la clé seulement
+await post({ alertes: { critique: true, token: '', cle: CLE } });
+await vu('2026-11-17T10:00:00+01:00', 'bat=4.1&pct=94');
+console.log('critique, 5 h sans nouvelles :', await cron('2026-11-17T15:07:00+01:00'));
+await post({ alertes: { critique: false, token: TOKEN, cle: '' } });
+await vu('2026-11-17T15:30:00+01:00', 'bat=4.1&pct=94');
+console.log('retour :', await cron('2026-11-17T16:07:00+01:00'));
 await post({ alertes: { bus: false } });
-console.log('alerte bus décochée :', await cron('2026-11-17T11:07:00+01:00'), '| suivi :', kv.get('alertes').v);
+console.log('alerte bus décochée :', await cron('2026-11-17T17:07:00+01:00'), '| suivi :', kv.get('alertes').v);
+
+// Jeton d'authentification d'Apple : un JWT ES256 valide pour la clé de Bark (en-tête kid, émetteur team)
+const [h64, c64, s64] = jwts[0].split('.');
+const deB64 = t => Uint8Array.from(atob(t.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const entete = JSON.parse(new TextDecoder().decode(deB64(h64))), corps = JSON.parse(new TextDecoder().decode(deB64(c64)));
+const PEM = (await import('fs')).readFileSync(new URL('../../serveur/bark.js', import.meta.url), 'utf8').match(/APNS_CLE = '([^']+)'/)[1];
+const privee = await crypto.subtle.importKey('pkcs8', deB64(PEM), { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
+const jwk = await crypto.subtle.exportKey('jwk', privee);
+const publique = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y }, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+const ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, publique, deB64(s64), new TextEncoder().encode(h64 + '.' + c64));
+console.log('JWT :', entete.alg, entete.kid, corps.iss, typeof corps.iat, '| signature valide :', ok, '| jetons différents :', jwts.length);

@@ -263,15 +263,18 @@
 <details class="menu" id="menu-alertes">
   <summary>Alertes sur l'iPhone</summary>
   <label><input type="checkbox" id="alActif"> Me prévenir par une notification quand quelque chose ne va pas</label>
-  <label><span style="white-space:nowrap">Sujet ntfy</span> <input type="text" id="alSujet" placeholder="cadre-…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64"></label>
-  <div class="ligne"><button onclick="genererSujet()">Générer un sujet</button><button onclick="essayerAlerte()">Envoyer un essai</button></div>
+  <label><span style="white-space:nowrap">Device Token</span> <input type="text" id="alToken" placeholder="copié dans Bark" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="220"></label>
+  <label><span style="white-space:nowrap">Clé Bark (secours)</span> <input type="text" id="alCle" placeholder="facultatif" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120"></label>
+  <div class="ligne"><button onclick="essayerAlerte(false)">Envoyer un essai</button><button onclick="essayerAlerte(true)">Essai critique</button></div>
   <p class="aide" style="margin:10px 0 2px">Me prévenir quand :</p>
   <label><input type="checkbox" id="alMuet"> le cadre ne donne plus de nouvelles depuis 3 h</label>
+  <label style="margin-left:24px"><input type="checkbox" id="alCritique"> en alerte critique (sonne même en mode silencieux)</label>
   <label><input type="checkbox" id="alBatterie"> la batterie passe sous <select id="alSeuil" style="width:auto"><option>10</option><option>20</option><option>30</option></select> %</label>
   <label><input type="checkbox" id="alBus"> les horaires de bus arrivent à leur fin</label>
   <div class="calendriers" id="etatAlertes"></div>
+  <p class="aide cache" id="erreurAlertes"></p>
   <div class="msg" id="msgAlertes"></div>
-  <p class="aide repliable">Installe l'application gratuite <b>ntfy</b> sur l'iPhone, touche « + » et abonne-toi au sujet ci-dessus, sans compte : c'est tout. Le serveur vérifie une fois par heure ; il envoie une notification par problème, puis un rappel par jour tant qu'il dure (tous les 3 jours pour les bus), et prévient quand le cadre répond à nouveau. Le sujet tient lieu de mot de passe : quiconque le connaît peut lire tes alertes, garde donc un sujet long tiré au hasard (bouton « Générer »). Les notifications passent par le service public ntfy.sh. En mode Écran blanc, le cadre est considéré comme rangé : pas d'alerte de silence.</p>
+  <p class="aide repliable">Installe l'application gratuite <b>Bark</b> sur l'iPhone et autorise ses notifications. Dans Bark, onglet <b>Settings</b>, touche <b>Device Token</b> pour le copier, colle-le ci-dessus, envoie un essai, puis coche la première case et enregistre. Le serveur envoie alors les alertes directement aux serveurs d'Apple, sans service intermédiaire. La <b>clé Bark</b> (onglet Service → Copy Key) est facultative : si l'envoi direct échoue, le serveur public de Bark (api.day.app) prend le relais. Le serveur vérifie une fois par heure ; il envoie une notification par problème, puis un rappel par jour tant qu'il dure (tous les 3 jours pour les bus), et prévient quand le cadre répond à nouveau. Une <b>alerte critique</b> sonne même en mode silencieux ou Ne pas déranger : autorise-les quand Bark le demande (sinon : Réglages de l'iPhone → Notifications → Bark → Alertes critiques), puis fais un « Essai critique ». En mode Écran blanc, le cadre est considéré comme rangé : pas d'alerte de silence.</p>
 </details>
 </div>
 

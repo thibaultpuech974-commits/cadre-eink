@@ -29,6 +29,7 @@
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
 //   acces.js             droits des jetons de service Cloudflare Access (carte, raccourci)
 //   alertes.js           alertes sur l'iPhone (cadre muet, batterie faible, horaires de bus perimes)
+//   bark.js              envoi des alertes par l'application Bark (direct a Apple, secours api.day.app)
 //   page.js              page web de reglage, assemblee a partir des fichiers du dossier page/
 // =====================================================================
 

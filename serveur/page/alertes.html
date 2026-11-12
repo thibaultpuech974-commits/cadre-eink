@@ -1,31 +1,28 @@
-<!-- Page web du cadre : menu Alertes sur l'iPhone (notifications ntfy) -->
+<!-- Page web du cadre : menu Alertes sur l'iPhone (application Bark) -->
 <script>
-// --- Alertes : reglages (enregistres avec le reste), sujet au hasard, essai, etat des surveillances ---
+// --- Alertes : reglages (enregistres avec le reste), essai, etat des surveillances, dernier echec ---
 function remplirAlertes() {
   var a = config.alertes || {};
-  $('alActif').checked = !!a.actif; $('alSujet').value = a.sujet || '';
-  $('alMuet').checked = a.muet !== false; $('alBatterie').checked = a.batterie !== false; $('alBus').checked = a.bus !== false;
+  $('alActif').checked = !!a.actif; $('alToken').value = a.token || ''; $('alCle').value = a.cle || '';
+  $('alMuet').checked = a.muet !== false; $('alCritique').checked = !!a.critique;
+  $('alBatterie').checked = a.batterie !== false; $('alBus').checked = a.bus !== false;
   choisirValeur($('alSeuil'), a.seuilBatterie || 20);
 }
 function lireAlertes() {
-  return { actif: $('alActif').checked, sujet: $('alSujet').value.trim(), muet: $('alMuet').checked, batterie: $('alBatterie').checked,
-    bus: $('alBus').checked, seuilBatterie: +$('alSeuil').value };
+  return { actif: $('alActif').checked, token: $('alToken').value.trim(), cle: $('alCle').value.trim(), critique: $('alCritique').checked,
+    muet: $('alMuet').checked, batterie: $('alBatterie').checked, bus: $('alBus').checked, seuilBatterie: +$('alSeuil').value };
 }
-// Sujet tire au hasard : "cadre-" suivi de 20 lettres et chiffres (il tient lieu de mot de passe)
-function genererSujet() {
-  var lettres = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', o = new Uint8Array(20), s = 'cadre-';
-  crypto.getRandomValues(o);
-  for (var i = 0; i < o.length; i++) s += lettres[o[i] % lettres.length];
-  $('alSujet').value = s;
-  message('msgAlertes', "Sujet créé : abonne-toi à ce sujet dans l'application ntfy, envoie un essai, puis enregistre.");
-  verifierModifs();
-}
-function essayerAlerte() {
-  var sujet = $('alSujet').value.trim();
-  if (!sujet) { message('msgAlertes', "Choisis d'abord un sujet (bouton « Générer un sujet »)."); return; }
+// Essai avec les champs tels qu'ils sont (enregistres ou non). critique : alerte qui sonne meme en silencieux
+function essayerAlerte(critique) {
+  var token = $('alToken').value.trim(), cle = $('alCle').value.trim();
+  if (!token && !cle) { message('msgAlertes', "Colle d'abord le Device Token copié dans Bark (Settings → Device Token)."); return; }
   $('msgAlertes').textContent = 'Envoi…';
-  api('/api/alertes/essai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sujet: sujet }) })
-    .then(function () { message('msgAlertes', "Notification d'essai envoyée : elle doit arriver sur l'iPhone en quelques secondes."); })
+  api('/api/alertes/essai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: token, cle: cle, critique: critique }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      message('msgAlertes', (critique ? 'Alerte critique' : "Notification d'essai") + ' envoyée ' + (d.chemin === 'bark' ? 'par le serveur de secours de Bark' : 'directement à Apple') +
+        " : elle doit arriver sur l'iPhone en quelques secondes.");
+    })
     .catch(function (e) { message('msgAlertes', 'Erreur : ' + e.message); });
 }
 // Ce que le serveur voit en ce moment pour chaque surveillance
@@ -40,6 +37,10 @@ function chargerEtatAlertes() {
       t.textContent = NOMS_ALERTES[e.cle] + ' — ' + e.info + (e.envoyee ? ' (alerte envoyée le ' + new Date(e.envoyee).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ')' : '');
       l.appendChild(signe); l.appendChild(t); z.appendChild(l);
     });
+    // Dernier envoi rate (Device Token perime, par exemple) : efface au prochain envoi reussi
+    var err = $('erreurAlertes');
+    err.textContent = d.erreur ? 'Dernier envoi raté le ' + new Date(d.erreur.t).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' : ' + d.erreur.m : '';
+    err.classList.toggle('cache', !d.erreur);
   }).catch(function (e) { $('etatAlertes').textContent = 'État indisponible : ' + e.message; });
 }
 $('menu-alertes').addEventListener('toggle', function () { if (this.open && config) chargerEtatAlertes(); });
