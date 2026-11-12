@@ -4,7 +4,7 @@ Le projet a trois parties :
 
 | Partie | Fichier | Rôle |
 |---|---|---|
-| Serveur web | `serveur/` : `worker.js` (point d'entrée et routes) et un fichier par thème (`meteo.js`, `agenda.js`, `bus.js`, `f1.js`, `scenes.js`, `tableau.js`, `rebours.js`, `alertes.js`, `rafraichissement.js`…, liste en tête de `worker.js`), `page/` (page web : `structure.html` pour les menus, `style.html`, et un script par thème, assemblés par `page.js`), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
+| Serveur web | `serveur/` : `worker.js` (point d'entrée et routes) et un fichier par thème (`meteo.js`, `agenda.js`, `bus.js`, `f1.js`, `scenes.js`, `tableau.js`, `rebours.js`, `alertes.js`, `bark.js`, `rafraichissement.js`…, liste en tête de `worker.js`), `page/` (page web : `structure.html` pour les menus, `style.html`, et un script par thème, assemblés par `page.js`), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
 | Carte ESP32 | `carte/cadre_eink/` : `cadre_eink.ino` (réglages, Wi-Fi, écran, veille) et `dessin.h` (dessin de l'image, partagé avec l'aperçu web) | Se réveille, demande quoi afficher, dessine, se rendort |
 | Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
 
@@ -216,12 +216,16 @@ Le calendrier vient de l'API libre Jolpica (ex-Ergast). Les tracés viennent du 
 **Photo** (groupe Contenu) : choisis une image, puis cadre-la dans l'aperçu tramé. **Remplir** couvre tout l'écran, **Image entière** la montre en entier avec des marges blanches. Fais glisser la photo pour choisir la partie visible, pince-la (ou utilise le curseur **Zoom**, jusqu'à 4 fois) pour l'agrandir ; **Recentrer** revient au cadrage de départ. **Tramage** : Floyd-Steinberg garde les nuances fines, Atkinson donne des noirs et des blancs plus francs, souvent plus lisibles de loin. **Envoyer au cadre** envoie l'image telle que tu la vois.
 
 **Alertes** (groupe Cadre) : le serveur vérifie une fois par heure et envoie une notification sur l'iPhone quand le cadre ne donne plus de nouvelles depuis 3 h, quand la batterie passe sous le seuil choisi (10, 20 ou 30 %), ou quand les horaires de bus arrivent à leur fin. Mise en route :
-1. installe l'application gratuite **ntfy** sur l'iPhone (aucun compte) ;
-2. dans le menu **Alertes sur l'iPhone**, clique sur **Générer un sujet**, coche la première case, puis **Enregistrer** ;
-3. dans ntfy, touche « + » et abonne-toi à ce sujet ;
-4. **Envoyer un essai** : la notification doit arriver en quelques secondes.
+1. installe l'application gratuite **Bark** sur l'iPhone et autorise ses notifications (aucun compte) ;
+2. dans Bark, onglet **Settings**, touche **Device Token** : il est copié ;
+3. dans le menu **Alertes sur l'iPhone**, colle-le dans **Device Token**, puis **Envoyer un essai** : la notification doit arriver en quelques secondes ;
+4. coche la première case, puis **Enregistrer**.
 
-Une notification par problème, puis un rappel par jour tant qu'il dure (tous les 3 jours pour les bus), et une dernière quand le cadre répond à nouveau. Le sujet tient lieu de mot de passe : quiconque le connaît peut lire tes alertes, garde donc le sujet long tiré au hasard. Les notifications passent par le service public ntfy.sh. En mode Écran blanc, le cadre est considéré comme rangé : pas d'alerte de silence.
+Le serveur envoie les notifications **directement aux serveurs d'Apple**, avec la clé publique de l'application Bark (celle de son serveur open source, voir `serveur/bark.js`). Aucun service intermédiaire, donc pas de limite partagée avec les autres Workers Cloudflare (ntfy.sh, utilisé avant, refusait les envois avec une erreur HTTP 429 parce que tous les Workers partagent les mêmes adresses IP). **Clé Bark (secours)**, facultative : dans Bark, onglet **Service → Copy Key**. Si l'envoi direct échoue, le serveur public de Bark (api.day.app) prend le relais. Le Device Token peut changer, par exemple si Bark est réinstallée : la page affiche alors « Dernier envoi raté… Device Token périmé » et il suffit de le recopier.
+
+**Alerte critique** (case sous « le cadre ne donne plus de nouvelles ») : la notification sonne même en mode silencieux ou Ne pas déranger. Autorise les alertes critiques quand Bark le demande (sinon : Réglages de l'iPhone → Notifications → Bark → Alertes critiques), puis vérifie avec **Essai critique**. La batterie faible arrive en notification « urgente » (elle passe les modes Concentration qui l'autorisent), les bus en notification normale.
+
+Une notification par problème, puis un rappel par jour tant qu'il dure (tous les 3 jours pour les bus), et une dernière quand le cadre répond à nouveau. En mode Écran blanc, le cadre est considéré comme rangé : pas d'alerte de silence.
 
 ---
 

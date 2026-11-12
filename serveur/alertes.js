@@ -1,18 +1,17 @@
 // Alertes sur l'iPhone : le serveur surveille le cadre une fois par heure (déclencheur planifié de
-// Cloudflare, voir "triggers" dans wrangler.jsonc) et envoie une notification par le service ntfy
-// quand quelque chose ne va pas :
+// Cloudflare, voir "triggers" dans wrangler.jsonc) et envoie une notification par l'application Bark
+// (voir bark.js) quand quelque chose ne va pas :
 //  - muet     : le cadre ne donne plus de nouvelles (batterie vide, Wi-Fi perdu, carte bloquée)
 //  - batterie : la batterie passe sous le seuil choisi
 //  - bus      : les horaires de bus chargés arrivent à leur fin (le bloc Prochains bus deviendrait vide)
 // Une notification par problème, puis un rappel tant qu'il dure (une fois par jour ; tous les 3 jours
-// pour les bus). Le « sujet » ntfy tient lieu de mot de passe : il est choisi long et au hasard.
+// pour les bus).
 import { json, texte } from './commun.js';
+import { notifierBark, nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
 import { lireConfig } from './config.js';
 import { finValiditeBus } from './bus.js';
 import { JOURS_COURTS, MOIS, deux, mural } from './temps.js';
 
-const NTFY = 'https://ntfy.sh/';
-export const SUJET_VALIDE = /^[A-Za-z0-9_-]{10,64}$/;
 const RAPPEL_H = { muet: 24, batterie: 24, bus: 72 };
 
 // Pourcentage estime d'apres la tension, pour une carte sans jauge (meme table que la carte et la page)
@@ -75,10 +74,14 @@ export async function etatAlertes(cfg, env, maintenant) {
   return res;
 }
 
-async function notifier(sujet, titre, message, priorite, etiquette) {
-  const r = await fetch(NTFY, { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ topic: sujet, title: titre, message, priority: priorite, tags: [etiquette] }), signal: AbortSignal.timeout(8000) });
-  if (!r.ok) throw new Error('ntfy a répondu HTTP ' + r.status);
+// Destinataire enregistre : Device Token (envoi direct a Apple) et/ou cle Bark (serveur public, secours)
+const destinataire = a => ({ token: a.token, cle: a.cle });
+const aDestinataire = a => TOKEN_VALIDE.test(nettoyerToken(a.token)) || CLE_VALIDE.test(nettoyerCle(a.cle));
+// Importance de chaque alerte dans Bark : « critical » sonne meme en mode silencieux (option de la page,
+// pour le cadre muet seulement) ; « timeSensitive » passe les modes Concentration autorises
+function niveau(cle, a) {
+  if (cle === 'muet') return a.critique ? 'critical' : 'timeSensitive';
+  return cle === 'batterie' ? 'timeSensitive' : 'active';
 }
 
 // Appelee une fois par heure : envoie les alertes nouvelles et les rappels. Le KV ("alertes") retient la
@@ -86,7 +89,7 @@ async function notifier(sujet, titre, message, priorite, etiquette) {
 export async function verifierAlertes(env, maintenant = Date.now()) {
   const cfg = await lireConfig(env);
   const a = cfg.alertes || {};
-  if (!a.actif || !SUJET_VALIDE.test(a.sujet || '')) return { envoyees: [] };
+  if (!a.actif || !aDestinataire(a)) return { envoyees: [] };
   const etats = await etatAlertes(cfg, env, maintenant);
   const memo = JSON.parse((await env.CADRE.get('alertes')) || '{}');
   const envoyees = [];
@@ -96,15 +99,20 @@ export async function verifierAlertes(env, maintenant = Date.now()) {
     try {
       if (surveille && e.probleme) {
         if (memo[e.cle] && maintenant - memo[e.cle] < RAPPEL_H[e.cle] * 3600e3) continue;
-        await notifier(a.sujet, e.titre, e.message, e.cle === 'bus' ? 3 : 4, e.cle === 'batterie' ? 'battery' : e.cle === 'bus' ? 'bus' : 'warning');
-        console.log('Alerte envoyée :', e.titre);
+        const chemin = await notifierBark(env, destinataire(a), { titre: e.titre, message: e.message, niveau: niveau(e.cle, a) }, maintenant);
+        console.log('Alerte envoyée (' + chemin + ') :', e.titre);
         memo[e.cle] = maintenant; change = true; envoyees.push(e.cle);
+        if (memo.erreur) { delete memo.erreur; change = true; }
       } else if (memo[e.cle] && (!surveille || e.probleme || e.retabli !== false)) {
         // Le probleme a cesse (ou n'est plus surveille) ; pour le cadre muet, on previent de son retour
-        if (surveille && e.cle === 'muet') await notifier(a.sujet, 'Cadre : de retour', 'Le cadre répond à nouveau (' + e.info + ').', 2, 'white_check_mark');
+        if (surveille && e.cle === 'muet') await notifierBark(env, destinataire(a), { titre: 'Cadre : de retour', message: 'Le cadre répond à nouveau (' + e.info + ').', niveau: 'active' }, maintenant);
         delete memo[e.cle]; change = true;
       }
-    } catch (err) { console.log('Alerte « ' + e.cle + ' » non envoyée :', err.message); }
+    } catch (err) {
+      console.log('Alerte « ' + e.cle + ' » non envoyée :', err.message);
+      // Retenue pour la page web (Device Token perime, par exemple) ; ecrite seulement si elle change
+      if (!memo.erreur || memo.erreur.m !== err.message) { memo.erreur = { t: maintenant, m: err.message }; change = true; }
+    }
   }
   if (change) { try { await env.CADRE.put('alertes', JSON.stringify(memo)); } catch (e) { /* limite d'ecriture : renvoyee dans une heure */ } }
   return { envoyees };
@@ -115,14 +123,19 @@ export async function routeEtatAlertes(env) {
   const cfg = await lireConfig(env);
   const etats = await etatAlertes(cfg, env, Date.now());
   const memo = JSON.parse((await env.CADRE.get('alertes')) || '{}');
-  return json({ etats: etats.map(e => ({ cle: e.cle, probleme: e.probleme, info: e.info, envoyee: memo[e.cle] || 0 })) });
+  return json({ etats: etats.map(e => ({ cle: e.cle, probleme: e.probleme, info: e.info, envoyee: memo[e.cle] || 0 })), erreur: memo.erreur || null });
 }
+// Essai avec les champs de la page, enregistres ou non. critique : essai d'une alerte critique
 export async function routeEssaiAlerte(req, env) {
-  let sujet = '';
-  try { sujet = String((await req.json()).sujet || '').trim(); } catch (e) { /* corps vide */ }
-  if (!SUJET_VALIDE.test(sujet)) return texte('Sujet ntfy invalide : 10 à 64 lettres, chiffres, - ou _', 400);
+  let d = {};
+  try { d = (await req.json()) || {}; } catch (e) { /* corps vide */ }
+  const dest = { token: nettoyerToken(d.token), cle: nettoyerCle(d.cle) };
+  if (dest.token && !TOKEN_VALIDE.test(dest.token)) return texte('Device Token invalide : copie-le dans Bark, Settings → Device Token (64 caractères 0-9 et a-f)', 400);
+  if (dest.cle && !CLE_VALIDE.test(dest.cle)) return texte('Clé Bark invalide : copie-la dans Bark, Service → Copy Key', 400);
+  if (!dest.token && !dest.cle) return texte('Colle d\'abord le Device Token de Bark', 400);
+  let chemin;
   try {
-    await notifier(sujet, 'Cadre : essai', 'Les alertes du cadre arrivent bien sur cet appareil.', 3, 'white_check_mark');
+    chemin = await notifierBark(env, dest, { titre: 'Cadre : essai', message: 'Les alertes du cadre arrivent bien sur cet appareil.', niveau: d.critique ? 'critical' : 'active' });
   } catch (e) { return texte('Envoi impossible : ' + e.message, 502); }
-  return json({ ok: true });
+  return json({ ok: true, chemin });
 }

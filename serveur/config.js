@@ -2,6 +2,7 @@
 import { MODES, fusionner } from './commun.js';
 import { ROTATIONS, grille, validerDisposition } from './disposition.js';
 import { validerCreneaux, validerScenes } from './scenes.js';
+import { nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
 
 export const CONFIG_DEFAUT = {
   mode: 'tableau',
@@ -12,8 +13,10 @@ export const CONFIG_DEFAUT = {
   nuit: { actif: false, debut: '23:00', fin: '07:00', intervalleMin: 60 },
   // Heures creuses : plages (jours + heures) ou personne ne regarde le cadre ; reveils espaces, comme la nuit
   creuses: { actif: false, creneaux: [], intervalleMin: 60 },
-  // Alertes sur l'iPhone (notifications ntfy, voir alertes.js) : sujet = nom du canal, long et au hasard
-  alertes: { actif: false, sujet: '', muet: true, batterie: true, bus: true, seuilBatterie: 20 },
+  // Alertes sur l'iPhone (application Bark, voir alertes.js et bark.js) : token = Device Token de Bark
+  // (envoi direct a Apple), cle = cle du serveur public de Bark (secours, facultative) ; critique : le
+  // cadre muet sonne meme en mode silencieux
+  alertes: { actif: false, token: '', cle: '', critique: false, muet: true, batterie: true, bus: true, seuilBatterie: 20 },
   // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
   // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
   // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double, triple ou quadruple (2 a 4
@@ -128,10 +131,13 @@ export function preparerModif(modif, cfg, rapport = {}) {
   if (modif.alertes !== undefined) {
     const a = modif.alertes || {}, actuel = cfg.alertes || CONFIG_DEFAUT.alertes;
     const val = (k, defaut) => (a[k] === undefined ? defaut : a[k]);
-    const sujet = String(val('sujet', actuel.sujet) || '').trim();
+    const token = nettoyerToken(val('token', actuel.token)), cle = nettoyerCle(val('cle', actuel.cle));
     const actif = !!val('actif', actuel.actif);
-    if (sujet ? !SUJET_ALERTES.test(sujet) : actif) return 'Alertes : le sujet ntfy doit faire 10 à 64 caractères (lettres sans accent, chiffres, - ou _)';
-    modif.alertes = { actif, sujet, muet: !!val('muet', actuel.muet), batterie: !!val('batterie', actuel.batterie), bus: !!val('bus', actuel.bus),
+    if (token && !TOKEN_VALIDE.test(token)) return 'Alertes : Device Token invalide (copie-le dans Bark, Settings → Device Token)';
+    if (cle && !CLE_VALIDE.test(cle)) return 'Alertes : clé Bark invalide (copie-la dans Bark, Service → Copy Key)';
+    if (actif && !token && !cle) return 'Alertes : colle le Device Token de Bark avant de les activer';
+    modif.alertes = { actif, token, cle, critique: !!val('critique', actuel.critique),
+      muet: !!val('muet', actuel.muet), batterie: !!val('batterie', actuel.batterie), bus: !!val('bus', actuel.bus),
       seuilBatterie: [10, 20, 30].includes(+a.seuilBatterie) ? +a.seuilBatterie : (actuel.seuilBatterie || 20) };
   }
   if (modif.agenda && Array.isArray(modif.agenda.urls)) {
@@ -172,7 +178,5 @@ function lireAnniversaires(texte) {
   }
   return { liste, ignorees };
 }
-// Sujet ntfy des alertes : il tient lieu de mot de passe, d'ou la longueur minimale (meme regle dans alertes.js)
-const SUJET_ALERTES = /^[A-Za-z0-9_-]{10,64}$/;
 // Methodes de mise a jour partielle et lettre du plan correspondant (la carte fait le reste)
 export const METHODES_PARTIEL = { simple: 'P', double: 'D', triple: 'T', quadruple: 'Q', inversion: 'I' };
