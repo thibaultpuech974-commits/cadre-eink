@@ -34,14 +34,22 @@ export async function agenda(o, maintenant, env) {
     const j = memeJour(w, auj) ? "Aujourd'hui" : memeJour(w, demain) ? 'Demain' : JOURS_COURTS[w.js] + ' ' + w.d;
     let h = '';
     if (!e.journee) h = enCours ? 'en cours' : deux(w.hh) + ':' + deux(w.mi);
-    const t = pourEcran(titreF1(e.titre));
+    const f1 = titreF1(e.titre);
+    const t = pourEcran(f1 === e.titre ? f1 : sessionCourte(f1));
     // 100 caracteres au plus : la carte met un titre long sur 2 ou 3 lignes quand le bloc a de la place
     const ligne = { j, h, t: t.length > 100 ? t.slice(0, 97) + '...' : t };
+    // Pastille de la carte : numero du jour et jour de la semaine (ou "Auj.", "Dem.")
+    ligne.n = String(w.d);
+    ligne.s = j === "Aujourd'hui" ? 'Auj.' : j === 'Demain' ? 'Dem.' : JOURS_COURTS[w.js];
     // Lieu (salle, adresse...) : affiche apres le titre, sauf s'il y figure deja ou si l'option est decochee
     const l = o.lieu !== false && e.lieu ? pourEcran(e.lieu) : '';
     if (l && !t.toLowerCase().includes(l.toLowerCase())) ligne.l = l.length > 32 ? l.slice(0, 29) + '...' : l;
     return ligne;
   });
+}
+// Seances de F1 abregees dans l'agenda, pour tenir sur une ligne ("GP de Las Vegas - EL1")
+function sessionCourte(t) {
+  return t.replace(/Essais libres (\d)$/, 'EL$1').replace(/Qualif\. sprint$/, 'Qualif sprint').replace(/Qualifications$/, 'Qualif');
 }
 // Prochaine occurrence de chaque anniversaire (evenement "journee entiere")
 function anniversaires(liste, maintenant, fin) {
