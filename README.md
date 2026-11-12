@@ -168,7 +168,7 @@ Pour les blocs de la scène choisie :
 - coche ou décoche un bloc pour l'ajouter ou le retirer ;
 - **Traits de séparation** dessine des lignes entre les blocs.
 
-L'écran est découpé en une grille de 12 × 8 cases, et les blocs ne peuvent pas se chevaucher. Le contenu de chaque bloc s'adapte à sa taille : polices, taille des icônes, nombre de colonnes d'heures ou de jours, nombre de lignes d'agenda. Clique sur **Enregistrer**, et le cadre applique la disposition à son prochain réveil.
+L'écran est découpé en une grille de 12 × 8 cases, et les blocs ne peuvent pas se chevaucher. Le contenu de chaque bloc s'adapte à sa taille : polices, taille des icônes, nombre de colonnes d'heures ou de jours, nombre de lignes d'agenda. Dans l'agenda, un titre trop long pour sa ligne passe sur 2, voire 3 lignes quand il reste de la place en bas du bloc (sans jamais retirer un évènement de la liste). Clique sur **Enregistrer**, et le cadre applique la disposition à son prochain réveil.
 
 **Orientation** (menu **Montage du cadre**) : les boutons **Paysage**, **Portrait** et **Portrait inversé** choisissent le sens du cadre. Les deux portraits correspondent aux deux façons d'accrocher le cadre en hauteur : prends celui qui affiche l'image à l'endroit. Chaque orientation garde sa propre disposition (grille de 8 × 12 cases en portrait). Une photo est préparée dans l'orientation active au moment de l'envoi : renvoie-la si tu changes d'orientation.
 

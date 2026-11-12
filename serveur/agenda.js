@@ -35,7 +35,8 @@ export async function agenda(o, maintenant, env) {
     let h = '';
     if (!e.journee) h = enCours ? 'en cours' : deux(w.hh) + ':' + deux(w.mi);
     const t = pourEcran(titreF1(e.titre));
-    return { j, h, t: t.length > 60 ? t.slice(0, 57) + '...' : t };
+    // 100 caracteres au plus : la carte met un titre long sur 2 ou 3 lignes quand le bloc a de la place
+    return { j, h, t: t.length > 100 ? t.slice(0, 97) + '...' : t };
   });
 }
 // Prochaine occurrence de chaque anniversaire (evenement "journee entiere")

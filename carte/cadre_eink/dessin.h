@@ -48,7 +48,9 @@ void texte(int x, int y, const char* s);
 void texteDroite(int xDroite, int y, const char* s);
 void texteCentre(int xCentre, int y, const char* s);
 void texteTronque(int x, int y, const char* s, int largeurMax);
+int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax, bool dessiner);
 int texteMultiligne(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax);
+int compterLignes(const char* s, int largeurMax, int lignesMax);
 void trait(float x0, float y0, float x1, float y1, float e);
 void formeNuage(float cx, float cy, float s, uint16_t c);
 void nuage(float cx, float cy, float s);
@@ -117,25 +119,26 @@ void texteTronque(int x, int y, const char* s, int largeurMax) {
 }
 
 // Texte sur plusieurs lignes (coupure aux espaces). Renvoie le y de la ligne suivante.
-int texteMultiligne(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax) {
-  char ligne[160] = "";
+// dessiner = false : rien n'est trace, on mesure seulement la place prise (voir compterLignes).
+int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax, bool dessiner) {
+  char ligne[240] = "";
   const char* p = s;
   int lignes = 0;
   while (*p && lignes < lignesMax) {
     while (*p == ' ') p++;
     const char* fin = p;
     while (*fin && *fin != ' ') fin++;
-    char essai[160];
+    char essai[240];
     snprintf(essai, sizeof essai, "%s%s%.*s", ligne, ligne[0] ? " " : "", (int)(fin - p), p);
     if (ligne[0] && largeurTexte(essai) > largeurMax) {
       lignes++;
       if (lignes == lignesMax) {
-        char reste[200];
+        char reste[280];
         snprintf(reste, sizeof reste, "%s %s", ligne, p);
-        texteTronque(x, y, reste, largeurMax);
+        if (dessiner) texteTronque(x, y, reste, largeurMax);
         return y + interligne;
       }
-      texte(x, y, ligne);
+      if (dessiner) texteTronque(x, y, ligne, largeurMax);   // tronque : un mot seul peut depasser la largeur
       y += interligne;
       ligne[0] = 0;
       continue;
@@ -143,8 +146,15 @@ int texteMultiligne(int x, int y, const char* s, int largeurMax, int interligne,
     strncpy(ligne, essai, sizeof ligne - 1);
     p = fin;
   }
-  if (ligne[0] && lignes < lignesMax) { texteTronque(x, y, ligne, largeurMax); y += interligne; }
+  if (ligne[0] && lignes < lignesMax) { if (dessiner) texteTronque(x, y, ligne, largeurMax); y += interligne; }
   return y;
+}
+int texteMultiligne(int x, int y, const char* s, int largeurMax, int interligne, int lignesMax) {
+  return texteLignes(x, y, s, largeurMax, interligne, lignesMax, true);
+}
+// Nombre de lignes que prendrait ce texte dans cette largeur (lignesMax au plus), avec la police en cours
+int compterLignes(const char* s, int largeurMax, int lignesMax) {
+  return max(1, texteLignes(0, 0, s, largeurMax, 1, lignesMax, false));
 }
 
 // Trait epais entre deux points
@@ -515,24 +525,46 @@ void widgetAgenda(JsonVariant ag, Boite b) {
   largHeure = min(largHeure + 14, b.w * 3 / 10);
   bool colHeure = b.w >= colJour + largHeure + 120;
   int xHeure = b.x + colJour, xTitre = xHeure + largHeure;
+  // Nombre d'evenements affiches : comme avec une ligne chacun (un titre long ne chasse pas un evenement)
+  int dispo = b.h - aE - 4;                      // descente possible de la derniere ligne de texte
+  int n = min((int)evts.size(), min(lignes, dispo / pas + 1));
+  // La place qui reste en bas sert aux titres trop longs : une 2e ligne pour chacun (les premiers
+  // evenements servis d'abord), puis une 3e s'il reste encore de la place
+  int inter = aE * 13 / 10 + 1;                  // lignes d'un meme titre plus serrees que deux evenements
+  int reste = dispo - (n - 1) * pas;
+  char tampon[240];
+  int voulu[14], nl[14];
+  n = min(n, 14);
   int i = 0;
-  char tampon[160];
   for (JsonObject e : evts) {
-    if (i >= lignes) break;
-    int yy = b.y + aE + 4 + i * pas;
-    if (yy > b.y + b.h) break;
+    if (i >= n) break;
+    const char* h = e["h"] | "";
+    const char* titre = e["t"] | "";
+    bool separe = h[0] && colHeure;
+    if (h[0] && !separe) { snprintf(tampon, sizeof tampon, "%s %s", h, titre); titre = tampon; }
+    voulu[i] = compterLignes(titre, b.x + b.w - (separe ? xTitre : xHeure), 3);
+    nl[i++] = 1;
+  }
+  for (int tour = 2; tour <= 3; tour++)
+    for (i = 0; i < n; i++)
+      if (voulu[i] >= tour && reste >= inter) { nl[i] = tour; reste -= inter; }
+  int y = b.y + aE + 4;
+  i = 0;
+  for (JsonObject e : evts) {
+    if (i >= n) break;
     policeT(17, true);
-    texteTronque(b.x, yy, e["j"] | "", colJour - 8);
+    texteTronque(b.x, y, e["j"] | "", colJour - 8);
     policeT(17, false);
     const char* h = e["h"] | "";
     const char* titre = e["t"] | "";
-    if (h[0] && colHeure) {
-      texteTronque(xHeure, yy, h, largHeure - 8);
-      texteTronque(xTitre, yy, titre, b.x + b.w - xTitre);
-    } else {
+    int xT = xTitre;
+    if (h[0] && colHeure) texteTronque(xHeure, y, h, largHeure - 8);
+    else {
       if (h[0]) { snprintf(tampon, sizeof tampon, "%s %s", h, titre); titre = tampon; }
-      texteTronque(xHeure, yy, titre, b.x + b.w - xHeure);
+      xT = xHeure;
     }
+    texteMultiligne(xT, y, titre, b.x + b.w - xT, inter, nl[i]);
+    y += pas + (nl[i] - 1) * inter;
     i++;
   }
 }
