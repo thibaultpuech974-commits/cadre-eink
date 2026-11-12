@@ -41,8 +41,9 @@ export async function agenda(o, maintenant, env) {
     // Pastille de la carte : numero du jour et jour de la semaine (ou "Auj.", "Dem.")
     ligne.n = String(w.d);
     ligne.s = j === "Aujourd'hui" ? 'Auj.' : j === 'Demain' ? 'Dem.' : JOURS_COURTS[w.js];
-    // Lieu (salle, adresse...) : affiche apres le titre, sauf s'il y figure deja ou si l'option est decochee
-    const l = o.lieu !== false && e.lieu ? pourEcran(e.lieu) : '';
+    // Lieu (salle, adresse...) : affiche apres le titre, sauf s'il y figure deja, si l'option est decochee
+    // ou pour une seance de F1 (le nom du GP dit deja ou elle a lieu)
+    const l = o.lieu !== false && e.lieu && f1 === e.titre ? pourEcran(e.lieu) : '';
     if (l && !t.toLowerCase().includes(l.toLowerCase())) ligne.l = l.length > 32 ? l.slice(0, 29) + '...' : l;
     return ligne;
   });

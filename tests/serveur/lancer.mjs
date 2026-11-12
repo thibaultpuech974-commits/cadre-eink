@@ -63,7 +63,7 @@ const ATTENDU = {
     /mensuel : Mar 10 18:00 2e mardi \| Ven 27 19:00 Dernier vendredi \| Lun 30 09:00 Fin de mois \| Mar 1 07:00 1er jour ouvré \| Mar 8 18:00 2e mardi \| Ven 25 19:00 Dernier vendredi \| Jeu 31 09:00 Fin de mois \| Ven 1 07:00 1er jour ouvré$/m,
     /divers : Aujourd'hui 18:00 Footing \| Aujourd'hui 20:00 Projet \| Demain 18:00 Footing \| Demain 20:00 Projet \| Lun 9 20:00 Projet \| Jeu 12 14:00 Code de la route \| Sam 14 18:00 Footing \| Dim 15 18:00 Footing \| Mer 18 17:00 Club \| Jeu 19 14:00 Code de la route$/m,
     /gros calendrier \(\d+ octets\) : calcul rapide \(< 25 ms\) : true/],
-  'agenda-rebours.mjs': [/lieux : Aujourd'hui 17:30 Colle de maths @ C104 \| Demain 08:00 Dentiste @ Cabinet du Dr Martin \| Demain 10:00 Cours de maths, salle B12 \| Demain 14:00 Anglais \| Jeu 12 09:00 Visite @ Musée de la Romanité, un lieu\.\.\.$/m,
+  'agenda-rebours.mjs': [/lieux : Aujourd'hui 17:30 Colle de maths @ C104 \| Demain 08:00 Dentiste @ Cabinet du Dr Martin \| Demain 10:00 Cours de maths, salle B12 \| Demain 14:00 Anglais \| Jeu 12 09:00 Visite @ Musée de la Romanité, un lieu\.\.\. \| Jeu 12 18:00 GP de Las Vegas - EL1$/m,
     /option décochée : aucun lieu/, /enregistré : Vacances de Noël=19\/12\/2026 Concours blanc=14\/1\/2027 Rentrée=2\/9\/0 .* \| ignorées : pas une date/,
     /rebours : J-0 Aujourd'hui \(mar\. 10 novembre\) \| J-39 Vacances de Noël \(sam\. 19 décembre\) \| J-52 Nouvel an \(ven\. 1 janvier 2027\) \| J-65 Concours blanc \(jeu\. 14 janvier 2027\)$/m,
     /même jour : signature identique true \| lendemain : 38 Vacances de Noël \| signature changée true/, /avant le changement d'heure : 2 jours/,
