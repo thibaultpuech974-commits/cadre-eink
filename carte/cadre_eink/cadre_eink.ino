@@ -444,7 +444,7 @@ int telecharger(const String& chemin, uint8_t** dest, int max) {
 }
 
 // Envoie l'image dessinee (apercu de la page web) et recoit du serveur comment rafraichir l'ecran :
-// 'R' rien (image identique), 'P', 'D' ou 'I' partiel (zones dans *plan, voir afficherZones),
+// 'R' rien (image identique), 'P', 'D', 'T', 'Q' ou 'I' partiel (zones dans *plan, voir afficherZones),
 // 'C' complet, 'N' complet avec nettoyage.
 // Sans reponse lisible (serveur ancien, erreur) : 'C', sans risque.
 // C'est la derniere requete d'un reveil : la connexion est fermee ensuite.
@@ -458,11 +458,11 @@ static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   char type = 'C';
   if (code == 200) {
     int t = lireCorps(httpServeur, plan, 60000);
-    if (t >= 1 && (*plan)[0] && strchr("RPDICN", (*plan)[0])) { type = (char)(*plan)[0]; *taillePlan = t; }
+    if (t >= 1 && (*plan)[0] && strchr("RPDTQICN", (*plan)[0])) { type = (char)(*plan)[0]; *taillePlan = t; }
     empreinteEnvoyee = empreinteImage(canvas.getBuffer(), OCTETS);   // le serveur a cette image
   }
   fermerConnexion();
-  if (!strchr("PDI", type)) { free(*plan); *plan = nullptr; *taillePlan = 0; }
+  if (!strchr("PDTQI", type)) { free(*plan); *plan = nullptr; *taillePlan = 0; }
   Serial.printf("Apercu envoye : HTTP %d, plan %c (%d octets)\n", code, type, *taillePlan);
   return type;
 }
@@ -510,8 +510,9 @@ void afficherComplet(bool nettoyage) {
 // compte. Au rallumage de l'ecran, les roles reviennent a la normale.
 //  P (simple)    : ancien contenu des zones (envoye par le serveur) dans la "precedente", une passe ;
 //                  seuls les pixels qui changent bougent, sans clignotement.
-//  D (double)    : pareil, puis memoires rechargees pour refaire le meme trajet : les pixels qui changent
-//                  recoivent une seconde impulsion dans le meme sens.
+//  D, T, Q       : pareil en 2, 3 ou 4 passes. Avant chaque passe, les memoires sont rechargees (selon
+//                  l'echange) pour refaire le meme trajet ancien -> nouveau : les pixels qui changent
+//                  recoivent plusieurs impulsions dans le meme sens (~0,5 s chacune).
 //  I (inversion) : chaque zone passe en negatif, puis revient a la nouvelle image : tous ses pixels font
 //                  un aller-retour complet (moins de traces, petit clignotement des seules zones).
 bool afficherZones(const uint8_t* plan, int taille) {
@@ -530,17 +531,25 @@ bool afficherZones(const uint8_t* plan, int taille) {
     // les memoires sont deja comme il faut pour le retour
     display.epd2.refresh(true);    // negatif -> nouvelle image
   } else {
+    int passes = plan[0] == 'Q' ? 4 : plan[0] == 'T' ? 3 : plan[0] == 'D' ? 2 : 1;
     // 0x26 (precedente) : ancien contenu des zones ; 0x24 (courante) : nouvelle image
     for (int k = 0; k < n; k++) display.epd2.writeImageToPrevious(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
     display.epd2.refresh(true);    // partiel sur tout l'ecran : seuls les pixels differents bougent
-    if (plan[0] == 'D') {
-      // Echange : 0x24 est maintenant la precedente, 0x26 la courante. On y remet l'ancien contenu et la
-      // nouvelle image (dans cet ordre de roles) pour refaire le meme trajet ancien -> nouveau.
+    for (int p = 1; p < passes; p++) {
+      // Apres un nombre impair de passes, 0x24 est la precedente et 0x26 la courante ; apres un nombre
+      // pair, roles normaux. On y remet l'ancien contenu et la nouvelle image selon ces roles.
+      bool echange = p % 2 == 1;
       for (int k = 0; k < n; k++) {
-        display.epd2.writeImage(zones[k].ancien, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
-        display.epd2.writeImagePartToPrevious(img, zones[k].x, zones[k].y, LARGEUR, HAUTEUR, zones[k].x, zones[k].y, zones[k].w, zones[k].h, true);
+        const ZonePlan& z = zones[k];
+        if (echange) {
+          display.epd2.writeImage(z.ancien, z.x, z.y, z.w, z.h, true);
+          display.epd2.writeImagePartToPrevious(img, z.x, z.y, LARGEUR, HAUTEUR, z.x, z.y, z.w, z.h, true);
+        } else {
+          display.epd2.writeImageToPrevious(z.ancien, z.x, z.y, z.w, z.h, true);
+          display.epd2.writeImagePart(img, z.x, z.y, LARGEUR, HAUTEUR, z.x, z.y, z.w, z.h, true);
+        }
       }
-      display.epd2.refresh(true);  // 2e impulsion, dans le meme sens
+      display.epd2.refresh(true);  // impulsion suivante, dans le meme sens
     }
   }
   eteindreEcran();
@@ -569,7 +578,7 @@ void mettreEcranAJour(char type, const uint8_t* plan, int taille) {
   fermerConnexion();                            // plus de requete avant la veille : memoire rendue a l'ecran
   if (empreinteAffichee == 0) type = 'N';       // image a l'ecran inconnue (demarrage) : nettoyage
   if (type == 'R') { ecranEnAttente = false; Serial.println("Ecran : image identique, rien a rafraichir"); return; }
-  bool demandePartiel = strchr("PDI", type) != nullptr;
+  bool demandePartiel = strchr("PDTQI", type) != nullptr;
   if (dernierAffichageMs && millis() - dernierAffichageMs < 180000UL) {
     Serial.println("Ecran : rafraichissement reporte (3 min minimum entre deux)");
     ecranEnAttente = true;
@@ -580,7 +589,8 @@ void mettreEcranAJour(char type, const uint8_t* plan, int taille) {
   if (!partiel) afficherComplet(type == 'N');
   unsigned long duree = millis() - t0;
   ecranTotalMs += duree;
-  if (partiel) Serial.printf("Ecran : mise a jour partielle (%s) en %lu ms\n", type == 'I' ? "inversion" : type == 'D' ? "double" : "simple", duree);
+  if (partiel) Serial.printf("Ecran : mise a jour partielle (%s) en %lu ms\n", type == 'I' ? "inversion" : type == 'Q' ? "4 passes" :
+                             type == 'T' ? "3 passes" : type == 'D' ? "2 passes" : "simple", duree);
   else Serial.printf("Ecran : %s en %lu ms\n", type == 'N' ? "complet avec nettoyage" : "complet", duree);
   empreinteAffichee = empreinteImage(canvas.getBuffer(), OCTETS);
   if (partiel) partielsDepuisComplet++;

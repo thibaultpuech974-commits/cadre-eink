@@ -76,7 +76,7 @@ function quand(t) {
 // Comment l'ecran a ete rafraichi pour la derniere image (plan du serveur : "P;2;3", "C;seuil", "N;quotidien", "R")
 function decrirePlan(p) {
   var m = String(p || '').split(';');
-  var methodes = { P: '', D: ', double passe', I: ', inversion des zones' };
+  var methodes = { P: '', D: ', double passe', T: ', triple passe', Q: ', quadruple passe', I: ', inversion des zones' };
   if (m[0] in methodes) return { court: 'partielle', long: 'mise à jour partielle' + methodes[m[0]] + ', ' + m[1] + (m[1] === '1' ? ' zone' : ' zones') + ' (' + m[2] + ' % de l\'écran)' };
   if (m[0] === 'R') return { court: 'identique', long: 'image identique, écran non rafraîchi' };
   var raisons = { seuil: 'trop de changements', inconnue: 'image à l\'écran inconnue', desactive: 'mises à jour partielles désactivées',

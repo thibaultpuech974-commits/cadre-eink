@@ -46,7 +46,7 @@ const ATTENDU = {
     /moitié de l'écran +: C /, /empreinte fausse +: C /, /24 h sans complet +: N /, /orientation changée +: C /,
     /partiel désactivé +: C /, /mode photo +: C /, /mise en route +: P /, /méthode changée +: N /,
     /inversion +: I \| zones 96,200 64x40 \| 330 octets \| écran juste : true/, /méthode double +: N /,
-    /double +: D \| zones 160,300 16x2 \| 14 octets \| écran juste : true/, /après 3 partielles +: C /,
+    /double +: D \| zones 160,300 16x2 \| 14 octets \| écran juste : true/, /après 3 partielles +: C /, /méthode quadruple +: N /, /quadruple +: Q \| zones 240,400 16x2 \| 14 octets \| écran juste : true/,
     /ancienne carte : ok/, /en-tête x-plan : P;1;1/,
     /après une image non envoyée +: P \| zones 240,400 16x2 \| 14 octets \| écran juste : true/, /méthode changée, après saut +: N /,
     /réglages invalides ignorés : \{"partiel":true,"completH":24,"seuil":40,"methode":"simple","maxPartiels":0\}/,

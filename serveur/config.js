@@ -16,8 +16,9 @@ export const CONFIG_DEFAUT = {
   alertes: { actif: false, sujet: '', muet: true, batterie: true, bus: true, seuilBatterie: 20 },
   // Rafraichissement de l'ecran : mises a jour partielles (seules les zones changees, sans clignotement),
   // un rafraichissement complet avec nettoyage au moins toutes les completH heures, et un complet des que
-  // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double (deux passes, pixels plus
-  // francs) ou inversion (chaque zone passe en negatif puis revient : moins de traces, petit clignotement).
+  // plus de 'seuil' % de l'ecran change. methode : simple (une passe), double, triple ou quadruple (2 a 4
+  // passes : les pixels qui changent recoivent plusieurs impulsions, traces mieux effacees, ~0,5 s par
+  // passe) ou inversion (chaque zone passe en negatif puis revient : moins de traces, petit clignotement).
   // maxPartiels : rafraichissement complet apres ce nombre de mises a jour partielles (0 = pas de limite)
   rafraich: { partiel: true, completH: 24, seuil: 40, methode: 'simple', maxPartiels: 0 },
   meteo: {
@@ -174,4 +175,4 @@ function lireAnniversaires(texte) {
 // Sujet ntfy des alertes : il tient lieu de mot de passe, d'ou la longueur minimale (meme regle dans alertes.js)
 const SUJET_ALERTES = /^[A-Za-z0-9_-]{10,64}$/;
 // Methodes de mise a jour partielle et lettre du plan correspondant (la carte fait le reste)
-export const METHODES_PARTIEL = { simple: 'P', double: 'D', inversion: 'I' };
+export const METHODES_PARTIEL = { simple: 'P', double: 'D', triple: 'T', quadruple: 'Q', inversion: 'I' };
