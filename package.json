@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Cadre e-ink : serveur (Cloudflare Worker) et programme de la carte",
   "scripts": {
-    "test": "node tests/serveur/lancer.mjs"
+    "test": "node tests/serveur/lancer.mjs",
+    "references": "node tests/serveur/references.mjs --enregistrer"
   }
 }
