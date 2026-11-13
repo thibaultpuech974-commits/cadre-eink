@@ -97,6 +97,8 @@ const ATTENDU = {
     /sans scène : 1 segment défaut \| rien enregistré : true/, /demande illisible : 400/, /changement d'heure : dimanche de 25 h \| dim 09:00 Week-end \| dim 22:00 défaut/,
     /avant le premier réveil : inconnu/, /^réveil : appliqué à mar 12:00/m, /changement de mode : en attente/, /réveil suivant : appliqué à mar 12:10/,
     /10 min après, heure gardée : appliqué à mar 12:10/, /contour de l'aperçu : appliqué à mar 12:10 \| version inchangée : true/, /contour et traits : en attente/],
+  // Images de reference du dessin : toutes identiques (sinon : npm run references, apres avoir regarde tests/rendu/ecarts/)
+  'references.mjs': [/images de référence : (\d\d+) sur \1 identiques$/m],
   'reveils-cales.mjs': [/10 min, depuis 14:07:20 : 14:07:20 \| 14:10:07 \| 14:20:07 \| 14:30:07 \| 14:40:07/, /60 min, depuis 13:58:30 : 13:58:30 \| 14:00:20 \| 15:00:20/,
     /0,4 % rapide : 14:00:20 \| 15:00:05 \| 16:00:06 \| 17:00:05/, /2 % rapide : 14:00:20 \| 14:59:08 \| 15:00:18 \| 15:59:08 \| 16:00:19/,
     /2 % lente : 14:00:20 \| 15:01:31 \| 16:01:31 \| 17:01:31/,

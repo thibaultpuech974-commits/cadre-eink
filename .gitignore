@@ -1,6 +1,7 @@
 tests/rendu/libs/
 tests/rendu/rendu
 tests/rendu/r3_*
+tests/rendu/ecarts/
 tests/serveur/node_modules/
 *.bin
 
