@@ -38,14 +38,30 @@ function dansNuit(n, maintenant) {
   const depuis = (min - d + 1440) % 1440, duree = (f - d + 1440) % 1440;
   return depuis < duree ? depuis : -1;
 }
-// Intervalle de reveil (s) : la nuit et pendant les heures creuses, reveil espace, et cale sur la fin de la periode
+// --- Reveils cales sur l'horloge ---
+// Le cadre ne se reveille pas "toutes les 10 min a partir du dernier reveil" (14:07, 14:17...), mais aux
+// reperes de l'horloge : 14:00, 14:10, 14:20... (les multiples de l'intervalle comptes depuis minuit, heure
+// de Paris). La date, a minuit, et les colonnes "prochaines heures", a l'heure pile, basculent ainsi a
+// l'heure au lieu d'attendre jusqu'a un intervalle entier. Le nombre de reveils par jour ne change pas.
+// Renvoie les secondes a dormir : jusqu'au prochain repere, plus une marge pour se reveiller juste apres
+// lui et non juste avant. L'horloge de veille de la carte derive : la marge vaut 0,5 % de l'intervalle
+// (18 s pour une heure), au moins MARGE_REVEIL. Si la carte se reveille quand meme avant le repere, elle
+// se rendort jusqu'a lui (une minute au moins). Le premier intervalle est plus court que les suivants.
+export const MARGE_REVEIL = 5;
+export function calerSurHorloge(intervalleS, maintenant, w = mural(maintenant)) {
+  const depuisMinuit = w.hh * 3600 + w.mi * 60 + w.ss;
+  const repere = Math.min((Math.floor(depuisMinuit / intervalleS) + 1) * intervalleS, 86400);   // minuit est toujours un repere
+  return Math.max(60, repere - depuisMinuit + Math.max(MARGE_REVEIL, Math.round(intervalleS / 200)));
+}
+// Secondes jusqu'au prochain reveil : rythme 'normal' (en secondes) cale sur l'horloge ; la nuit et pendant
+// les heures creuses, reveils espaces (cales eux aussi), avec un reveil a la fin de la periode
 export function reveilNuit(cfg, maintenant, normal) {
   const n = cfg.nuit, depuis = dansNuit(n, maintenant);
   if (depuis >= 0) {
     const w = mural(maintenant);
     const resteS = ((enMinutes(n.fin) - (w.hh * 60 + w.mi) + 1440) % 1440) * 60 - w.ss;
     const inter = Math.max(15, Math.min(240, n.intervalleMin || 60)) * 60;
-    return Math.max(60, Math.min(inter, resteS + 5));
+    return Math.max(60, Math.min(calerSurHorloge(inter, maintenant, w), resteS + MARGE_REVEIL));
   }
   // Heures creuses : meme principe, sur des plages jours + heures (elles ne passent pas minuit) ;
   // jamais plus souvent que le rythme normal
@@ -56,10 +72,10 @@ export function reveilNuit(cfg, maintenant, normal) {
     if (plage) {
       const resteS = (enMinutes(plage.fin) - min) * 60 - w.ss;
       const inter = Math.max(normal, Math.max(15, Math.min(240, c.intervalleMin || 60)) * 60);
-      return Math.max(60, Math.min(inter, resteS + 5));
+      return Math.max(60, Math.min(calerSurHorloge(inter, maintenant, w), resteS + MARGE_REVEIL));
     }
   }
-  return normal;
+  return calerSurHorloge(normal, maintenant);
 }
 export function texteCreneaux(o) {
   const J = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];

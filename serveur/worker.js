@@ -41,7 +41,7 @@ import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.j
 import { JOURS_COURTS, MOIS, TZ, dateDuJour, deux, mural, versUTC } from './temps.js';
 import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
 import { ROTATIONS } from './disposition.js';
-import { friseScenes, reveilNuit } from './scenes.js';
+import { MARGE_REVEIL, calerSurHorloge, friseScenes, reveilNuit } from './scenes.js';
 import { grandPrix } from './f1.js';
 import { GTFS_TANGO, enregistrerIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
@@ -159,13 +159,13 @@ async function routeEtat(url, env) {
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
     for (const id of ['agenda', 'bus', 'f1', 'rebours']) if (!ici.has(id)) delete contenu[id];
     Object.assign(etat, contenu);
-    // Scene affichee : son rythme (ou le rythme normal / de nuit), et reveil cale sur le prochain changement de scene
+    // Scene affichee : son rythme (ou le rythme normal / de nuit), cale sur l'horloge, et reveil au prochain changement de scene
     const sc = contenu.scene;
     delete contenu.scene; delete etat.scene;
     etat.scene = sc.nom;
     if (!cfg.dev) {
-      etat.reveil = sc.reveilMin ? Math.max(3, sc.reveilMin) * 60 : reveilNuit(cfg, maintenant, etat.reveil);
-      if (sc.changement) etat.reveil = Math.min(etat.reveil, Math.max(60, Math.ceil((sc.changement - maintenant) / 1000) + 5));
+      etat.reveil = sc.reveilMin ? calerSurHorloge(Math.max(3, sc.reveilMin) * 60, maintenant) : reveilNuit(cfg, maintenant, etat.reveil);
+      if (sc.changement) etat.reveil = Math.min(etat.reveil, Math.max(60, Math.ceil((sc.changement - maintenant) / 1000) + MARGE_REVEIL));
     }
   } else if (cfg.mode === 'photo') {
     if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
@@ -251,7 +251,7 @@ async function routeEtat(url, env) {
       } catch (e) { /* limite d'ecriture */ }
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
-      ancien.fw !== nouveau.fw || ancien.r !== nouveau.r || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
+      ancien.fw !== nouveau.fw || Math.abs((ancien.r || 0) - nouveau.r) > 60 || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
       ancien.fwko !== nouveau.fwko || ancien.cv !== nouveau.cv ||
       // carte redemarree (bouton RESET, nouveau programme...) : son compteur d'eveil repart de zero
       (ev !== null && typeof ancien.ev === 'number' && ev < ancien.ev) || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||

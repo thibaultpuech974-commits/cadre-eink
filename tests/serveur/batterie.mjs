@@ -40,6 +40,7 @@ st = JSON.parse(kv.get('statut').v);
 console.log('valeurs bornées :', st.pct, st.crate);
 // Mode développement (réveil toutes les 30 s), fin de charge : une vitesse qui hésite autour du seuil
 // (+1,9 / +2,1 % par heure) ne réécrit pas l'état à chaque réveil
+await post({ dev: true, devSecondes: 30 });
 let ecrituresStatut = 0; const set1 = kv.set.bind(kv);
 kv.set = (k, v) => { if (k === 'statut') ecrituresStatut++; return set1(k, v); };
 for (let i = 0; i < 20; i++) {
