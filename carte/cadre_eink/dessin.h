@@ -32,7 +32,8 @@ struct Boite { int x, y, w, h; };
 // Style du texte du bloc en cours de dessin : e = echelle (0,8 a 1,5), f = famille de police
 struct Style { float e; int f; };
 // Place prise par le texte du bloc F1
-struct MesureF1 { int aT, aP, aQ, ligneS, lJ, lH, h; bool tient; };
+struct MesureF1 { int aT, aP, aQ, ligneS, lJ, lH, h; bool tient;
+                  int modeM, ligneM, lT, lP, lV, esp; };   // meteo du circuit : 0 aucune, 1 sur la ligne de la seance, 2 dessous
 // Zone d'une mise a jour partielle envoyee par le serveur : rectangle et ancien contenu
 struct ZonePlan { int x, y, w, h; const uint8_t* ancien; };
 
@@ -82,6 +83,7 @@ void widgetCourbe(JsonVariant g, Boite b);
 void dessinerCircuit(JsonVariant tr, int x, int y, int w, int h);
 MesureF1 mesurerF1(JsonArray S, const char* gp, int largeur, int decalage);
 void widgetF1(JsonVariant f, Boite b);
+void widgetMeteoCircuit(JsonVariant f, Boite b);
 void dessinerTableau(JsonVariant e, float vBat);
 int rappelJPEG(JPEGDRAW* d);
 bool tramer(const uint8_t* g, int gl, int gh, int x0, int y0, int w, int h, float contraste);
@@ -970,7 +972,28 @@ MesureF1 mesurerF1(JsonArray S, const char* gp, int largeur, int decalage) {
     r.lH = max(r.lH, (int)largeurTexte(o["h"] | ""));
   }
   r.lJ += max(8, aS / 2); r.lH += max(10, aS * 2 / 3);
-  r.h = r.aT + r.aP + 10 + r.aQ + 12 + 8 + S.size() * r.ligneS;
+  // Meteo du circuit a l'heure de chaque seance a venir ("m" : temperature, risque de pluie, vent) :
+  // au bout de la ligne de la seance si la largeur le permet, sinon sur une ligne plus petite dessous
+  r.modeM = 0; r.ligneM = 0; r.lT = r.lP = r.lV = 0; r.esp = 0;
+  int nbM = 0, lNom = 0;
+  char tm[24];
+  for (JsonObject o : S) {
+    policeT(17, !strcmp(o["n"] | "", "Course"));
+    lNom = max(lNom, (int)largeurTexte(o["n"] | ""));
+    if (o["m"].isNull() || (o["f"] | 0)) continue;
+    nbM++;
+    policeT(14, false);
+    snprintf(tm, sizeof tm, "%d°", (int)(o["m"]["t"] | 0));      r.lT = max(r.lT, (int)largeurTexte(tm));
+    snprintf(tm, sizeof tm, "%d %%", (int)(o["m"]["p"] | 0));    r.lP = max(r.lP, (int)largeurTexte(tm));
+    snprintf(tm, sizeof tm, "%d km/h", (int)(o["m"]["v"] | 0));  r.lV = max(r.lV, (int)largeurTexte(tm));
+  }
+  if (nbM) {
+    policeT(14, false); int aM = asc();
+    r.esp = max(10, aM);
+    if (r.lJ + r.lH + lNom + r.esp * 3 + r.lT + r.lP + r.lV <= largeur) r.modeM = 1;
+    else { r.modeM = 2; r.ligneM = aM + max(5, aM / 2); }
+  }
+  r.h = r.aT + r.aP + 10 + r.aQ + 12 + 8 + S.size() * r.ligneS + (r.modeM == 2 ? nbM * r.ligneM : 0);
   r.tient = r.lJ + r.lH + largeurTexte("Qualifications") * 6 / 10 <= largeur;
   decalageCran = 0;
   return r;
@@ -1026,6 +1049,13 @@ void widgetF1(JsonVariant f, Boite b) {
   y += m.aQ + 12;
   if (y <= txt.y + txt.h) texteTronque(txt.x, y, f["quand"] | "", txt.w);
   y += 8;
+  // Meteo sous les seances : seulement si tout tient (sinon les horaires passent d'abord)
+  int modeM = m.modeM;
+  if (modeM == 2) {
+    int nbM = 0;
+    for (JsonObject o : S) if (!o["m"].isNull() && !(o["f"] | 0)) nbM++;
+    if (y + ns * m.ligneS + nbM * m.ligneM > txt.y + txt.h) modeM = 0;
+  }
   // Seances : si la place manque encore, on garde les prochaines
   int place = (txt.y + txt.h - y) / m.ligneS;
   int premier = 0;
@@ -1037,10 +1067,79 @@ void widgetF1(JsonVariant f, Boite b) {
     policeT(17, course);
     texte(txt.x, y, o["j"] | "");
     texte(txt.x + m.lJ, y, o["h"] | "");
-    texteTronque(txt.x + m.lJ + m.lH, y, o["n"] | "", txt.w - m.lJ - m.lH);
+    bool meteo = modeM && !fini && !o["m"].isNull();
+    int lM = meteo && modeM == 1 ? m.lT + m.lP + m.lV + m.esp * 3 : 0;
+    texteTronque(txt.x + m.lJ + m.lH, y, o["n"] | "", txt.w - m.lJ - m.lH - lM);
+    if (meteo) {
+      JsonObject mt = o["m"];
+      int xD = txt.x + txt.w;
+      policeT(14, false);
+      if (modeM == 1) {                 // trois colonnes alignees a droite : temperature, pluie, vent
+        snprintf(t, sizeof t, "%d km/h", (int)(mt["v"] | 0)); texteDroite(xD, y, t);
+        snprintf(t, sizeof t, "%d %%", (int)(mt["p"] | 0));   texteDroite(xD - m.lV - m.esp, y, t);
+        snprintf(t, sizeof t, "%d°", (int)(mt["t"] | 0));     texteDroite(xD - m.lV - m.lP - m.esp * 2, y, t);
+      } else {
+        y += m.ligneM;
+        snprintf(t, sizeof t, "%d° · pluie %d %% · vent %d km/h", (int)(mt["t"] | 0), (int)(mt["p"] | 0), (int)(mt["v"] | 0));
+        texteTronque(txt.x + m.lJ, y - (m.ligneM - asc()) / 2, t, txt.w - m.lJ);
+      }
+      policeT(17, course);
+    }
     if (fini) canvas.fillRect(txt.x, y - asc() / 2 - 1, min(txt.w, m.lJ + m.lH + (int)largeurTexte(o["n"] | "")), 2, NOIR);   // barre
   }
   decalageCran = 0;
+}
+
+// Meteo du circuit pendant le week-end d'un Grand Prix : une colonne par jour de seance (temperatures,
+// risque de pluie, vent), ou une ligne par jour quand le bloc est trop etroit pour des colonnes
+void widgetMeteoCircuit(JsonVariant f, Boite b) {
+  JsonArray J = f["meteo"];
+  int n = J.size();
+  if (!n) return;
+  char t[64];
+  policeT(20, true);  int aTi = asc();
+  policeT(17, true);  int aJ = asc();
+  policeT(20, true);  int aV = asc();
+  policeT(14, false); int aP = asc();
+  // Largeur d'une colonne : le plus large des textes
+  int lCol = 0;
+  for (JsonObject o : J) {
+    policeT(20, true);  snprintf(t, sizeof t, "%d° / %d°", (int)(o["min"] | 0), (int)(o["max"] | 0)); lCol = max(lCol, (int)largeurTexte(t));
+    policeT(14, false); snprintf(t, sizeof t, "vent %d km/h", (int)(o["v"] | 0)); lCol = max(lCol, (int)largeurTexte(t));
+  }
+  snprintf(t, sizeof t, "Météo à %s", (const char*)(f["lieu"] | ""));
+  bool colonnes = (lCol + 16) * n <= b.w;
+  int hCorps = colonnes ? aJ + 10 + aV + 10 + aP + 6 + aP : n * (aJ + 10) - 10;
+  bool titre = b.h >= aTi + 14 + hCorps;
+  int y = centrerV(b, hCorps + (titre ? aTi + 14 : 0));
+  if (titre) { policeT(20, true); texteTronque(b.x, y + aTi, t, b.w); y += aTi + 14; }
+  if (colonnes) {
+    float l = (float)b.w / n;
+    int i = 0;
+    for (JsonObject o : J) {
+      int cx = b.x + l * i + l / 2, yy = y + aJ;
+      policeT(17, true);  texteCentre(cx, yy, o["j"] | "");
+      yy += 10 + aV;
+      policeT(20, true);  snprintf(t, sizeof t, "%d° / %d°", (int)(o["min"] | 0), (int)(o["max"] | 0)); texteCentre(cx, yy, t);
+      yy += 10 + aP;
+      policeT(14, false); snprintf(t, sizeof t, "pluie %d %%", (int)(o["p"] | 0)); texteCentre(cx, yy, t);
+      yy += 6 + aP;
+      snprintf(t, sizeof t, "vent %d km/h", (int)(o["v"] | 0)); texteCentre(cx, yy, t);
+      if (i) ligneVPointillee(b.x + l * i, y, y + hCorps);
+      i++;
+    }
+    return;
+  }
+  // Bloc etroit : une ligne par jour
+  policeT(17, true); int lJ = 0;
+  for (JsonObject o : J) lJ = max(lJ, (int)largeurTexte(o["j"] | ""));
+  for (JsonObject o : J) {
+    y += aJ;
+    policeT(17, true);  texte(b.x, y, o["j"] | "");
+    policeT(17, false); snprintf(t, sizeof t, "%d°/%d°", (int)(o["min"] | 0), (int)(o["max"] | 0)); texte(b.x + lJ + 12, y, t);
+    policeT(14, false); snprintf(t, sizeof t, "%d %% · %d km/h", (int)(o["p"] | 0), (int)(o["v"] | 0)); texteDroite(b.x + b.w, y, t);
+    y += 10;
+  }
 }
 
 void dessinerTableau(JsonVariant e, float vBat) {
@@ -1083,6 +1182,7 @@ void dessinerTableau(JsonVariant e, float vBat) {
     else if (!strcmp(id, "rebours")) widgetRebours(e["rebours"], b);
     else if (!strcmp(id, "bus")) widgetBus(e["bus"], b);
     else if (!strcmp(id, "f1")) widgetF1(e["f1"], b);
+    else if (!strcmp(id, "f1meteo")) widgetMeteoCircuit(e["f1"], b);
     else if (!strcmp(id, "courbe")) {
       if (meteoKO || m["courbe"].isNull()) { policeT(20, false); texteTronque(b.x, b.y + asc() + 6, "Météo indisponible", b.w); }
       else widgetCourbe(m["courbe"], b);
