@@ -50,24 +50,37 @@ export function titreF1(t) {
 // sites (d'ou des refus "HTTP 429"). Si Jolpica ne repond pas, on garde la derniere copie.
 const CLES_GP = ['round', 'raceName', 'date', 'time', 'Circuit', 'FirstPractice', 'SecondPractice', 'ThirdPractice',
   'SprintQualifying', 'SprintShootout', 'Sprint', 'Qualifying'];
+// Calendrier d'une saison : garde 12 h dans le KV. Apres un echec (Jolpica limite les demandes : HTTP 429),
+// l'heure de l'echec est notee dans la meme cle et on attend une heure avant de redemander. Sans cela, le
+// calendrier etait redemande a chaque reveil du cadre tant que Jolpica refusait.
+const VALIDITE_F1 = 12 * 3600e3, REESSAI_F1 = 3600e3;
 async function calendrierF1(annee, env) {
   const cle = 'f1-' + annee;
   let memo = null;
   try { memo = JSON.parse((await env.CADRE.get(cle)) || 'null'); } catch (e) { /* pas de copie */ }
-  if (memo && Date.now() - memo.t < 12 * 3600e3) return memo.courses;
+  const copie = memo && memo.t > 0 ? memo.courses : null;       // (t = 0 : aucun calendrier recu, seulement un echec note)
+  if (copie && Date.now() - memo.t < VALIDITE_F1) return copie;
+  if (memo && memo.echec && Date.now() - memo.echec < REESSAI_F1) {
+    if (copie) return copie;                // copie plus ancienne : toujours valable pour les horaires
+    throw new Error(memo.raison || 'pas de réponse');
+  }
   try {
     const r = await fetch('https://api.jolpi.ca/ergast/f1/' + annee + '.json?limit=40',
       { cf: { cacheTtl: 21600, cacheEverything: true }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const courses = ((((await r.json()).MRData || {}).RaceTable || {}).Races || [])
       .map(c => Object.fromEntries(CLES_GP.filter(k => c[k] !== undefined).map(k => [k, c[k]])));
-    if (courses.length || !memo || !memo.courses.length) {
-      try { await env.CADRE.put(cle, JSON.stringify({ t: Date.now(), courses })); } catch (e) { /* limite d'ecriture */ }
-    }
-    return courses.length || !memo ? courses : memo.courses;
+    if (!courses.length && copie && copie.length) throw new Error('calendrier vide');     // on garde celui qu'on a
+    try { await env.CADRE.put(cle, JSON.stringify({ t: Date.now(), courses })); } catch (e) { /* limite d'ecriture */ }
+    return courses;
   } catch (e) {
-    if (memo) return memo.courses;          // copie plus ancienne : toujours valable pour les horaires
-    throw new Error(e.name === 'TimeoutError' ? 'pas de réponse' : e.message);
+    const raison = e.name === 'TimeoutError' ? 'pas de réponse' : e.message;
+    console.log('Calendrier F1 ' + annee + ' : ' + raison + (copie ? ', copie gardée' : '') + ' ; nouvel essai dans une heure');
+    try {       // une ecriture par heure au plus, tant que la panne dure
+      await env.CADRE.put(cle, JSON.stringify({ t: copie ? memo.t : 0, courses: copie || [], echec: Date.now(), raison }));
+    } catch (err) { /* limite d'ecriture */ }
+    if (copie) return copie;
+    throw new Error(raison);
   }
 }
 const SESSIONS_JOLPICA = [['FirstPractice', 'Essais libres 1'], ['SecondPractice', 'Essais libres 2'],
