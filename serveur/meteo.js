@@ -11,7 +11,7 @@ const DESCRIPTIONS = {
   80: 'Averses', 81: 'Averses', 82: 'Fortes averses', 85: 'Averses de neige', 86: 'Averses de neige',
   95: 'Orage', 96: 'Orage et grêle', 99: 'Orage et grêle',
 };
-function directionVent(deg) {
+export function directionVent(deg) {
   return ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 }
 // Donnees brutes d'Open-Meteo (avec copie de secours si le service ne repond pas)

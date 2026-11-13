@@ -1069,17 +1069,22 @@ void widgetF1(JsonVariant f, Boite b) {
 void widgetMeteoCircuit(JsonVariant f, Boite b) {
   JsonArray J = f["meteo"];
   int n = J.size();
-  if (!n) return;
   char t[64];
   policeT(20, true);  int aTi = asc();
   policeT(17, true);  int aJ = asc();
   const int LMIN = 200, HMIN = aJ + 6 + 100;      // plus petit, un graphique n'est plus lisible
-  bool titre = b.h >= aTi + 12 + HMIN || b.h < HMIN;
+  bool titre = !n || b.h >= aTi + 12 + HMIN || b.h < HMIN;
   int y = b.y;
   if (titre) {
-    snprintf(t, sizeof t, "Météo à %s", (const char*)(f["lieu"] | ""));
+    const char* lieu = f["lieu"] | "";
+    if (*lieu) snprintf(t, sizeof t, "Météo à %s", lieu); else snprintf(t, sizeof t, "Météo du circuit");
     policeT(20, true); texteTronque(b.x, y + aTi, t, b.w);
     y += aTi + 12;
+  }
+  if (!n) {                                         // rien a tracer : le serveur dit pourquoi
+    const char* note = f["noteMeteo"] | (f["erreur"] | "");
+    policeT(17, false); texteTronqueMot(b.x, y + asc(), note, b.w);
+    return;
   }
   int hDispo = b.y + b.h - y;
   if (hDispo >= HMIN && b.w >= LMIN) {
@@ -1093,7 +1098,11 @@ void widgetMeteoCircuit(JsonVariant f, Boite b) {
       if (i >= nb) break;
       int x = b.x + (i % cols) * (l + 20), yy = y + (i / cols) * (h + 12);
       policeT(17, true);  texte(x, yy + aJ, o["j"] | "");
-      policeT(14, false); snprintf(t, sizeof t, "vent %d km/h", (int)(o["v"] | 0)); texteDroite(x + l, yy + aJ, t);
+      int place = l - largeurTexte(o["j"] | "") - 10;
+      const char* dir = o["d"] | "";             // d'ou vient le vent (N, NE, E...)
+      policeT(14, false); snprintf(t, sizeof t, "vent %s%s%d km/h", dir, *dir ? " " : "", (int)(o["v"] | 0));
+      const char* vent = largeurTexte(t) <= place ? t : t + 5;      // graphique etroit : sans le mot "vent"
+      if (largeurTexte(vent) <= place) texteDroite(x + l, yy + aJ, vent);
       widgetCourbe(o["g"], { x, yy + aJ + 6, l, h - aJ - 6 });
       i++;
     }
@@ -1107,7 +1116,8 @@ void widgetMeteoCircuit(JsonVariant f, Boite b) {
     if (y > b.y + b.h) break;
     policeT(17, true);  texte(b.x, y, o["j"] | "");
     policeT(17, false); snprintf(t, sizeof t, "%d°/%d°", (int)(o["min"] | 0), (int)(o["max"] | 0)); texte(b.x + lJ + 12, y, t);
-    policeT(14, false); snprintf(t, sizeof t, "%d %% · %d km/h", (int)(o["p"] | 0), (int)(o["v"] | 0)); texteDroite(b.x + b.w, y, t);
+    const char* dir = o["d"] | "";
+    policeT(14, false); snprintf(t, sizeof t, "%d %% · %s%s%d km/h", (int)(o["p"] | 0), dir, *dir ? " " : "", (int)(o["v"] | 0)); texteDroite(b.x + b.w, y, t);
     y += 10;
   }
 }

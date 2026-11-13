@@ -5,7 +5,7 @@ import { prochainChangementScene, sceneActive } from './scenes.js';
 import { prochainsBus } from './bus.js';
 import { chargerMeteo, meteo } from './meteo.js';
 import { agenda } from './agenda.js';
-import { grandPrix } from './f1.js';
+import { grandPrix, meteoCircuit } from './f1.js';
 import { compteARebours } from './rebours.js';
 
 // ---------------------------------------------------------------------
@@ -18,14 +18,13 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
   const g = grille(rotation, cfg.ecrans);
   // Grand Prix de F1 : utile pour le bloc F1 et pour les scenes "semaine / week-end de GP"
   const scenes = cfg.scenes || [];
-  let f1 = null;
-  const chargerGP = async () => {
-    if (!f1) {
-      try { f1 = await grandPrix(maintenant, env); }
-      catch (e) { console.log('F1 :', e.message); f1 = { erreur: 'Calendrier F1 indisponible (' + e.message + ')' }; }
-    }
+  let f1 = null, pF1 = null;
+  // Une seule demande du calendrier, meme si le bloc F1 et la meteo du circuit le veulent en meme temps
+  const chargerGP = () => pF1 || (pF1 = (async () => {
+    try { f1 = await grandPrix(maintenant, env); }
+    catch (e) { console.log('F1 :', e.message); f1 = { erreur: 'Calendrier F1 indisponible (' + e.message + ')' }; }
     return f1;
-  };
+  })());
   // Toutes les sources sont interrogees en meme temps (reponse plus rapide = carte allumee moins
   // longtemps). Meteo, agenda et F1 sont lancees avant de connaitre la scene, si une des dispositions
   // possibles les utilise ; les bus (plus lourds) seulement si la scene affichee les montre.
@@ -37,7 +36,7 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
     ? sansErreur(chargerMeteo(cfg.meteo, env), 'Météo indisponible') : null;
   const avecAgenda = cfg.agenda.urls.length || cfg.agenda.anniversaires.length;
   const pAgenda = peutServir(['agenda']) && avecAgenda ? sansErreur(agenda(cfg.agenda, maintenant, env), 'Agenda indisponible') : null;
-  const pGP = scenes.some(sc => sc.f1) || peutServir(['f1']) ? chargerGP() : null;
+  const pGP = scenes.some(sc => sc.f1) || peutServir(['f1', 'f1meteo']) ? chargerGP() : null;
   if (scenes.some(sc => sc.f1)) await pGP;
   // Scene affichee : la premiere active de la liste, sinon la disposition par defaut
   const active = forcer === null || forcer === undefined ? scenes.find(sc => sceneActive(sc, maintenant, f1))
@@ -45,6 +44,9 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
   let dispo = validerDisposition(active ? active[cle] : cfg[cle], g);
   const presents = new Set(dispo.map(d => d.id));
   const pBus = presents.has('bus') ? sansErreur(prochainsBus(cfg.bus, maintenant, env, true), 'Bus indisponibles') : null;
+  // Meteo du circuit : seulement si son bloc est affiche (elle a besoin du calendrier, d'ou l'attente)
+  const pCircuit = presents.has('f1meteo') ? chargerGP().then(gp => (gp.erreur ? { meteo: [] } : meteoCircuit(gp, maintenant, env)))
+    .catch(e => { console.log('Météo du circuit :', e.message); return { meteo: [], noteMeteo: 'Météo du circuit indisponible' }; }) : null;
   const [brutMeteo, resAgenda] = await Promise.all([pMeteo, pAgenda, pGP]);
   const res = {
     date: JOURS_LONGS[w.js] + ' ' + w.d + ' ' + MOIS[w.m - 1],
@@ -55,7 +57,10 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
     scene: { nom: active ? active.nom : 'Par défaut', reveilMin: active ? active.reveilMin : 0,
       changement: prochainChangementScene(scenes, maintenant, f1) },
   };
-  if (presents.has('f1')) { res.f1 = Object.assign({}, f1); delete res.f1.periodes; }
+  if (presents.has('f1') || presents.has('f1meteo')) {
+    res.f1 = Object.assign({}, f1, await pCircuit);
+    delete res.f1.periodes; delete res.f1.interne;
+  }
   if (['meteo', 'heures', 'jours', 'courbe'].some(id => presents.has(id))) {
     if (!brutMeteo || brutMeteo.erreur) res.meteo = { erreur: 'Météo indisponible' };
     else {

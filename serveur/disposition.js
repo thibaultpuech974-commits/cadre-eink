@@ -5,7 +5,7 @@ import { HAUTEUR, LARGEUR } from './commun.js';
 export const MARGE = 24, GOUTTIERE = 16;
 const WIDGETS = {               // taille minimale de chaque widget (en cases)
   date: { w: 3, h: 1 }, meteo: { w: 4, h: 2 }, heures: { w: 4, h: 2 }, jours: { w: 3, h: 2 }, agenda: { w: 3, h: 1 }, bus: { w: 3, h: 2 },
-  courbe: { w: 4, h: 2 }, f1: { w: 3, h: 2 }, rebours: { w: 3, h: 1 },
+  courbe: { w: 4, h: 2 }, f1: { w: 3, h: 2 }, f1meteo: { w: 3, h: 2 }, rebours: { w: 3, h: 1 },
 };
 export const ROTATIONS = [0, 1, 3];
 // Taille et police du texte, reglables bloc par bloc
