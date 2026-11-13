@@ -72,3 +72,25 @@ console.log('signature pirate', await req('GET', '/api/config', await jeton({ em
 console.log('clés gardées en mémoire :', appelsCerts <= 3);
 certsDispo = false;
 console.log('clés introuvables :', await req('GET', '/api/config', await jeton({ email: 'moi@exemple.fr' }, paire.privateKey, 'k7')));
+// Clés de Cloudflare Access gardées dans le KV : la mémoire d'un Worker est vidée sans cesse, et sans cette
+// copie les clés étaient retéléchargées à un réveil du cadre sur trois. On avance l'horloge pour vider la
+// mémoire (clés gardées une heure), comme le ferait un redémarrage du Worker.
+const reel = Date.now.bind(Date); let decalage = 0;
+Date.now = () => reel() + decalage;
+const plusTard = async heures => { decalage = heures * 3600e3; const s = Math.floor(Date.now() / 1000); return jeton({ email: 'moi@exemple.fr', iat: s, exp: s + 3600 }); };
+let ecrituresCles = 0; const put0 = KV.put.bind(KV);
+KV.put = (k, v, o) => { if (k === 'access-cles') ecrituresCles++; return put0(k, v, o); };
+const copie = JSON.parse(kv.get('access-cles').v);
+console.log('copie dans le KV :', copie.iss === EQUIPE, '| clés', copie.keys.map(c => c.kid + ':' + Object.keys(c).sort().join('')).join(','));
+certsDispo = true; appelsCerts = 0;
+console.log('2 h après, mémoire vidée :', await req('GET', '/api/config', await plusTard(2)), '|', appelsCerts, 'téléchargement |', ecrituresCles, 'écriture');
+console.log('13 h après, copie trop vieille :', await req('GET', '/api/config', await plusTard(13)), '|', appelsCerts, 'téléchargement |', ecrituresCles, 'écriture');
+console.log('clé inconnue, clés inchangées :', await req('GET', '/api/config', await jeton({ email: 'moi@exemple.fr', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 }, paire.privateKey, 'k9')),
+  '|', appelsCerts, 'téléchargements |', ecrituresCles, 'écriture');
+certsDispo = false;
+console.log('Cloudflare muet, copie de 2 jours :', await req('GET', '/api/config', await plusTard(13 + 48)), '| copie de 9 jours :', await req('GET', '/api/config', await plusTard(13 + 9 * 24)));
+// Une copie faite pour une autre équipe n'est pas utilisée
+certsDispo = true; appelsCerts = 0;
+kv.set('access-cles', { v: JSON.stringify({ iss: 'https://autre.cloudflareaccess.com', t: Date.now(), keys: copie.keys }) });
+console.log('copie d\'une autre équipe :', await req('GET', '/api/config', await plusTard(13 + 9 * 24 + 2)), '|', appelsCerts, 'téléchargement');
+

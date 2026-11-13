@@ -30,27 +30,64 @@ const octets = s => {
   const b = s.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(b + '='.repeat((4 - b.length % 4) % 4)), c => c.charCodeAt(0));
 };
-const cles = new Map();     // equipe -> { t, k: Map(kid -> cle) }, gardees une heure
-async function cle(iss, kid) {
+// Cles publiques de l'equipe Cloudflare Access (/cdn-cgi/access/certs), sur trois etages :
+//  1. en memoire, une heure ;
+//  2. dans le KV (cle 'access-cles'), douze heures. La memoire d'un Worker peu sollicite est videe
+//     sans cesse : sans cette copie, les cles etaient retelechargees a un reveil du cadre sur trois
+//     (132 fois en 24 h, 110 ms chaque fois, pendant que la carte attend sa reponse) ;
+//  3. chez Cloudflare, quand la copie est trop vieille ou ne connait pas la cle du jeton (les cles
+//     changent de temps en temps). Si Cloudflare ne repond pas, la copie sert jusqu'a 7 jours.
+// La copie n'est reecrite que si elle a change ou a plus de douze heures (limite d'ecritures du KV).
+const cles = new Map();     // equipe -> { t, k: Map(kid -> cle) }
+const CLE_KV = 'access-cles', MEMOIRE_MS = 3600e3, COPIE_MS = 12 * 3600e3, SECOURS_MS = 7 * 86400e3;
+async function importer(jwks) {
+  const k = new Map();
+  for (const c of jwks || []) {
+    if (c.kty !== 'RSA' || !c.kid) continue;
+    k.set(c.kid, await crypto.subtle.importKey('jwk', { kty: 'RSA', n: c.n, e: c.e, alg: 'RS256', ext: true },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']));
+  }
+  return k;
+}
+async function cle(iss, kid, env) {
   let e = cles.get(iss);
-  if (!e || Date.now() - e.t > 3600e3 || !e.k.has(kid)) {
+  if (e && Date.now() - e.t <= MEMOIRE_MS && e.k.has(kid)) return e.k.get(kid);
+  // Copie du KV : seulement les champs publics des cles (kid, n, e), pour cette equipe
+  let copie = null;
+  try { copie = JSON.parse((env && await env.CADRE.get(CLE_KV)) || 'null'); } catch (err) { /* pas de copie lisible */ }
+  if (copie && (copie.iss !== iss || !Array.isArray(copie.keys))) copie = null;
+  const connue = copie && copie.keys.some(c => c.kid === kid);
+  if (connue && Date.now() - copie.t < COPIE_MS) {
+    e = { t: Date.now(), k: await importer(copie.keys) };
+    cles.set(iss, e);
+    return e.k.get(kid) || null;
+  }
+  let keys;
+  try {
     const rep = await fetch(iss + '/cdn-cgi/access/certs', { signal: AbortSignal.timeout(5000) });
     if (!rep.ok) throw new Error('clés de Cloudflare Access indisponibles (HTTP ' + rep.status + ')');
-    const k = new Map();
-    for (const c of (await rep.json()).keys || []) {
-      if (c.kty !== 'RSA' || !c.kid) continue;
-      k.set(c.kid, await crypto.subtle.importKey('jwk', { kty: 'RSA', n: c.n, e: c.e, alg: 'RS256', ext: true },
-        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']));
+    keys = ((await rep.json()).keys || []).filter(c => c.kty === 'RSA' && c.kid).map(c => ({ kid: c.kid, kty: 'RSA', n: c.n, e: c.e }));
+  } catch (err) {
+    if (connue && Date.now() - copie.t < SECOURS_MS) {
+      console.log('Clés de Cloudflare Access : copie de secours utilisée :', err.message);
+      e = { t: Date.now(), k: await importer(copie.keys) };
+      cles.set(iss, e);
+      return e.k.get(kid) || null;
     }
-    e = { t: Date.now(), k };
-    cles.set(iss, e);
+    throw err;
+  }
+  e = { t: Date.now(), k: await importer(keys) };
+  cles.set(iss, e);
+  const texte = JSON.stringify(keys);
+  if (env && (!copie || JSON.stringify(copie.keys) !== texte || Date.now() - copie.t >= COPIE_MS)) {
+    try { await env.CADRE.put(CLE_KV, JSON.stringify({ iss, t: Date.now(), keys })); } catch (err) { /* limite d'ecriture : sans gravite */ }
   }
   return e.k.get(kid) || null;
 }
 // Contenu du jeton s'il est valable (signature de Cloudflare, application, date), sinon null.
 // L'emetteur doit etre une equipe Cloudflare (*.cloudflareaccess.com), et le jeton viser cette
 // application (aud) : un jeton d'une autre equipe ou d'une autre application est refuse.
-export async function lireJwt(jwt, aud, maintenant = Date.now()) {
+export async function lireJwt(jwt, aud, env, maintenant = Date.now()) {
   const p3 = String(jwt).split('.');
   if (p3.length !== 3) return null;
   let tete, corps;
@@ -62,7 +99,7 @@ export async function lireJwt(jwt, aud, maintenant = Date.now()) {
   if (aud && ![].concat(corps.aud || []).includes(aud)) return null;
   const s = maintenant / 1000;
   if (!(corps.exp > s - 60) || (corps.nbf && corps.nbf > s + 60)) return null;
-  const k = await cle(corps.iss, tete.kid);
+  const k = await cle(corps.iss, tete.kid, env);
   if (!k) return null;
   const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', k, octets(p3[2]), new TextEncoder().encode(p3[0] + '.' + p3[1]));
   return ok ? corps : null;
@@ -75,7 +112,7 @@ export async function controlerAcces(req, access, env, url) {
   const jwt = req.headers.get('cf-access-jwt-assertion');
   if (!jwt) return { personne: true };               // pas de jeton a lire (ne se produit pas chez Cloudflare)
   let p;
-  try { p = await lireJwt(jwt, access.aud); } catch (e) { return { refus: texte('Vérification du jeton impossible : ' + e.message, 503) }; }
+  try { p = await lireJwt(jwt, access.aud, env); } catch (e) { return { refus: texte('Vérification du jeton impossible : ' + e.message, 503) }; }
   if (!p) return { refus: texte('Jeton Cloudflare Access invalide', 403) };
   if (p.email || !p.common_name) return { personne: true };
   // Jeton de service

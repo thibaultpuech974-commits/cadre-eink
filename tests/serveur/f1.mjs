@@ -34,7 +34,7 @@ let maintenant;
 globalThis.fetch = async (u) => {
   u = String(u);
   if (u.includes('open-meteo')) return new Response(JSON.stringify(meteo(maintenant)));
-  if (u.includes('jolpi.ca') && globalThis.jolpicaKO) return new Response('Too Many Requests', { status: 429 });
+  if (u.includes('jolpi.ca') && globalThis.jolpicaKO) { globalThis.refusJolpica = (globalThis.refusJolpica || 0) + 1; return new Response('Too Many Requests', { status: 429 }); }
   globalThis.appelsJolpica = (globalThis.appelsJolpica || 0) + 1;
   if (u.includes('jolpi.ca/ergast/f1/2026')) return new Response(JSON.stringify(saison));
   if (u.includes('jolpi.ca')) return new Response(JSON.stringify({ MRData: { RaceTable: { Races: [] } } }));
@@ -68,7 +68,21 @@ console.log('appels à Jolpica pour 20 réveils (1 par heure) :', globalThis.app
 globalThis.jolpicaKO = true;
 e = await etat('2026-10-28T09:00:00+01:00');
 console.log('Jolpica en panne, copie du KV ->', e.f1.erreur || e.f1.gp + ' ' + e.f1.quand);
+// Tant que la panne dure : une demande par heure, pas une à chaque réveil (ici 18 réveils en 3 h)
+globalThis.refusJolpica = 0;
+const t9 = Date.parse('2026-10-28T09:00:00+01:00');
+for (let i = 1; i <= 18; i++) e = await etat(new Date(t9 + i * 600e3).toISOString());
+console.log('panne de 3 h, 18 réveils :', globalThis.refusJolpica, 'demandes | GP toujours affiché :', e.f1.gp);
+globalThis.jolpicaKO = false; globalThis.appelsJolpica = 0;
+for (let i = 19; i <= 30; i++) e = await etat(new Date(t9 + i * 600e3).toISOString());
+console.log('Jolpica revenu :', globalThis.appelsJolpica, 'demande | échec effacé :', !JSON.parse(kv.get('f1-2026').v).echec);
+globalThis.jolpicaKO = true;
 kv.clear();
 await post({ disposition: [{ id: 'f1', x: 0, y: 0, w: 6, h: 4 }] });
 e = await etat('2026-10-28T09:00:00+01:00');
 console.log('Jolpica en panne, sans copie ->', e.f1.erreur);
+globalThis.refusJolpica = 0;
+e = await etat('2026-10-28T09:10:00+01:00');
+console.log('sans copie, 10 min après :', globalThis.refusJolpica, 'demande ->', e.f1.erreur);
+e = await etat('2026-10-28T10:01:00+01:00');
+console.log('sans copie, 1 h après :', globalThis.refusJolpica, 'demande');
