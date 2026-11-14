@@ -77,6 +77,7 @@ void widgetRebours(JsonVariant r, Boite b);
 void disqueLune(int cx, int cy, int r, int p);
 void widgetAstro(JsonVariant a, Boite b);
 void widgetMois(JsonVariant m, Boite b);
+void widgetTaches(JsonVariant t, Boite b);
 void widgetBus(JsonVariant bus, Boite b);
 void trame(int x0, int y0, int w, int h, int pas);
 void ligneHPointillee(int x0, int x1, int y);
@@ -785,6 +786,45 @@ void widgetMois(JsonVariant m, Boite b) {
   }
 }
 
+// A faire : une case vide devant chaque tache, ecrite en entier (sur plusieurs lignes au besoin).
+// S'il n'y a pas la place pour toutes, la derniere ligne dit combien il en reste ("+ 3 autres").
+void widgetTaches(JsonVariant t, Boite b) {
+  if (t.isNull()) return;
+  JsonArray L = t.as<JsonArray>();
+  if (L.size() == 0) { policeT(20, false); texteTronque(b.x, b.y + asc() + 6, "Rien à faire", b.w); return; }
+  const int MAXT = 20;
+  const char* txt[MAXT];
+  int nl[MAXT], total = 0;
+  for (JsonVariant v : L) { if (total >= MAXT) break; txt[total++] = v | ""; }
+  policeT(14, false); int aP = asc();
+  policeT(17, false);
+  int aE = asc(), inter = aE * 13 / 10 + 1, ecart = aE * 9 / 10, cote = aE;
+  int xT = b.x + cote + 10, lT = b.x + b.w - xT;
+  for (int k = 0; k < total; k++) nl[k] = compterLignes(txt[k], lT, 6);
+  auto hauteur = [&](int m) {
+    int h = 0;
+    for (int k = 0; k < m; k++) h += (k ? ecart : 0) + aE + (nl[k] - 1) * inter;
+    return h + (m < total ? ecart + aP : 0) + aE / 4;        // la ligne "+ N autres" et les jambages
+  };
+  int n = total;
+  while (n > 1 && hauteur(n) > b.h) n--;
+  while (nl[0] > 1 && hauteur(n) > b.h) nl[0]--;
+  int y = b.y;
+  for (int k = 0; k < n; k++) {
+    y += (k ? ecart : 0) + aE;
+    canvas.drawRoundRect(b.x, y - cote + 1, cote, cote, 3, NOIR);
+    canvas.drawRoundRect(b.x + 1, y - cote + 2, cote - 2, cote - 2, 2, NOIR);
+    policeT(17, false);
+    texteMultiligne(xT, y, txt[k], lT, inter, nl[k]);
+    y += (nl[k] - 1) * inter;
+  }
+  if (n < total && y + ecart + aP <= b.y + b.h) {
+    char reste[24];
+    snprintf(reste, sizeof reste, "+ %d autre%s", total - n, total - n > 1 ? "s" : "");
+    policeT(14, false); texte(xT, y + ecart + aP, reste);
+  }
+}
+
 // Compte a rebours : jours restants avant une date (vacances, concours...). La date la plus proche en
 // grand ("J-12", puis son titre et sa date) ; les suivantes en liste, a droite si le bloc est large,
 // sinon dessous, tant qu'il reste de la place.
@@ -1314,6 +1354,7 @@ void dessinerTableau(JsonVariant e, float vBat) {
     else if (!strcmp(id, "rebours")) widgetRebours(e["rebours"], b);
     else if (!strcmp(id, "astro")) widgetAstro(e["astro"], b);
     else if (!strcmp(id, "mois")) widgetMois(e["mois"], b);
+    else if (!strcmp(id, "taches")) widgetTaches(e["taches"], b);
     else if (!strcmp(id, "bus")) widgetBus(e["bus"], b);
     else if (!strcmp(id, "f1")) widgetF1(e["f1"], b);
     else if (!strcmp(id, "f1meteo")) widgetMeteoCircuit(e["f1"], b);

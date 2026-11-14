@@ -6,6 +6,7 @@ import { prochainsBus } from './bus.js';
 import { chargerMeteo, meteo } from './meteo.js';
 import { calendrierDuMois, evenementsAgenda, finAgenda, finDuMois, lignesAgenda } from './agenda.js';
 import { soleilEtLune } from './astro.js';
+import { tachesDuBloc } from './taches.js';
 import { grandPrix, meteoCircuit } from './f1.js';
 import { compteARebours } from './rebours.js';
 
@@ -81,6 +82,7 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
   // Calendrier du mois : sans calendrier (ou en panne), la grille s'affiche quand meme, sans marques
   if (presents.has('mois')) res.mois = calendrierDuMois(avecAgenda && !resAgenda.erreur ? resAgenda : [], maintenant);
   if (presents.has('astro')) res.astro = soleilEtLune(cfg.meteo, maintenant);
+  if (presents.has('taches')) res.taches = tachesDuBloc(cfg.taches);
   if (presents.has('rebours')) res.rebours = compteARebours(cfg.rebours, maintenant);
   if (presents.has('bus')) {
     res.bus = await pBus;

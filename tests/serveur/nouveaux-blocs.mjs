@@ -1,6 +1,7 @@
-// Blocs « Soleil et lune » et « Calendrier du mois »
+// Blocs « Soleil et lune », « Calendrier du mois » et « À faire »
 import fs from 'fs';
-import { req, post, horloge } from './simu.mjs';
+import { req, post, horloge, KV } from './simu.mjs';
+import { ROLES } from '../../serveur/acces.js';
 import { soleil, elongation, prochaineLune } from '../../serveur/astro.js';
 const hm = ms => new Date(ms).toISOString().slice(11, 16);
 const etat = async () => (await req('/api/etat?ui=1')).json();
@@ -49,3 +50,24 @@ await post({ agenda: { urls: [] } }); e = await etat();
 console.log('sans calendrier : grille', e.mois.n, 'jours, marques', e.mois.e.length);
 await post({ disposition: [{ id: 'date', x: 0, y: 0, w: 12, h: 1 }] }); e = await etat();
 console.log('sans les blocs :', 'astro' in e || 'mois' in e ? 'données envoyées' : 'rien');
+
+// --- À faire : tâches de la page, liste envoyée par le raccourci iPhone ---
+horloge('2026-11-14T18:00:00+01:00');
+let ecritures = 0; const mettre = KV.put.bind(KV); KV.put = async (...a) => { ecritures++; return mettre(...a); };
+const envoyer = async corps => (await req('/api/taches', { method: 'POST', body: corps })).text();
+let r = await post({ disposition: [{ id: 'taches', x: 0, y: 0, w: 6, h: 6 }], taches: { texte: '- Rendre le DM de maths\n\n  [ ] Acheter des piles  \n• Appeler Mamie\n' + 'x'.repeat(200) } });
+console.log('page :', JSON.stringify(r.config.taches.liste.slice(0, 3)), '| 4e coupée à', r.config.taches.liste[3].length, 'caractères');
+await post({ taches: { texte: 'Rendre le DM de maths\nAcheter des piles' } });
+console.log('raccourci (texte) :', await envoyer('Acheter des piles\r\nRéviser la colle 📚\nLire Woolf\n'));
+e = await etat(); console.log('bloc :', JSON.stringify(e.taches));
+ecritures = 0; const v1 = e.version;
+console.log('même liste renvoyée :', await envoyer('Acheter des piles\nRéviser la colle 📚\nLire Woolf'), '| écritures', ecritures);
+console.log('raccourci (JSON) :', await envoyer(JSON.stringify({ taches: ['Footing', { titre: 'Dentiste' }] })), '|', JSON.stringify((await etat()).taches));
+r = await post({ taches: { texte: 'Une seule' } });
+console.log('la page ne touche pas aux rappels :', JSON.stringify(r.config.taches.rappels), '| reçus à', new Date(r.config.taches.rappelsT).toISOString().slice(0, 16));
+const sauv = await (await req('/api/sauvegarde')).text();
+r = await post({ taches: { rappels: [] } }); console.log('bouton Effacer :', JSON.stringify(r.config.taches));
+console.log('liste vide envoyée :', await envoyer(''), '| trop longue :', (await envoyer(Array.from({ length: 30 }, (_, i) => 'Tâche ' + i).join('\n'))));
+console.log('restauration :', (await req('/api/sauvegarde', { method: 'POST', body: sauv })).status, JSON.stringify((await (await req('/api/config')).json()).config.taches.rappels));
+await post({ taches: { texte: '', rappels: [] } }); console.log('rien à faire :', JSON.stringify((await etat()).taches));
+console.log('droit du raccourci :', ROLES.raccourci.includes('POST /api/taches'), '| de la carte :', ROLES.carte.includes('POST /api/taches'));

@@ -3,6 +3,7 @@ import { MODES, fusionner } from './commun.js';
 import { ROTATIONS, grille, validerDisposition } from './disposition.js';
 import { validerCreneaux, validerScenes } from './scenes.js';
 import { nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
+import { nettoyerTaches } from './taches.js';
 
 export const CONFIG_DEFAUT = {
   mode: 'tableau',
@@ -38,6 +39,8 @@ export const CONFIG_DEFAUT = {
   agenda: { actif: true, urls: [], nb: 8, joursMax: 14, anniversaires: [], lieu: true },
   // Compte a rebours : dates a venir (nom, jour, mois, annee ou 0 = chaque annee), saisies sur la page web
   rebours: { liste: [] },
+  // A faire : taches saisies sur la page (liste) et recues du raccourci iPhone (rappels, recus a rappelsT)
+  taches: { liste: [], rappels: [], rappelsT: 0 },
   // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
   disposition: [
     { id: 'date', x: 0, y: 0, w: 12, h: 1 },
@@ -162,6 +165,14 @@ export function preparerModif(modif, cfg, rapport = {}) {
     }
     modif.rebours = { liste: liste.filter(d => d && String(d.nom || '').trim() && d.j >= 1 && d.j <= 31 && d.m >= 1 && d.m <= 12)
       .map(d => ({ nom: String(d.nom).trim().slice(0, 40), j: d.j | 0, m: d.m | 0, a: d.a >= 2000 && d.a <= 2100 ? d.a | 0 : 0 })).slice(0, 12) };
+  }
+  // A faire : texte de la page (une tache par ligne) ou listes deja pretes (restauration, bouton Effacer)
+  if (modif.taches !== undefined) {
+    const t = modif.taches || {}, propre = {};
+    if (typeof t.texte === 'string') propre.liste = nettoyerTaches(t.texte);
+    else if (Array.isArray(t.liste)) propre.liste = nettoyerTaches(t.liste);
+    if (Array.isArray(t.rappels)) { propre.rappels = nettoyerTaches(t.rappels); propre.rappelsT = propre.rappels.length ? +t.rappelsT || Date.now() : 0; }
+    modif.taches = propre;
   }
   return ignorees;
 }

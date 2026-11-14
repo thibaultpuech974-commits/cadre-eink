@@ -25,6 +25,7 @@
 //   agenda.js            calendriers ICS et anniversaires
 //   rebours.js           compte a rebours (jours restants avant une date)
 //   astro.js             soleil et lune (lever, coucher, phase), calcules sur place
+//   taches.js            liste « A faire » (page web et raccourci Rappels)
 //   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
@@ -47,6 +48,7 @@ import { grandPrix } from './f1.js';
 import { GTFS_TANGO, enregistrerIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
 import { construireTableau } from './tableau.js';
+import { lireEnvoi } from './taches.js';
 import { empreinteImage, encoderPlan, planRafraichissement, resumePlan } from './rafraichissement.js';
 import { controlerAcces, routeEcrireJetons, routeLireJetons } from './acces.js';
 import { routeEssaiAlerte, routeEtatAlertes, verifierAlertes } from './alertes.js';
@@ -103,6 +105,7 @@ export default {
       if (chemin === '/api/photo' && m === 'POST') return await routeEnvoyerPhoto(req, url, env);
       if (chemin === '/api/photo' && m === 'GET') return await routeBinaire(env, url.searchParams.get('ecran') === '1' ? 'photo1' : 'photo', 'application/octet-stream');
       if (chemin === '/api/pochette' && m === 'POST') return await routeEnvoyerPochette(req, url, env);
+      if (chemin === '/api/taches' && m === 'POST') return await routeEnvoyerTaches(req, env);
       if (chemin === '/api/pochette.jpg' && m === 'GET') return await routeBinaire(env, 'pochette', 'image/jpeg');
       if (chemin === '/api/apercu' && m === 'POST') return await routeEnvoyerApercu(req, url, env);
       if (chemin === '/api/apercu' && m === 'GET') return await routeLireApercu(url, env);
@@ -158,7 +161,7 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois']) if (!ici.has(id)) delete contenu[id];
+    for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois', 'taches']) if (!ici.has(id)) delete contenu[id];
     // Les blocs « Grand Prix » et « Meteo du circuit » partagent f1 : chacun ne recoit que sa part
     if (!ici.has('f1') && !ici.has('f1meteo')) delete contenu.f1;
     else if (!ici.has('f1meteo')) { delete contenu.f1.meteo; delete contenu.f1.noteMeteo; }
@@ -434,6 +437,19 @@ async function routeEnvoyerPochette(req, url, env) {
   cfg.version++;
   await ecrireConfig(env, cfg);
   return texte('Pochette envoyée au cadre');
+}
+// Liste « A faire » envoyee par le raccourci iPhone (rappels non termines) : elle remplace la precedente.
+// Les taches saisies sur la page ne sont pas touchees. Rien n'est ecrit si la liste n'a pas change
+// (le raccourci peut tourner souvent sans user les ecritures du KV ni redessiner l'ecran).
+async function routeEnvoyerTaches(req, env) {
+  const recues = lireEnvoi(await req.text());
+  const cfg = await lireConfig(env);
+  const t = cfg.taches || (cfg.taches = { liste: [], rappels: [], rappelsT: 0 });
+  if (JSON.stringify(t.rappels || []) === JSON.stringify(recues)) return texte('Liste inchangée (' + recues.length + ')');
+  t.rappels = recues; t.rappelsT = recues.length ? Date.now() : 0;
+  cfg.version++;
+  await ecrireConfig(env, cfg);
+  return texte(recues.length ? recues.length + ' tâche(s) envoyée(s) au cadre' : 'Liste vidée');
 }
 // Relais du fichier d'horaires Tango (pour que la page web puisse le lire)
 async function routeGTFS() {

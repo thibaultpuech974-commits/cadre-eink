@@ -15,13 +15,13 @@ import { json, texte } from './commun.js';
 // Routes permises a chaque role ('tout' : aucune limite)
 export const ROLES = {
   carte: ['GET /api/etat', 'GET /api/photo', 'GET /api/pochette.jpg', 'POST /api/apercu', 'GET /api/firmware.bin'],
-  raccourci: ['POST /api/pochette'],
+  raccourci: ['POST /api/pochette', 'POST /api/taches'],
   tout: null,
 };
 
 function deviner(route, url) {
   if (route === 'GET /api/etat' && url.searchParams.has('fw')) return 'carte';
-  if (route === 'POST /api/pochette') return 'raccourci';
+  if (route === 'POST /api/pochette' || route === 'POST /api/taches') return 'raccourci';
   return null;        // role a choisir dans la page ; en attendant, aucun droit
 }
 

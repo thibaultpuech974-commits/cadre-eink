@@ -168,6 +168,19 @@
   <p class="aide repliable">Le bloc « Compte à rebours » (à ajouter dans « Scènes et disposition ») affiche en grand les jours restants avant la date la plus proche (« J-39 », puis « Jour J »), et les suivantes en dessous ou à côté s'il a la place. Une date passée disparaît toute seule. 12 dates au plus.</p>
 </details>
 
+<details class="menu" id="menu-taches">
+  <summary>À faire</summary>
+  <p class="aide">Tâches à afficher dans le bloc « À faire », une par ligne. Efface une ligne quand c'est fait.</p>
+  <textarea id="tTexte" placeholder="Rendre le DM de maths&#10;Réviser la colle de physique"></textarea>
+  <div id="tRappels" class="cache">
+    <p class="aide" id="tRappelsInfo"></p>
+    <ul id="tRappelsListe"></ul>
+    <button type="button" style="width:100%;margin-top:8px" onclick="effacerRappels()">Effacer la liste reçue</button>
+  </div>
+  <div class="msg" id="msgTaches"></div>
+  <p class="aide repliable">Le bloc « À faire » (à ajouter dans « Scènes et disposition ») affiche ces tâches, puis celles de l'app Rappels si un raccourci de l'iPhone les envoie (voir le README, « Raccourci iPhone pour les rappels »). Le raccourci remplace à chaque envoi la liste reçue, sans toucher aux tâches saisies ici. 20 tâches au plus.</p>
+</details>
+
 <details class="menu" id="menu-photo">
   <summary>Photo plein écran</summary>
   <input type="file" id="fichier" accept="image/*">

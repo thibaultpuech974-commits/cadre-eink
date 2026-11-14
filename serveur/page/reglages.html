@@ -15,7 +15,7 @@ function charger() {
   });
 }
 function remplirFormulaires() {
-  remplirMeteo(); remplirAgenda(); remplirRebours(); remplirDispo(); remplirBus();
+  remplirMeteo(); remplirAgenda(); remplirRebours(); remplirTaches(); remplirDispo(); remplirBus();
   choisirValeur($('reveil'), config.reveilMin);
   $('dev').checked = !!config.dev; choisirValeur($('devSecondes'), config.devSecondes || 30);
   var n = config.nuit || {};
@@ -59,6 +59,18 @@ function remplirRebours() {
   }).join('\n');
 }
 function lireRebours() { return { texte: $('rTexte').value }; }
+// A faire : une tache par ligne ; la liste recue du raccourci iPhone est seulement montree (et effacable)
+function remplirTaches() {
+  var t = config.taches || {}, recus = t.rappels || [];
+  $('tTexte').value = (t.liste || []).join('\n');
+  $('tRappels').classList.toggle('cache', !recus.length);
+  $('tRappelsInfo').textContent = 'Reçues du raccourci' + (t.rappelsT ? ' le ' + new Date(t.rappelsT).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '') + ' :';
+  var ul = $('tRappelsListe');
+  ul.textContent = '';
+  recus.forEach(function (r) { var li = document.createElement('li'); li.textContent = r; ul.appendChild(li); });
+}
+function lireTaches() { return { texte: $('tTexte').value }; }
+function effacerRappels() { enregistrer({ taches: { rappels: [] } }, 'msgTaches'); }
 
 function enregistrer(modif, idMsg) {
   return api('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(modif) })
@@ -77,7 +89,7 @@ function modificationsCourantes() {
   lireFormScene(); ranger();
   return { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
     affichage: { traits: $('traits').checked, rotation: rot },
-    meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), bus: lireBus(),
+    meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), taches: lireTaches(), bus: lireBus(),
     reveilMin: +$('reveil').value, dev: $('dev').checked, devSecondes: +$('devSecondes').value,
     nuit: { actif: $('nuitActif').checked, debut: $('nuitDebut').value || '23:00', fin: $('nuitFin').value || '07:00',
       intervalleMin: +$('nuitIntervalle').value },
@@ -114,7 +126,7 @@ function prendreReference() { reference = JSON.stringify(modificationsCourantes(
 function modifie() { return reference !== null && JSON.stringify(modificationsCourantes()) !== reference; }
 // Menus dont les reglages different de ceux enregistres
 var PARTIES = [['Scènes', ['disposition', 'dispositionPortrait', 'scenes']], ['Montage', ['ecrans', 'affichage']],
-  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Compte à rebours', ['rebours']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'creuses', 'rafraich']], ['Alertes', ['alertes']]];
+  ['Météo', ['meteo']], ['Agenda', ['agenda']], ['Compte à rebours', ['rebours']], ['À faire', ['taches']], ['Bus', ['bus']], ['Réveil', ['reveilMin', 'dev', 'devSecondes', 'nuit', 'creuses', 'rafraich']], ['Alertes', ['alertes']]];
 function partiesModifiees() {
   var r = JSON.parse(reference), c = JSON.parse(JSON.stringify(modificationsCourantes()));
   return PARTIES.filter(function (p) { return p[1].some(function (k) { return JSON.stringify(r[k]) !== JSON.stringify(c[k]); }); })
