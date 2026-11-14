@@ -32,8 +32,9 @@ export async function agenda(o, maintenant, env) {
     const enCours = e.debut < maintenant;
     const w = enCours ? auj : mural(e.debut);
     const j = memeJour(w, auj) ? "Aujourd'hui" : memeJour(w, demain) ? 'Demain' : JOURS_COURTS[w.js] + ' ' + w.d;
-    // Toute la journee : "jour" a la place de l'heure (pas plus large qu'une heure, la colonne ne bouge pas)
-    const h = e.journee ? 'jour' : enCours ? 'en cours' : deux(w.hh) + ':' + deux(w.mi);
+    // Toute la journee : "Jour" a la place de l'heure. Pas plus large qu'une heure, la colonne ne bouge
+    // pas ; la majuscule monte a la hauteur des chiffres (tout en minuscules, le mot paraissait plus petit)
+    const h = e.journee ? 'Jour' : enCours ? 'en cours' : deux(w.hh) + ':' + deux(w.mi);
     const f1 = titreF1(e.titre);
     const t = pourEcran(f1 === e.titre ? f1 : sessionCourte(f1));
     // 100 caracteres au plus : la carte met un titre long sur 2 ou 3 lignes quand le bloc a de la place
