@@ -7,6 +7,7 @@ import { chargerMeteo, meteo } from './meteo.js';
 import { calendrierDuMois, evenementsAgenda, finAgenda, finDuMois, lignesAgenda } from './agenda.js';
 import { soleilEtLune } from './astro.js';
 import { tachesDuBloc } from './taches.js';
+import { prochainsTrains } from './trains.js';
 import { grandPrix, meteoCircuit } from './f1.js';
 import { compteARebours } from './rebours.js';
 
@@ -49,6 +50,7 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
   let dispo = validerDisposition(active ? active[cle] : cfg[cle], g);
   const presents = new Set(dispo.map(d => d.id));
   const pBus = presents.has('bus') ? sansErreur(prochainsBus(cfg.bus, maintenant, env, true), 'Bus indisponibles') : null;
+  const pTrains = presents.has('trains') ? sansErreur(prochainsTrains(cfg.trains, maintenant, env), 'Trains indisponibles') : null;
   // Meteo du circuit : seulement si son bloc est affiche (elle a besoin du calendrier, d'ou l'attente)
   const pCircuit = presents.has('f1meteo') ? chargerGP().then(gp => (gp.erreur ? { meteo: [] } : meteoCircuit(gp, maintenant, env)))
     .catch(e => { console.log('Météo du circuit :', e.message); return { meteo: [], noteMeteo: 'Météo du circuit indisponible' }; }) : null;
@@ -83,6 +85,7 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
   if (presents.has('mois')) res.mois = calendrierDuMois(avecAgenda && !resAgenda.erreur ? resAgenda : [], maintenant);
   if (presents.has('astro')) res.astro = soleilEtLune(cfg.meteo, maintenant);
   if (presents.has('taches')) res.taches = tachesDuBloc(cfg.taches);
+  if (presents.has('trains')) res.trains = await pTrains;
   if (presents.has('rebours')) res.rebours = compteARebours(cfg.rebours, maintenant);
   if (presents.has('bus')) {
     res.bus = await pBus;

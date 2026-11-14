@@ -4,6 +4,7 @@ import { ROTATIONS, grille, validerDisposition } from './disposition.js';
 import { validerCreneaux, validerScenes } from './scenes.js';
 import { nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
 import { nettoyerTaches } from './taches.js';
+import { nettoyerTrains } from './trains.js';
 
 export const CONFIG_DEFAUT = {
   mode: 'tableau',
@@ -41,6 +42,8 @@ export const CONFIG_DEFAUT = {
   rebours: { liste: [] },
   // A faire : taches saisies sur la page (liste) et recues du raccourci iPhone (rappels, recus a rappelsT)
   taches: { liste: [], rappels: [], rappelsT: 0 },
+  // Trains : gare de depart et destinations ({ id de l'API SNCF, nom }), nombre de departs affiches
+  trains: { gare: null, vers: [], nb: 4 },
   // Disposition des widgets sur une grille de 12 colonnes x 8 rangees
   disposition: [
     { id: 'date', x: 0, y: 0, w: 12, h: 1 },
@@ -174,6 +177,7 @@ export function preparerModif(modif, cfg, rapport = {}) {
     if (Array.isArray(t.rappels)) { propre.rappels = nettoyerTaches(t.rappels); propre.rappelsT = propre.rappels.length ? +t.rappelsT || Date.now() : 0; }
     modif.taches = propre;
   }
+  if (modif.trains !== undefined) modif.trains = nettoyerTrains(modif.trains, cfg.trains);
   return ignorees;
 }
 // Lignes du type "Léa 14/03/2005" ou "Mamie 2/11" (l'annee est facultative) : anniversaires, compte a rebours

@@ -79,6 +79,7 @@ void widgetAstro(JsonVariant a, Boite b);
 void widgetMois(JsonVariant m, Boite b);
 void widgetTaches(JsonVariant t, Boite b);
 void widgetBus(JsonVariant bus, Boite b);
+void widgetTrains(JsonVariant tr, Boite b);
 void trame(int x0, int y0, int w, int h, int pas);
 void ligneHPointillee(int x0, int x1, int y);
 void ligneVPointillee(int x, int y0, int y1);
@@ -980,6 +981,75 @@ void widgetBus(JsonVariant bus, Boite b) {
   }
 }
 
+// Prochains trains : une ligne par depart. L'heure prevue en gras, la destination, puis a droite le
+// type de train et l'heure d'arrivee ("TER > 19:11") quand il reste de la place. Un retard s'affiche
+// dans une pastille noire ("+5 min") ; un train supprime a son heure barree.
+void widgetTrains(JsonVariant tr, Boite b) {
+  if (tr.isNull()) return;
+  policeT(17, false);
+  if (tr["erreur"].is<const char*>()) { texteMultiligne(b.x, b.y + asc() + 6, tr["erreur"].as<const char*>(), b.w, asc() * 13 / 10 + 1, 3); return; }
+  JsonArray D = tr["d"];
+  int y = b.y;
+  const char* gare = tr["gare"] | "";
+  policeT(14, false);
+  int aA = asc();
+  if (gare[0] && b.h >= 4 * aA + 30) {
+    char t[80];
+    snprintf(t, sizeof t, "Trains - %s", gare);
+    texteTronque(b.x, y + aA, t, b.w);
+    y += aA + 10;
+  }
+  if (D.isNull() || D.size() == 0) { policeT(20, false); texteTronque(b.x, y + asc() + 4, "Aucun train direct", b.w); return; }
+  policeT(20, true);  int aH = asc(), largHeure = largeurTexte("88:88") + 12;
+  policeT(17, false); int aD = asc();
+  int marge = max(10, aH * 2 / 3);
+  char t[48];
+  y += marge / 2;
+  for (JsonObject p : D) {
+    bool supprime = (p["x"] | 0) == 1;
+    int retard = p["r"] | 0;
+    const char* dest = p["v"] | "";
+    const char* h = p["h"] | "";
+    // Largeur prise a droite par la pastille du retard ou par "supprimé"
+    int wDroite = 0;
+    policeT(14, true);
+    if (supprime) wDroite = largeurTexte("supprimé");
+    else if (retard > 0) { snprintf(t, sizeof t, "+%d min", retard); wDroite = largeurTexte(t) + 12; }
+    int place = b.w - largHeure - (wDroite ? wDroite + 10 : 0);
+    policeT(17, false);
+    int wDest = largeurTexte(dest);
+    // Destination trop longue pour la ligne : elle passe dessous, en entier, plutot que d'etre coupee
+    bool dessous = wDest > place;
+    int hLigne = aH + (dessous ? aD + 6 : 0);
+    if (y + hLigne > b.y + b.h) break;
+    int base = y + aH;
+    policeT(20, true);
+    texte(b.x, base, h);
+    if (supprime) canvas.fillRect(b.x - 1, base - aH / 2, largeurTexte(h) + 2, 2, NOIR);
+    int xr = b.x + b.w, x = b.x + largHeure;
+    if (supprime) {
+      policeT(14, true);
+      if (xr - wDroite >= x) texteDroite(xr, base, "supprimé");
+      xr -= wDroite + 10;
+    } else if (retard > 0) {
+      policeT(14, true);
+      int hp = asc() + 8;
+      canvas.fillRoundRect(xr - wDroite, base - asc() - 4, wDroite, hp, 5, NOIR);
+      u8g2.setForegroundColor(BLANC); texte(xr - wDroite + 6, base, t); u8g2.setForegroundColor(NOIR);
+      xr -= wDroite + 10;
+    }
+    // Type de train et heure d'arrivee, seulement s'ils tiennent a cote du reste
+    const char* arrivee = p["a"] | "";
+    policeT(14, false);
+    if (*arrivee) snprintf(t, sizeof t, "%s > %s", (const char*)(p["m"] | ""), arrivee); else snprintf(t, sizeof t, "%s", (const char*)(p["m"] | ""));
+    int wi = largeurTexte(t);
+    if (xr - x - wi - 12 >= (dessous ? 0 : wDest)) { texteDroite(xr, base, t); xr -= wi + 12; }
+    if (dessous) { policeAjustee(17, false, dest, b.w); texteTronque(b.x, base + 6 + aD, dest, b.w); }
+    else { policeT(17, false); texte(x, base, dest); }
+    y += hLigne + marge;
+  }
+}
+
 // Trame "gris clair" ou "gris moyen" dans un rectangle (l'ecran n'a que du noir et blanc)
 void trame(int x0, int y0, int w, int h, int pas) {
   for (int y = y0; y < y0 + h; y++)
@@ -1356,6 +1426,7 @@ void dessinerTableau(JsonVariant e, float vBat) {
     else if (!strcmp(id, "mois")) widgetMois(e["mois"], b);
     else if (!strcmp(id, "taches")) widgetTaches(e["taches"], b);
     else if (!strcmp(id, "bus")) widgetBus(e["bus"], b);
+    else if (!strcmp(id, "trains")) widgetTrains(e["trains"], b);
     else if (!strcmp(id, "f1")) widgetF1(e["f1"], b);
     else if (!strcmp(id, "f1meteo")) widgetMeteoCircuit(e["f1"], b);
     else if (!strcmp(id, "courbe")) {

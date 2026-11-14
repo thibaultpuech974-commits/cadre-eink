@@ -4,7 +4,7 @@ Le projet a trois parties :
 
 | Partie | Fichier | Rôle |
 |---|---|---|
-| Serveur web | `serveur/` : `worker.js` (point d'entrée et routes) et un fichier par thème (`meteo.js`, `agenda.js`, `bus.js`, `f1.js`, `scenes.js`, `tableau.js`, `rebours.js`, `alertes.js`, `bark.js`, `rafraichissement.js`…, liste en tête de `worker.js`), `page/` (page web : `structure.html` pour les menus, `style.html`, et un script par thème, assemblés par `page.js`), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
+| Serveur web | `serveur/` : `worker.js` (point d'entrée et routes) et un fichier par thème (`meteo.js`, `agenda.js`, `bus.js`, `f1.js`, `scenes.js`, `tableau.js`, `rebours.js`, `astro.js`, `taches.js`, `trains.js`, `alertes.js`, `bark.js`, `rafraichissement.js`…, liste en tête de `worker.js`), `page/` (page web : `structure.html` pour les menus, `style.html`, et un script par thème, assemblés par `page.js`), `circuits.js` (tracés F1) | Interface web, météo, agenda, bus, F1, photo, aperçu |
 | Carte ESP32 | `carte/cadre_eink/` : `cadre_eink.ino` (réglages, Wi-Fi, écran, veille) et `dessin.h` (dessin de l'image, partagé avec l'aperçu web) | Se réveille, demande quoi afficher, dessine, se rendort |
 | Raccourci iPhone | à créer (étape 4) | Envoie la pochette Apple Music |
 
@@ -45,7 +45,7 @@ Avec Access, personne n'atteint le serveur sans s'être identifié : la page web
 
 Ensuite, tu peux garder le secret `CLE` (il n'est utilisé que si Access est désactivé) ou le supprimer : sans Access ni `CLE`, le serveur refuse tout.
 
-**Droits de chaque jeton** : le serveur vérifie le jeton signé par Cloudflare à chaque requête, et limite chaque jeton de service à son rôle. La carte n'a accès qu'à ses routes : son état, la photo, la pochette, son programme et l'envoi de l'aperçu. Le raccourci ne peut qu'envoyer la pochette. Un jeton volé ne peut donc ni changer les réglages, ni lire la sauvegarde, ni envoyer un programme à la carte. Le rôle est deviné dès que le jeton se comporte comme la carte (elle demande son état avec sa version) ou comme le raccourci (il envoie une pochette). Il se vérifie et se change dans la page web, menu **Accès des jetons** (groupe Système). Un jeton dont le rôle n'a pas pu être deviné n'a aucun droit tant que tu ne lui en as pas choisi un. Les personnes connectées gardent tous les droits. Pour vérifier les jetons, le serveur garde les clés publiques de Cloudflare Access douze heures dans le KV, au lieu de les retélécharger à chaque redémarrage du Worker ; si Cloudflare ne les fournit plus, cette copie sert jusqu'à 7 jours.
+**Droits de chaque jeton** : le serveur vérifie le jeton signé par Cloudflare à chaque requête, et limite chaque jeton de service à son rôle. La carte n'a accès qu'à ses routes : son état, la photo, la pochette, son programme et l'envoi de l'aperçu. Le raccourci ne peut qu'envoyer la pochette et la liste « À faire ». Un jeton volé ne peut donc ni changer les réglages, ni lire la sauvegarde, ni envoyer un programme à la carte. Le rôle est deviné dès que le jeton se comporte comme la carte (elle demande son état avec sa version) ou comme le raccourci (il envoie une pochette). Il se vérifie et se change dans la page web, menu **Accès des jetons** (groupe Système). Un jeton dont le rôle n'a pas pu être deviné n'a aucun droit tant que tu ne lui en as pas choisi un. Les personnes connectées gardent tous les droits. Pour vérifier les jetons, le serveur garde les clés publiques de Cloudflare Access douze heures dans le KV, au lieu de les retélécharger à chaque redémarrage du Worker ; si Cloudflare ne les fournit plus, cette copie sert jusqu'à 7 jours.
 
 En cas de fuite d'un jeton (téléphone perdu, code publié par erreur) : dans **Service Tokens**, désactive-le ou fais **Rotate** pour en générer un nouveau. Les vraies valeurs de `WIFI_MDP`, `CLE` et `ACCES_SECRET` restent dans `secrets.h`, qui n'est jamais envoyé sur GitHub.
 
@@ -211,6 +211,41 @@ Quatre blocs à ajouter dans **Scènes et disposition** :
 
 Le calendrier vient de l'API libre Jolpica (ex-Ergast) ; il est gardé 12 h, et après un refus de Jolpica (qui limite les demandes), le serveur attend une heure avant de redemander, en affichant le calendrier qu'il a déjà. La météo du circuit vient d'Open-Meteo, comme la météo de ta ville, demandée aux coordonnées du circuit données par le calendrier ; elle n'est demandée que si le bloc est affiché, et la dernière réponse sert de secours pendant 24 h si le service ne répond pas. Les tracés viennent du projet libre [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits) (licence MIT) et sont intégrés au serveur (`serveur/circuits.js`). Pour les mettre à jour quand un nouveau circuit arrive :
 `git clone --depth 1 https://github.com/bacinger/f1-circuits /tmp/f1c && python3 outils/circuits.py /tmp/f1c`
+
+---
+
+## 7 bis. Soleil et lune, calendrier du mois, à faire et trains
+
+Quatre autres blocs à ajouter dans **Scènes et disposition**. Comme tout nouveau bloc, **le cadre ne les dessine qu'après un téléversement du programme de la carte** (section 2) ; l'aperçu de la page, lui, les montre tout de suite.
+
+- **Soleil et lune** : la lune dessinée avec sa phase (la partie dans l'ombre est noire), son nom (« Premier croissant »), la prochaine pleine ou nouvelle lune, les heures de lever et de coucher du soleil et la durée du jour, avec l'écart sur la veille (« Jour 9 h 43 (-2 min) »). Selon la taille du bloc, une à quatre lignes. Tout est calculé par le serveur pour l'endroit choisi dans **Météo**, sans service extérieur, à une ou deux minutes près ; le bloc ne change qu'une fois par jour.
+- **Calendrier du mois** : la grille du mois, lundi à gauche. Aujourd'hui est sur une pastille noire ; un point (ou un soulignement dans un petit bloc) marque les jours à venir qui ont au moins un évènement dans tes calendriers ou tes anniversaires. Les jours passés ne sont pas marqués. Taille conseillée : au moins 3 × 3 cases.
+- **À faire** : une case devant chaque tâche, écrite en entier ; s'il manque de la place, la dernière ligne dit combien il en reste (« + 3 autres »). Les tâches se saisissent dans le menu **À faire** de la page, une par ligne (efface la ligne quand c'est fait), et un raccourci de l'iPhone peut y ajouter une liste de l'app Rappels (ci-dessous). 20 tâches au plus.
+- **Prochains trains** : les prochains trains directs d'une gare vers une à trois destinations : heure de départ, destination, type de train et heure d'arrivée (« TER > 19:11 »). Un retard s'affiche dans une pastille noire (« +5 min », l'heure affichée reste celle de l'horaire) ; un train supprimé a son heure barrée. Réglages et clé ci-dessous.
+
+### Raccourci iPhone pour les rappels
+
+Dans l'app **Raccourcis**, crée un raccourci « Rappels sur le cadre » :
+
+1. **Rechercher des rappels** : filtre **Liste** est *(ta liste)* et **Est terminé** est **non**.
+2. **Combiner le texte** : les **Rappels** de l'étape 1, séparés par **Nouvelles lignes**.
+3. **Obtenir le contenu de l'URL** :
+   - URL : `https://ADRESSE-DE-TON-CADRE/api/taches`
+   - Méthode : **POST**
+   - Corps de la requête : **Fichier** → le **Texte combiné** de l'étape 2
+   - **En-têtes** : `CF-Access-Client-Id` et `CF-Access-Client-Secret` avec les valeurs du jeton `raccourci-iphone` (le même que pour la pochette ; son rôle « raccourci » autorise aussi cette adresse).
+
+Chaque envoi remplace la liste reçue la fois d'avant, sans toucher aux tâches saisies sur la page ; une tâche présente des deux côtés n'est affichée qu'une fois. Un rappel coché disparaît donc du cadre au prochain envoi. Pour ne pas y penser, crée une automatisation (**Automatisation → Heure de la journée**, par exemple matin et soir, ou **Quand l'app Rappels est fermée**). Renvoyer la même liste ne coûte rien : le serveur n'écrit que si elle a changé. Le menu **À faire** montre la liste reçue et permet de l'effacer.
+
+### Prochains trains : clé SNCF, gare et destinations
+
+Les horaires viennent de l'API de la SNCF, gratuite mais avec une clé personnelle :
+
+1. Demande une clé sur [numerique.sncf.com](https://numerique.sncf.com/startup/api/) (« Obtenir ma clé d'API ») ; elle arrive par email.
+2. Dans Cloudflare, ouvre ton Worker → **Paramètres** → **Variables et secrets** → **Ajouter** : type **Secret**, nom `SNCF`, valeur = la clé. Comme `CLE`, elle reste dans Cloudflare : ni dans le dépôt, ni dans les réglages, ni dans la page.
+3. Sur la page, menu **Prochains trains (SNCF)** : cherche ta gare de départ, ajoute une à trois destinations, choisis le nombre de départs, puis **Enregistrer**. **Voir les prochains trains** montre ce que le cadre recevra.
+
+Seuls les trains **sans correspondance** vers les gares choisies sont affichés, qu'elles soient leur terminus ou un simple arrêt. Le serveur fait une demande par destination à chaque réveil où le bloc est affiché, et aucune le reste du temps : place le bloc dans une scène aux heures où tu prends le train (comme pour les bus) plutôt que dans la disposition par défaut, pour rester loin du quota de la clé. Si la SNCF ne répond pas, le bloc l'écrit (« Trains indisponibles ») au lieu de montrer de vieux horaires.
 
 ---
 

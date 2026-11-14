@@ -4,7 +4,7 @@
 // Cf-Access-Jwt-Assertion). Pour une personne connectee, il contient son adresse email ; pour un jeton
 // de service, son identifiant (common_name = Client ID). Le serveur verifie la signature, puis limite
 // chaque jeton de service au role qu'il a : la carte n'atteint que les routes de la carte, le raccourci
-// iPhone que l'envoi de la pochette. Un jeton vole ne peut donc ni changer les reglages, ni lire la
+// iPhone que l'envoi de la pochette et de la liste « A faire ». Un jeton vole ne peut donc ni changer les reglages, ni lire la
 // sauvegarde, ni envoyer un programme a la carte.
 //
 // Le role d'un jeton est devine a ce qu'il demande (la carte demande /api/etat avec sa version, le

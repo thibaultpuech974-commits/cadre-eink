@@ -9,9 +9,9 @@ static void sauver(const std::string& nom, int rot) {
 }
 int main() {
   preparerDessin();
-  const char* noms[] = {"defaut", "styles", "portrait", "courbe_f1", "courbe_f1_portrait", "courbe_petite", "meteo_circuit", "meteo_circuit_colonne",
+  const char* noms[] = {"defaut", "styles", "portrait", "courbe_f1", "courbe_f1_portrait", "courbe_petite", "meteo_circuit", "meteo_circuit_colonne", "nouveaux_blocs",
                         "agenda_rebours", "rebours_ligne", "rebours_large", "rebours_portrait", "agenda_long"};
-  for (int i = 0; i < 13; i++) {
+  for (int i = 0; i < 14; i++) {
     JsonDocument d; deserializeJson(d, lire((std::string("d_") + noms[i] + ".json").c_str()));
     int rot = d["rotation"] | 0;
     canvas.setRotation(rot);

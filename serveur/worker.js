@@ -26,6 +26,7 @@
 //   rebours.js           compte a rebours (jours restants avant une date)
 //   astro.js             soleil et lune (lever, coucher, phase), calcules sur place
 //   taches.js            liste « A faire » (page web et raccourci Rappels)
+//   trains.js            prochains trains d'une gare vers des destinations choisies (API SNCF)
 //   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
@@ -49,6 +50,7 @@ import { GTFS_TANGO, enregistrerIndexBus, prochainsBus } from './bus.js';
 import { evenementsICS } from './agenda.js';
 import { construireTableau } from './tableau.js';
 import { lireEnvoi } from './taches.js';
+import { chercherGares, prochainsTrains } from './trains.js';
 import { empreinteImage, encoderPlan, planRafraichissement, resumePlan } from './rafraichissement.js';
 import { controlerAcces, routeEcrireJetons, routeLireJetons } from './acces.js';
 import { routeEssaiAlerte, routeEtatAlertes, verifierAlertes } from './alertes.js';
@@ -114,6 +116,8 @@ export default {
       if (chemin === '/api/firmware' && m === 'POST') return await routeEnvoyerFirmware(req, url, env);
       if (chemin === '/api/firmware' && m === 'DELETE') return await routeRetirerFirmware(env);
       if (chemin === '/api/firmware.bin' && m === 'GET') return await routeTelechargerFirmware(env);
+      if (chemin === '/api/gares' && m === 'GET') return await routeGares(url, env);
+      if (chemin === '/api/trains-test' && m === 'GET') return json(await prochainsTrains((await lireConfig(env)).trains, Date.now(), env));
       if (chemin === '/api/bus-test' && m === 'GET') return json(await prochainsBus((await lireConfig(env)).bus, Date.now(), env, true));
       return texte('Route inconnue', 404);
     } catch (e) {
@@ -161,7 +165,7 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois', 'taches']) if (!ici.has(id)) delete contenu[id];
+    for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois', 'taches', 'trains']) if (!ici.has(id)) delete contenu[id];
     // Les blocs « Grand Prix » et « Meteo du circuit » partagent f1 : chacun ne recoit que sa part
     if (!ici.has('f1') && !ici.has('f1meteo')) delete contenu.f1;
     else if (!ici.has('f1meteo')) { delete contenu.f1.meteo; delete contenu.f1.noteMeteo; }
@@ -450,6 +454,13 @@ async function routeEnvoyerTaches(req, env) {
   cfg.version++;
   await ecrireConfig(env, cfg);
   return texte(recues.length ? recues.length + ' tâche(s) envoyée(s) au cadre' : 'Liste vidée');
+}
+// Recherche d'une gare par son nom pour la page web (la cle SNCF reste sur le serveur)
+async function routeGares(url, env) {
+  const q = (url.searchParams.get('q') || '').trim();
+  if (q.length < 2) return json([]);
+  try { return json(await chercherGares(q, env)); }
+  catch (e) { return texte(e.message === 'Clé SNCF absente' ? 'Clé SNCF absente : ajoute le secret SNCF dans Cloudflare (voir le README)' : e.message, 502); }
 }
 // Relais du fichier d'horaires Tango (pour que la page web puisse le lire)
 async function routeGTFS() {

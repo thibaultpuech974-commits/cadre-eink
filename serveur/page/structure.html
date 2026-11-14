@@ -160,6 +160,25 @@
   <pre id="busTest" class="cache"></pre>
 </details>
 
+<details class="menu" id="menu-trains">
+  <summary>Prochains trains (SNCF)</summary>
+  <p class="aide">Gare de départ :</p>
+  <div id="trainsGare" class="puces"></div>
+  <input type="text" id="trainsRechGare" placeholder="Chercher une gare, par ex. Nîmes" oninput="chercherGareDepart()">
+  <div class="resultats" id="trainsResGare"></div>
+  <p class="aide" style="margin-top:12px">Destinations (3 au maximum) : seuls les trains directs vers ces gares sont affichés.</p>
+  <div id="trainsVers" class="puces"></div>
+  <input type="text" id="trainsRechVers" placeholder="Ajouter une destination, par ex. Montpellier" oninput="chercherGareVers()">
+  <div class="resultats" id="trainsResVers"></div>
+  <label style="flex-wrap:wrap">Afficher
+    <select id="trainsNb" style="width:auto"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option></select>
+    départs</label>
+  <button style="width:100%;margin-top:8px" onclick="testerTrains()">Voir les prochains trains</button>
+  <pre id="trainsTest" class="cache"></pre>
+  <div class="msg" id="msgTrains"></div>
+  <p class="aide repliable">Le bloc « Prochains trains » (à ajouter dans « Scènes et disposition ») montre l'heure de départ, la destination, l'heure d'arrivée et le retard éventuel. Les horaires viennent de l'API SNCF, qui demande une clé gratuite à enregistrer une fois dans Cloudflare (voir le README, « Prochains trains »). Place plutôt le bloc dans une scène, aux heures où tu prends le train : chaque réveil du cadre compte dans le quota de la clé.</p>
+</details>
+
 <details class="menu" id="menu-rebours">
   <summary>Compte à rebours</summary>
   <p class="aide">Dates à attendre, une par ligne : le nom puis la date. Sans année, la date revient chaque année.</p>

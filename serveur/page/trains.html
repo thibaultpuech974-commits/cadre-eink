@@ -1,0 +1,78 @@
+<!-- Page web du cadre : menu Prochains trains (choix de la gare et des destinations) -->
+<script>
+// --- Prochains trains : la gare de départ et jusqu'à 3 destinations, cherchées par leur nom ---
+var trainsGare = null, trainsVers = [], attenteGare = null;
+
+function remplirTrains() {
+  var t = config.trains || {};
+  trainsGare = t.gare || null;
+  trainsVers = (t.vers || []).slice();
+  choisirValeur($('trainsNb'), t.nb || 4);
+  afficherTrains();
+}
+function lireTrains() { return { gare: trainsGare, vers: trainsVers, nb: +$('trainsNb').value }; }
+// Une puce par gare choisie ; un clic la retire
+function puceGare(zone, gare, retirer) {
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = gare.nom + '  ✕';
+  b.style.marginTop = '4px';
+  b.onclick = function () { retirer(); afficherTrains(); verifierModifs(); demanderPrevisu(); };
+  zone.appendChild(b);
+}
+function afficherTrains() {
+  var g = $('trainsGare'), v = $('trainsVers');
+  g.textContent = ''; v.textContent = '';
+  if (trainsGare) puceGare(g, trainsGare, function () { trainsGare = null; }); else g.textContent = 'Aucune';
+  if (!trainsVers.length) v.textContent = 'Aucune';
+  trainsVers.forEach(function (d) { puceGare(v, d, function () { trainsVers = trainsVers.filter(function (x) { return x.id !== d.id; }); }); });
+}
+// Recherche lancée une demi-seconde après la dernière frappe (l'API SNCF a un quota de demandes)
+function chercherGare(champ, zone, choisir) {
+  clearTimeout(attenteGare);
+  var q = $(champ).value.trim(), z = $(zone);
+  z.textContent = '';
+  if (q.length < 2) return;
+  attenteGare = setTimeout(function () {
+    api('/api/gares?q=' + encodeURIComponent(q)).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+      return r.json();
+    }).then(function (gares) {
+      if ($(champ).value.trim() !== q) return;           // une frappe plus récente est en cours
+      z.textContent = '';
+      if (!gares.length) { z.textContent = 'Aucune gare trouvée.'; return; }
+      gares.forEach(function (gare) {
+        var d = document.createElement('div');
+        d.textContent = gare.nom;
+        d.onclick = function () {
+          choisir(gare);
+          $(champ).value = ''; z.textContent = '';
+          afficherTrains(); verifierModifs(); demanderPrevisu();
+        };
+        z.appendChild(d);
+      });
+    }).catch(function (e) { z.textContent = e.message; });
+  }, 500);
+}
+function chercherGareDepart() { chercherGare('trainsRechGare', 'trainsResGare', function (g) { trainsGare = g; }); }
+function chercherGareVers() {
+  chercherGare('trainsRechVers', 'trainsResVers', function (g) {
+    if (trainsVers.some(function (x) { return x.id === g.id; })) return;
+    if (trainsVers.length >= 3) trainsVers.shift();
+    trainsVers.push(g);
+  });
+}
+function testerTrains() {
+  var z = $('trainsTest');
+  z.classList.remove('cache'); z.textContent = 'Chargement… (réglages enregistrés)';
+  api('/api/trains-test').then(function (r) { return r.json(); }).then(function (d) {
+    if (d.erreur) { z.textContent = d.erreur; return; }
+    var t = 'Départs de ' + d.gare + '\n\n';
+    if (!d.d.length) t += 'Aucun train direct trouvé.';
+    d.d.forEach(function (p) {
+      t += p.h + '  ' + p.m + ' → ' + p.v + (p.a ? '  (arrivée ' + p.a + ')' : '') + (p.x ? '  SUPPRIMÉ' : p.r ? '  retard ' + p.r + ' min' : '') + '\n';
+    });
+    z.textContent = t;
+  }).catch(function (e) { z.textContent = 'Erreur : ' + e.message; });
+}
+</script>

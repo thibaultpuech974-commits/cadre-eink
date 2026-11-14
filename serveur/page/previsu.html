@@ -144,7 +144,7 @@ $('scenePrevisu').onchange = function () { scenePrevisu = +this.value; majPrevis
 // Tout reglage modifie dans ces menus met la prevision a jour
 ['input', 'change'].forEach(function (ev) {
   document.addEventListener(ev, function (e) {
-    if (e.target.closest && e.target.closest('#menu-meteo, #menu-agenda, #menu-rebours, #menu-taches, #menu-bus, #menu-dispo, #menu-montage')) demanderPrevisu();
+    if (e.target.closest && e.target.closest('#menu-meteo, #menu-agenda, #menu-rebours, #menu-taches, #menu-trains, #menu-bus, #menu-dispo, #menu-montage')) demanderPrevisu();
   });
 });
 function demanderPrevisu() {
@@ -159,7 +159,7 @@ function majPrevisu() {
   var n = ++numPrevisu;
   // Tous les reglages des formulaires, enregistres ou non
   var modif = { ecrans: ECR, disposition: dispos['0'], dispositionPortrait: dispos['1'], scenes: scenes,
-    affichage: { traits: $('traits').checked, rotation: rot }, meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), taches: lireTaches(), bus: lireBus() };
+    affichage: { traits: $('traits').checked, rotation: rot }, meteo: lireMeteo(), agenda: lireAgenda(), rebours: lireRebours(), taches: lireTaches(), trains: lireTrains(), bus: lireBus() };
   texteInfoPrevisu('Préparation…');
   Promise.all([chargerMoteur(), api('/api/previsualiser', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ modif: modif, scene: scenePrevisu }) }).then(function (r) { return r.json(); })])
