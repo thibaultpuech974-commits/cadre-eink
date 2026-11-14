@@ -62,6 +62,7 @@ console.log('raccourci (texte) :', await envoyer('Acheter des piles\r\nRéviser 
 e = await etat(); console.log('bloc :', JSON.stringify(e.taches));
 ecritures = 0; const v1 = e.version;
 console.log('même liste renvoyée :', await envoyer('Acheter des piles\nRéviser la colle 📚\nLire Woolf'), '| écritures', ecritures);
+console.log('raccourci (JSON, texte) :', await envoyer(JSON.stringify({ taches: 'Footing\nPiscine' })), '|', JSON.stringify((await etat()).taches));
 console.log('raccourci (JSON) :', await envoyer(JSON.stringify({ taches: ['Footing', { titre: 'Dentiste' }] })), '|', JSON.stringify((await etat()).taches));
 r = await post({ taches: { texte: 'Une seule' } });
 console.log('la page ne touche pas aux rappels :', JSON.stringify(r.config.taches.rappels), '| reçus à', new Date(r.config.taches.rappelsT).toISOString().slice(0, 16));

@@ -40,6 +40,7 @@ const ATTENDU = {
     /sans calendrier : grille 28 jours, marques 0/, /sans les blocs : rien/,
     /page : \["Rendre le DM de maths","Acheter des piles","Appeler Mamie"\] \| 4e coupée à 80 caractères/, /raccourci \(texte\) : 3 tâche\(s\) envoyée\(s\) au cadre/,
     /bloc : \["Rendre le DM de maths","Acheter des piles","Réviser la colle","Lire Woolf"\]/, /même liste renvoyée : Liste inchangée \(3\) \| écritures 0/,
+    /raccourci \(JSON, texte\) : 2 tâche\(s\) .* \| \["Rendre le DM de maths","Acheter des piles","Footing","Piscine"\]/,
     /raccourci \(JSON\) : 2 tâche\(s\) .* \| \["Rendre le DM de maths","Acheter des piles","Footing","Dentiste"\]/, /la page ne touche pas aux rappels : \["Footing","Dentiste"\] \| reçus à 2026-11-14T17:00/,
     /bouton Effacer : \{"liste":\["Une seule"\],"rappels":\[\],"rappelsT":0\}/, /liste vide envoyée : Liste inchangée \(0\) \| trop longue : 20 tâche/,
     /restauration : 200 \["Footing","Dentiste"\]/, /rien à faire : \[\]/, /droit du raccourci : true \| de la carte : false/],

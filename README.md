@@ -225,17 +225,39 @@ Quatre autres blocs à ajouter dans **Scènes et disposition**. Comme tout nouve
 
 ### Raccourci iPhone pour les rappels
 
-Dans l'app **Raccourcis**, crée un raccourci « Rappels sur le cadre » :
+Le raccourci fait deux choses : il lit les rappels non terminés d'une de tes listes, puis il les envoie au cadre. Il tient en deux actions.
 
-1. **Rechercher des rappels** : filtre **Liste** est *(ta liste)* et **Est terminé** est **non**.
-2. **Combiner le texte** : les **Rappels** de l'étape 1, séparés par **Nouvelles lignes**.
-3. **Obtenir le contenu de l'URL** :
-   - URL : `https://ADRESSE-DE-TON-CADRE/api/taches`
-   - Méthode : **POST**
-   - Corps de la requête : **Fichier** → le **Texte combiné** de l'étape 2
-   - **En-têtes** : `CF-Access-Client-Id` et `CF-Access-Client-Secret` avec les valeurs du jeton `raccourci-iphone` (le même que pour la pochette ; son rôle « raccourci » autorise aussi cette adresse).
+**Avant de commencer**, aie sous la main :
+- l'adresse du raccourci : elle est affichée dans le menu **À faire** de la page (« Adresse à mettre dans le raccourci iPhone »), prête à copier ;
+- le **Client ID** et le **Client Secret** du jeton `raccourci-iphone`, les mêmes que pour le raccourci de la pochette (partie 1 bis). Si tu as déjà ce raccourci, ouvre-le pour les recopier.
 
-Chaque envoi remplace la liste reçue la fois d'avant, sans toucher aux tâches saisies sur la page ; une tâche présente des deux côtés n'est affichée qu'une fois. Un rappel coché disparaît donc du cadre au prochain envoi. Pour ne pas y penser, crée une automatisation (**Automatisation → Heure de la journée**, par exemple matin et soir, ou **Quand l'app Rappels est fermée**). Renvoyer la même liste ne coûte rien : le serveur n'écrit que si elle a changé. Le menu **À faire** montre la liste reçue et permet de l'effacer.
+**Créer le raccourci**
+
+1. Ouvre l'app **Raccourcis**, touche **+** en haut à droite, puis le nom en haut de l'écran → **Renommer** → « Rappels sur le cadre ».
+2. Dans la barre de recherche du bas, tape « rappels » et choisis l'action **Rechercher des rappels**. Dans cette action :
+   - touche **Ajouter un filtre**, règle-le sur **Liste** · **est** · *le nom de ta liste* ;
+   - touche encore **Ajouter un filtre**, règle-le sur **Est terminé** · **est** · **Non** (sans ce filtre, les rappels déjà cochés seraient envoyés aussi).
+3. Cherche « URL » et ajoute l'action **Obtenir le contenu de l'URL**, sous la première. Dans cette action :
+   - dans le champ **URL**, colle l'adresse copiée sur la page ;
+   - touche la petite flèche **›** à droite de l'action pour afficher les réglages ;
+   - **Méthode** : **POST** ;
+   - **En-têtes** : touche **Ajouter un en-tête** deux fois. Premier : clé `CF-Access-Client-Id`, valeur = le Client ID. Second : clé `CF-Access-Client-Secret`, valeur = le Client Secret ;
+   - **Corps de la requête** : **JSON** ;
+   - touche **Ajouter un champ** → **Texte**. Dans **Clé**, écris `taches` (en minuscules, sans accent). Touche **Valeur**, puis choisis la variable **Rappels** dans la ligne proposée au-dessus du clavier : c'est le résultat de l'action de l'étape 2.
+4. Touche **▶** en bas à droite pour l'essayer. Le résultat doit dire « 3 tâche(s) envoyée(s) au cadre » (ou « Liste inchangée »). Sur la page, le menu **À faire** montre alors la liste reçue, et le cadre l'affiche à son prochain réveil.
+
+**Si ça ne marche pas**
+
+- *Une page de connexion Cloudflare* : un des deux en-têtes est mal recopié (une espace en trop suffit), ou ce n'est pas le bon jeton.
+- *« Ce jeton n'a pas encore de rôle »* ou *« n'a pas accès à POST /api/taches »* : sur la page, menu **Accès des jetons** (groupe Système), donne au jeton le rôle **Raccourci iPhone**.
+- *Une seule tâche affichée, qui contient tous les rappels à la suite* : ajoute entre les deux actions l'action **Combiner le texte** (séparateur : **Nouvelles lignes**), et mets son résultat **Texte combiné** dans la valeur du champ `taches` à la place de **Rappels**.
+- *« Liste vidée »* : la recherche n'a trouvé aucun rappel ; vérifie le nom de la liste dans le premier filtre.
+
+**Bon à savoir**
+
+- Chaque envoi remplace la liste reçue la fois d'avant, sans toucher aux tâches saisies sur la page. Un rappel coché disparaît donc du cadre au prochain envoi ; une tâche présente des deux côtés n'est affichée qu'une fois.
+- Pour ne pas le lancer à la main : onglet **Automatisation** → **+** → **Heure de la journée** (par exemple 7 h et 19 h) → **Exécuter immédiatement** → choisis le raccourci. Ou **App** → **Rappels** → **Est fermée**, pour un envoi chaque fois que tu quittes l'app.
+- Renvoyer la même liste ne coûte rien : le serveur n'écrit que si elle a changé. Le menu **À faire** permet d'effacer la liste reçue.
 
 ### Prochains trains : clé SNCF, gare et destinations
 
