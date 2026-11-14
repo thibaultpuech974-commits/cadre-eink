@@ -184,6 +184,26 @@ int texteLignes(int x, int y, const char* s, int largeurMax, int interligne, int
       ligne[0] = 0;
       continue;
     }
+    if (!ligne[0] && lignes + 1 < lignesMax && largeurTexte(essai) > largeurMax) {
+      // Mot plus large que la colonne : il continue a la ligne, coupe apres un trait d'union
+      // ("physique-" / "chimie") s'il y en a un, sinon entre deux lettres
+      int coupe = 0, trait = 0;
+      for (int i = 1; i < (int)(fin - p) && i < (int)sizeof essai; i++) {
+        if ((p[i] & 0xC0) == 0x80) continue;              // pas au milieu d'une lettre accentuee (UTF-8)
+        snprintf(essai, sizeof essai, "%.*s", i, p);
+        if (largeurTexte(essai) > largeurMax) break;
+        coupe = i;
+        if (p[i - 1] == '-') trait = i;
+      }
+      if (trait) coupe = trait;
+      if (coupe > 0) {
+        snprintf(essai, sizeof essai, "%.*s", coupe, p);
+        if (dessiner) texte(x, y, essai);
+        y += interligne; lignes++; p += coupe;
+        continue;
+      }
+      snprintf(essai, sizeof essai, "%.*s", (int)(fin - p), p);
+    }
     strncpy(ligne, essai, sizeof ligne - 1);
     p = fin;
   }
@@ -539,8 +559,8 @@ void widgetColonnes(JsonArray liste, Boite b, bool jours) {
 
 // Agenda : une pastille par jour (numero du jour en grand, jour de la semaine en petit dessous), un filet
 // pointille entre deux jours, puis l'heure et le titre de chaque evenement de ce jour (lieu derriere).
-// On affiche autant d'evenements que possible avec une ligne chacun ; la place qui reste sert ensuite aux
-// titres trop longs : une 2e ligne pour chacun (les premiers servis d'abord), puis une 3e.
+// Un titre s'ecrit en entier, sur autant de lignes qu'il faut : on affiche les evenements qui tiennent
+// ainsi (moins nombreux, mais lisibles sans deviner la fin). La place qui reste sert ensuite aux lieux.
 void widgetAgenda(JsonVariant ag, Boite b) {
   if (ag.isNull()) return;
   policeT(20, false);
@@ -588,8 +608,10 @@ void widgetAgenda(JsonVariant ag, Boite b) {
     snprintf(tampon, sizeof tampon, "%s%s%s%s%s", hDevant ? h : "", hDevant ? " " : "", titre, l ? " · " : "", l ? lieu : "");
     return tampon;
   };
-  int voulu[MAXE], nl[MAXE];
-  for (int k = 0; k < total; k++) { voulu[k] = compterLignes(composer(k, true), lT, 3); nl[k] = 1; }
+  const int LMAX = 6;                            // garde-fou : un titre de 100 caracteres dans un bloc etroit
+  int nl[MAXE];
+  bool avecLieu[MAXE];
+  for (int k = 0; k < total; k++) { nl[k] = compterLignes(composer(k, false), lT, LMAX); avecLieu[k] = false; }
   // Hauteur prise par les m premiers evenements
   auto hauteur = [&](int m) {
     int h = 0;
@@ -600,11 +622,22 @@ void widgetAgenda(JsonVariant ag, Boite b) {
     }
     return h;
   };
-  int n = total;
-  while (n > 1 && hauteur(n) > b.h) n--;
-  for (int tour = 2; tour <= 3; tour++)
-    for (int k = 0; k < n; k++)
-      if (voulu[k] >= tour) { nl[k] = tour; if (hauteur(n) > b.h) nl[k] = tour - 1; }
+  int n = 0;
+  while (n < total && hauteur(n + 1) <= b.h) n++;
+  if (!n) {                                      // le premier ne tient pas en entier : ce qui rentre
+    n = 1;
+    while (nl[0] > 1 && hauteur(1) > b.h) nl[0]--;
+  }
+  // Lieu : seulement s'il tient en entier sans retirer d'evenement (derriere le titre, ou sur une ligne
+  // de plus). Coupe, il ferait croire que c'est le titre qui l'est ("Maths...").
+  policeT(17, false);
+  for (int k = 0; k < n; k++) {
+    const char* lieu = ev[k]["l"] | "";
+    if (!lieu[0]) continue;
+    int v = compterLignes(composer(k, true), lT, LMAX), avant = nl[k];
+    if (v > avant) { nl[k] = v; if (hauteur(n) > b.h) nl[k] = avant; }
+    avecLieu[k] = nl[k] >= v;
+  }
 
   int y = b.y;
   for (int i = 0; i < n;) {
@@ -620,12 +653,7 @@ void widgetAgenda(JsonVariant ag, Boite b) {
       const char* h = ev[i]["h"] | "";
       if (h[0] && colHeure) { policeT(14, false); texteTronque(xH, yy, h, largHeure - 8); }
       policeT(17, false);
-      // Le lieu suit le titre : sur plusieurs lignes s'il y a la place, sinon seulement s'il reste
-      // sur la ligne de quoi en lire le debut
-      const char* t = composer(i, false);
-      const char* lieu = ev[i]["l"] | "";
-      if (lieu[0] && (nl[i] > 1 || largeurTexte(t) + largeurTexte(" · ") + 48 <= lT)) t = composer(i, true);
-      texteMultiligne(xT, yy, t, lT, inter, nl[i]);
+      texteMultiligne(xT, yy, composer(i, avecLieu[i]), lT, inter, nl[i]);
       yy += (nl[i] - 1) * inter + pas;
     }
     y = yTop + max(yy - pas - yTop + desc, hP);
