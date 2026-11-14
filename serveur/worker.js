@@ -157,7 +157,11 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    for (const id of ['agenda', 'bus', 'f1', 'rebours']) if (!ici.has(id)) delete contenu[id];
+    for (const id of ['agenda', 'bus', 'rebours']) if (!ici.has(id)) delete contenu[id];
+    // Les blocs « Grand Prix » et « Meteo du circuit » partagent f1 : chacun ne recoit que sa part
+    if (!ici.has('f1') && !ici.has('f1meteo')) delete contenu.f1;
+    else if (!ici.has('f1meteo')) { delete contenu.f1.meteo; delete contenu.f1.noteMeteo; }
+    else if (!ici.has('f1')) { delete contenu.f1.trace; delete contenu.f1.sessions; }
     Object.assign(etat, contenu);
     // Scene affichee : son rythme (ou le rythme normal / de nuit), cale sur l'horloge, et reveil au prochain changement de scene
     const sc = contenu.scene;
