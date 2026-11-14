@@ -6,7 +6,8 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 const ici = dirname(fileURLToPath(import.meta.url));
 const ATTENDU = {
-  'test.mjs': [/UI 200/, /sans cle 401/, /sig stable true/, /^photo 200/m, /get photo 200 81600/, /pochette 200/, /apercu get 200 true/],
+  'test.mjs': [/UI 200/, /sans cle 401/, /sig stable true/, /^photo 200/m, /get photo 200 81600/, /pochette 200/, /apercu get 200 true/,
+    /"h": "jour",\s+"t": "Anniversaire de Léa"/],      // évènement sur toute la journée
   'scenes.mjs': [/migration : Bus \[date,bus\].*Grand Prix \[date,meteo,f1\].*f1=semaine/, /scène invalide -> \[\] reveil 0 blocs 0/,
     /ven 16\/10 17h50 +Par défaut/, /ven 16\/10 18h30 +Bus +date,bus +réveil 185 s/, /ven 16\/10 19h58 +Bus .*réveil 125 s/,
     /jeu 22\/10 22h00 +Vacances +date,courbe/, /ven 23\/10 08h00 \(GP\) +Grand Prix +date,f1,meteo +réveil 1809 s/,

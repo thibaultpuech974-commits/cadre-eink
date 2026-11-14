@@ -149,7 +149,7 @@ Limite d'iOS : un raccourci ne peut pas se déclencher tout seul à chaque chang
 
 **Montage du cadre** (groupe Cadre) : nombre d'écrans, sens du cadre (paysage, portrait, portrait inversé) et traits de séparation, des réglages qu'on ne fait qu'une fois.
 
-**Agenda** : sous les adresses des calendriers, la page indique pour chacun s'il est accessible (✓) et combien d'évènements il contient dans les prochains jours, ou ce qui ne va pas (✗ : adresse invalide, calendrier introuvable ou plus public…). Sur l'écran, les évènements sont regroupés par jour (le jour n'est écrit qu'une fois), et le lieu suit le titre quand il tient en entier sans prendre la place d'un évènement (« Colle de maths · C104 ») ; l'option **Afficher le lieu** le retire.
+**Agenda** : sous les adresses des calendriers, la page indique pour chacun s'il est accessible (✓) et combien d'évènements il contient dans les prochains jours, ou ce qui ne va pas (✗ : adresse invalide, calendrier introuvable ou plus public…). Sur l'écran, les évènements sont regroupés par jour (le jour n'est écrit qu'une fois), un évènement sur toute la journée porte le mot « jour » à la place de l'heure, et le lieu suit le titre quand il tient en entier sans prendre la place d'un évènement (« Colle de maths · C104 ») ; l'option **Afficher le lieu** le retire.
 
 **Scènes** : une scène est une disposition des blocs affichée pendant une période choisie. La scène **Par défaut** s'affiche quand aucune autre n'est active. Dans la section **Scènes et disposition** :
 - **+ Nouvelle scène** crée une scène (copie de « Par défaut ») ; donne-lui un nom ;
