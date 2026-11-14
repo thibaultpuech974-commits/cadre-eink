@@ -34,6 +34,7 @@ function remplirFormulaires() {
   var p = config.pochette;
   if (p.version) $('pochetteActuelle').textContent = 'Dernière pochette : ' + (p.titre || '?') + ' — ' + (p.artiste || '?') + ' (' + new Date(p.t).toLocaleString('fr-FR') + ')';
   // Avec Access, le raccourci s'identifie par son jeton de service (en-tetes), pas par l'adresse
+  $('urlTaches').textContent = location.origin + '/api/taches' + (session.access ? '' : '?cle=' + encodeURIComponent(cle));
   $('urlPochette').textContent = location.origin + '/api/pochette?' + (session.access ? '' : 'cle=' + encodeURIComponent(cle));
   $('aidePochetteAccess').classList.toggle('cache', !session.access);
 }
