@@ -4,7 +4,8 @@ import { GOUTTIERE, ROTATIONS, enPixels, grille, validerDisposition } from './di
 import { prochainChangementScene, sceneActive } from './scenes.js';
 import { prochainsBus } from './bus.js';
 import { chargerMeteo, meteo } from './meteo.js';
-import { agenda } from './agenda.js';
+import { calendrierDuMois, evenementsAgenda, finAgenda, finDuMois, lignesAgenda } from './agenda.js';
+import { soleilEtLune } from './astro.js';
 import { grandPrix, meteoCircuit } from './f1.js';
 import { compteARebours } from './rebours.js';
 
@@ -35,7 +36,10 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
   const pMeteo = peutServir(['meteo', 'heures', 'jours', 'courbe'])
     ? sansErreur(chargerMeteo(cfg.meteo, env), 'Météo indisponible') : null;
   const avecAgenda = cfg.agenda.urls.length || cfg.agenda.anniversaires.length;
-  const pAgenda = peutServir(['agenda']) && avecAgenda ? sansErreur(agenda(cfg.agenda, maintenant, env), 'Agenda indisponible') : null;
+  // Les calendriers sont lus une seule fois, jusqu'a la fin du mois si le calendrier du mois peut servir
+  const finLecture = Math.max(finAgenda(cfg.agenda, maintenant), peutServir(['mois']) ? finDuMois(maintenant) : 0);
+  const pAgenda = peutServir(['agenda', 'mois']) && avecAgenda
+    ? sansErreur(evenementsAgenda(cfg.agenda, maintenant, finLecture, env), 'Agenda indisponible') : null;
   const pGP = scenes.some(sc => sc.f1) || peutServir(['f1', 'f1meteo']) ? chargerGP() : null;
   if (scenes.some(sc => sc.f1)) await pGP;
   // Scene affichee : la premiere active de la liste, sinon la disposition par defaut
@@ -70,7 +74,13 @@ export async function construireTableau(cfg, maintenant, env, forcer = null) {
       } catch (e) { console.log('Météo :', e.message); res.meteo = { erreur: 'Météo indisponible' }; }
     }
   }
-  if (presents.has('agenda')) res.agenda = avecAgenda ? resAgenda : { erreur: 'Aucun calendrier configuré' };
+  if (presents.has('agenda')) {
+    res.agenda = !avecAgenda ? { erreur: 'Aucun calendrier configuré' }
+      : resAgenda.erreur ? resAgenda : lignesAgenda(cfg.agenda, resAgenda, maintenant);
+  }
+  // Calendrier du mois : sans calendrier (ou en panne), la grille s'affiche quand meme, sans marques
+  if (presents.has('mois')) res.mois = calendrierDuMois(avecAgenda && !resAgenda.erreur ? resAgenda : [], maintenant);
+  if (presents.has('astro')) res.astro = soleilEtLune(cfg.meteo, maintenant);
   if (presents.has('rebours')) res.rebours = compteARebours(cfg.rebours, maintenant);
   if (presents.has('bus')) {
     res.bus = await pBus;

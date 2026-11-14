@@ -24,6 +24,7 @@
 //   meteo.js             Open-Meteo
 //   agenda.js            calendriers ICS et anniversaires
 //   rebours.js           compte a rebours (jours restants avant une date)
+//   astro.js             soleil et lune (lever, coucher, phase), calcules sur place
 //   f1.js                calendrier de Formule 1 (+ circuits.js : traces des circuits)
 //   tableau.js           donnees de chaque bloc envoyees a la carte
 //   rafraichissement.js  plan de rafraichissement partiel de l'ecran
@@ -157,7 +158,7 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    for (const id of ['agenda', 'bus', 'rebours']) if (!ici.has(id)) delete contenu[id];
+    for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois']) if (!ici.has(id)) delete contenu[id];
     // Les blocs « Grand Prix » et « Meteo du circuit » partagent f1 : chacun ne recoit que sa part
     if (!ici.has('f1') && !ici.has('f1meteo')) delete contenu.f1;
     else if (!ici.has('f1meteo')) { delete contenu.f1.meteo; delete contenu.f1.noteMeteo; }
