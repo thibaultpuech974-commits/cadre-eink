@@ -1,13 +1,18 @@
 // Agenda : calendriers iCloud/ICS (récurrences comprises) et anniversaires
 import { avecSecours, empreinte, pourEcran } from './commun.js';
-import { JOURS_COURTS, TZ, deux, fuseauValide, mural, versUTC } from './temps.js';
+import { JOURS_COURTS, MOIS, TZ, deux, fuseauValide, mural, versUTC } from './temps.js';
 import { titreF1 } from './f1.js';
 
 // ---------------------------------------------------------------------
 //  Agenda iCloud (fichiers .ics), y compris les evenements recurrents
 // ---------------------------------------------------------------------
 export async function agenda(o, maintenant, env) {
-  const fin = maintenant + Math.max(1, o.joursMax || 14) * 86400e3;
+  return lignesAgenda(o, await evenementsAgenda(o, maintenant, finAgenda(o, maintenant), env), maintenant);
+}
+export const finAgenda = (o, maintenant) => maintenant + Math.max(1, o.joursMax || 14) * 86400e3;
+// Evenements de tous les calendriers et anniversaires entre maintenant et fin, dans l'ordre :
+// lus une seule fois par requete, pour la liste de l'agenda comme pour le calendrier du mois
+export async function evenementsAgenda(o, maintenant, fin, env) {
   // Tous les calendriers en meme temps ; un calendrier qui ne repond pas est remplace par sa
   // derniere copie (jusqu'a 7 jours), ou ignore si les autres repondent
   const lus = await Promise.allSettled(o.urls.map(async brut => {
@@ -23,8 +28,12 @@ export async function agenda(o, maintenant, env) {
   if (o.urls.length && !reussis.length) throw lus[0].reason;
   let tous = [].concat(...reussis.map(l => l.value));
   tous = tous.concat(anniversaires(o.anniversaires || [], maintenant, fin));
-  tous.sort((a, b) => a.debut - b.debut || (b.journee ? 1 : 0) - (a.journee ? 1 : 0));
-
+  return tous.sort((a, b) => a.debut - b.debut || (b.journee ? 1 : 0) - (a.journee ? 1 : 0));
+}
+// Lignes du bloc Agenda : les premiers evenements de la periode choisie dans les reglages
+export function lignesAgenda(o, evenements, maintenant) {
+  const limite = finAgenda(o, maintenant);
+  const tous = evenements.filter(e => e.debut < limite);
   const auj = mural(maintenant);
   const demain = mural(maintenant + 86400e3);
   const memeJour = (a, b) => a.y === b.y && a.m === b.m && a.d === b.d;
@@ -49,6 +58,25 @@ export async function agenda(o, maintenant, env) {
     return ligne;
   });
 }
+// ---------------------------------------------------------------------
+//  Calendrier du mois : grille du mois en cours, jours qui ont un evenement
+// ---------------------------------------------------------------------
+// t = "Novembre 2026", p = colonne du 1er (0 = lundi), n = nombre de jours, a = aujourd'hui,
+// e = jours du mois, a partir d'aujourd'hui, qui ont au moins un evenement (les jours passes ne sont
+// plus lus dans les calendriers). Un evenement deja commence compte pour aujourd'hui.
+export function finDuMois(maintenant) {
+  const w = mural(maintenant);
+  return versUTC({ y: w.y, m: w.m + 1, d: 1, hh: 0 }, TZ);
+}
+export function calendrierDuMois(evenements, maintenant) {
+  const w = mural(maintenant), fin = finDuMois(maintenant);
+  const jours = new Set();
+  for (const e of evenements || []) if (e.debut < fin) jours.add(mural(Math.max(e.debut, maintenant)).d);
+  return { t: MOIS[w.m - 1][0].toUpperCase() + MOIS[w.m - 1].slice(1) + ' ' + w.y,
+    p: (new Date(Date.UTC(w.y, w.m - 1, 1)).getUTCDay() + 6) % 7, n: new Date(Date.UTC(w.y, w.m, 0)).getUTCDate(),
+    a: w.d, e: [...jours].sort((x, y) => x - y) };
+}
+
 // Seances de F1 abregees dans l'agenda, pour tenir sur une ligne ("GP de Las Vegas - EL1")
 function sessionCourte(t) {
   return t.replace(/Essais libres (\d)$/, 'EL$1').replace(/Qualif\. sprint$/, 'Qualif sprint').replace(/Qualifications$/, 'Qualif');

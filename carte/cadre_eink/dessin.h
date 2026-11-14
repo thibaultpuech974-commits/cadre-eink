@@ -74,7 +74,12 @@ void widgetMeteo(JsonVariant m, Boite b);
 void widgetColonnes(JsonArray liste, Boite b, bool jours);
 void widgetAgenda(JsonVariant ag, Boite b);
 void widgetRebours(JsonVariant r, Boite b);
+void disqueLune(int cx, int cy, int r, int p);
+void widgetAstro(JsonVariant a, Boite b);
+void widgetMois(JsonVariant m, Boite b);
+void widgetTaches(JsonVariant t, Boite b);
 void widgetBus(JsonVariant bus, Boite b);
+void widgetTrains(JsonVariant tr, Boite b);
 void trame(int x0, int y0, int w, int h, int pas);
 void ligneHPointillee(int x0, int x1, int y);
 void ligneVPointillee(int x, int y0, int y1);
@@ -661,6 +666,166 @@ void widgetAgenda(JsonVariant ag, Boite b) {
   }
 }
 
+// Lune vue de l'hemisphere nord : p = avancement du cycle en centiemes (0 nouvelle lune, 25 premier
+// quartier eclaire a droite, 50 pleine lune, 75 dernier quartier). La partie dans l'ombre est noire.
+void disqueLune(int cx, int cy, int r, int p) {
+  float c = cosf(p * 2 * PI / 100);
+  for (int dy = -r; dy <= r; dy++) {
+    float w = sqrtf((float)(r * r - dy * dy));
+    // Limite de l'ombre : une demi-ellipse qui glisse d'un bord a l'autre du disque
+    int xa = p < 50 ? lroundf(-w) : lroundf(-w * c), xb = p < 50 ? lroundf(w * c) : lroundf(w);
+    if (xb > xa) canvas.drawFastHLine(cx + xa, cy + dy, xb - xa, NOIR);
+  }
+  canvas.drawCircle(cx, cy, r, NOIR);
+  canvas.drawCircle(cx, cy, r - 1, NOIR);
+}
+
+// Soleil et lune : le disque de la lune a gauche, puis jusqu'a quatre lignes selon la hauteur (la phase,
+// la prochaine pleine ou nouvelle lune, les heures de lever et de coucher du soleil, la duree du jour).
+// Bloc large et bas : la lune et le soleil cote a cote.
+void widgetAstro(JsonVariant a, Boite b) {
+  if (a.isNull()) return;
+  char soleilT[40] = "", jour[48] = "";
+  const char* lever = a["lever"] | "";
+  const char* duree = a["duree"] | "";
+  const char* ecart = a["ecart"] | "";
+  if (*lever) snprintf(soleilT, sizeof soleilT, "Soleil %s - %s", lever, (const char*)(a["coucher"] | ""));
+  if (*lever) snprintf(jour, sizeof jour, "Jour %s%s%s%s", duree, *ecart ? " (" : "", ecart, *ecart ? ")" : "");
+  else snprintf(jour, sizeof jour, "%s", duree);
+  // Dans l'ordre d'affichage ; prio = rang de chaque ligne quand il n'y a pas la place pour toutes
+  const char* L[4] = { a["lune"] | "", a["suite"] | "", soleilT, jour };
+  const bool gras[4] = { true, false, true, false };
+  const int taille[4] = { 17, 14, 17, 14 }, prio[4] = { 1, 3, 0, 2 };
+  policeT(17, true); int aG = asc();
+  policeT(14, false); int aP = asc();
+  int pasG = aG * 15 / 10 + 2, pasP = aP * 15 / 10 + 2;
+  auto hauteur = [&](int n) { int h = 0; for (int i = 0; i < 4; i++) if (prio[i] < n && *L[i]) h += gras[i] ? pasG : pasP; return h; };
+  bool deuxCol = b.w >= 430 * st.e && hauteur(4) > b.h && hauteur(2) <= b.h;
+  int n = 4;
+  if (!deuxCol) while (n > 1 && hauteur(n) > b.h) n--;
+  int hTexte = deuxCol ? pasG + pasP : hauteur(n);
+  int r = max(8, min(min(b.h, max(hTexte, 2 * pasG)) / 2 - 1, b.w / 8));
+  int cy = b.y + b.h / 2;
+  disqueLune(b.x + r, cy, r, a["p"] | 0);
+  int x = b.x + 2 * r + 14, larg = b.x + b.w - x;
+  // Une ligne trop longue passe en plus petit ; les heures du soleil perdent d'abord le mot "Soleil"
+  auto ligne = [&](int i, int xx, int yy, int lMax) {
+    const char* t = L[i];
+    policeT(taille[i], gras[i]);
+    if (i == 2 && largeurTexte(t) > lMax) t += 7;
+    policeAjustee(taille[i], gras[i], t, lMax);
+    texteTronque(xx, yy, t, lMax);
+  };
+  if (deuxCol) {
+    int lc = (larg - 16) / 2, y = cy - hTexte / 2;
+    for (int col = 0; col < 2; col++) {
+      int yy = y, xx = x + col * (lc + 16);
+      for (int i = col * 2; i < col * 2 + 2; i++) {
+        yy += gras[i] ? aG : aP;
+        ligne(i, xx, yy, lc);
+        yy += (gras[i] ? pasG - aG : pasP - aP);
+      }
+    }
+    return;
+  }
+  int y = cy - hTexte / 2;
+  for (int i = 0; i < 4; i++) {
+    if (prio[i] >= n || !*L[i]) continue;
+    y += gras[i] ? aG : aP;
+    ligne(i, x, y, larg);
+    y += (gras[i] ? pasG - aG : pasP - aP);
+  }
+}
+
+// Calendrier du mois : le mois en titre, les initiales des jours, puis une ligne par semaine (lundi a
+// gauche). Aujourd'hui est en blanc sur une pastille noire ; un point sous un jour = au moins un evenement.
+void widgetMois(JsonVariant m, Boite b) {
+  if (m.isNull()) return;
+  int premier = m["p"] | 0, nb = m["n"] | 30, auj = m["a"] | 0;
+  int rangs = (premier + nb + 6) / 7;
+  bool marque[32] = { false };
+  for (JsonVariant j : m["e"].as<JsonArray>()) { int d = j | 0; if (d >= 1 && d <= 31) marque[d] = true; }
+  policeT(17, true); int aT = asc();
+  policeT(11, false); int aI = asc();
+  // Titre et initiales seulement s'il reste des cases lisibles dessous
+  bool titre = (b.h - aT - 10 - aI - 6) / rangs >= 20;
+  bool initiales = (b.h - (titre ? aT + 10 : 0) - aI - 6) / rangs >= 18;
+  int y = b.y;
+  float cl = b.w / 7.0f;
+  if (titre) { policeAjustee(17, true, m["t"] | "", b.w); texteTronque(b.x, y + aT, m["t"] | "", b.w); y += aT + 10; }
+  if (initiales) {
+    const char* I[7] = { "L", "M", "M", "J", "V", "S", "D" };
+    policeT(11, false);
+    for (int c = 0; c < 7; c++) texteCentre(b.x + cl * c + cl / 2, y + aI, I[c]);
+    y += aI + 6;
+    canvas.drawFastHLine(b.x, y - 3, b.w, NOIR);
+  }
+  float ch = (b.y + b.h - y) / (float)rangs;
+  policeQuiTient(false, min(ch * 0.5f, 22 * st.e), "30", cl * 0.62f);
+  int aC = asc(), point = ch - aC >= 13 ? 2 : 0;       // place pour un point sous le chiffre ?
+  char t[4];
+  for (int d = 1; d <= nb; d++) {
+    int c = (premier + d - 1) % 7, r = (premier + d - 1) / 7;
+    int cx = b.x + cl * c + cl / 2, cyc = y + ch * r + ch / 2;
+    int base = cyc + aC / 2 - (point ? 3 : 0);
+    snprintf(t, sizeof t, "%d", d);
+    if (d == auj) {
+      int rp = min((int)(cl / 2) - 1, (int)(ch / 2) - 1);
+      rp = min(rp, aC + 4);
+      canvas.fillCircle(cx, base - aC / 2, rp, NOIR);
+      u8g2.setForegroundColor(BLANC);
+      texteCentre(cx, base, t);
+      if (marque[d] && point) canvas.fillCircle(cx, base + 5, point, BLANC);
+      u8g2.setForegroundColor(NOIR);
+      continue;
+    }
+    texteCentre(cx, base, t);
+    if (marque[d]) {
+      if (point) canvas.fillCircle(cx, base + 6, point, NOIR);
+      else canvas.drawFastHLine(cx - aC / 2, base + 2, aC, NOIR);      // case basse : un soulignement
+    }
+  }
+}
+
+// A faire : une case vide devant chaque tache, ecrite en entier (sur plusieurs lignes au besoin).
+// S'il n'y a pas la place pour toutes, la derniere ligne dit combien il en reste ("+ 3 autres").
+void widgetTaches(JsonVariant t, Boite b) {
+  if (t.isNull()) return;
+  JsonArray L = t.as<JsonArray>();
+  if (L.size() == 0) { policeT(20, false); texteTronque(b.x, b.y + asc() + 6, "Rien à faire", b.w); return; }
+  const int MAXT = 20;
+  const char* txt[MAXT];
+  int nl[MAXT], total = 0;
+  for (JsonVariant v : L) { if (total >= MAXT) break; txt[total++] = v | ""; }
+  policeT(14, false); int aP = asc();
+  policeT(17, false);
+  int aE = asc(), inter = aE * 13 / 10 + 1, ecart = aE * 9 / 10, cote = aE;
+  int xT = b.x + cote + 10, lT = b.x + b.w - xT;
+  for (int k = 0; k < total; k++) nl[k] = compterLignes(txt[k], lT, 6);
+  auto hauteur = [&](int m) {
+    int h = 0;
+    for (int k = 0; k < m; k++) h += (k ? ecart : 0) + aE + (nl[k] - 1) * inter;
+    return h + (m < total ? ecart + aP : 0) + aE / 4;        // la ligne "+ N autres" et les jambages
+  };
+  int n = total;
+  while (n > 1 && hauteur(n) > b.h) n--;
+  while (nl[0] > 1 && hauteur(n) > b.h) nl[0]--;
+  int y = b.y;
+  for (int k = 0; k < n; k++) {
+    y += (k ? ecart : 0) + aE;
+    canvas.drawRoundRect(b.x, y - cote + 1, cote, cote, 3, NOIR);
+    canvas.drawRoundRect(b.x + 1, y - cote + 2, cote - 2, cote - 2, 2, NOIR);
+    policeT(17, false);
+    texteMultiligne(xT, y, txt[k], lT, inter, nl[k]);
+    y += (nl[k] - 1) * inter;
+  }
+  if (n < total && y + ecart + aP <= b.y + b.h) {
+    char reste[24];
+    snprintf(reste, sizeof reste, "+ %d autre%s", total - n, total - n > 1 ? "s" : "");
+    policeT(14, false); texte(xT, y + ecart + aP, reste);
+  }
+}
+
 // Compte a rebours : jours restants avant une date (vacances, concours...). La date la plus proche en
 // grand ("J-12", puis son titre et sa date) ; les suivantes en liste, a droite si le bloc est large,
 // sinon dessous, tant qu'il reste de la place.
@@ -813,6 +978,75 @@ void widgetBus(JsonVariant bus, Boite b) {
     int largDest = xFinDest - (b.x + wb + 10);
     if (largDest >= 50) texteTronque(b.x + wb + 10, cy + asc() / 2, p["d"] | "", largDest);   // sinon pas la place
     i++;
+  }
+}
+
+// Prochains trains : une ligne par depart. L'heure prevue en gras, la destination, puis a droite le
+// type de train et l'heure d'arrivee ("TER > 19:11") quand il reste de la place. Un retard s'affiche
+// dans une pastille noire ("+5 min") ; un train supprime a son heure barree.
+void widgetTrains(JsonVariant tr, Boite b) {
+  if (tr.isNull()) return;
+  policeT(17, false);
+  if (tr["erreur"].is<const char*>()) { texteMultiligne(b.x, b.y + asc() + 6, tr["erreur"].as<const char*>(), b.w, asc() * 13 / 10 + 1, 3); return; }
+  JsonArray D = tr["d"];
+  int y = b.y;
+  const char* gare = tr["gare"] | "";
+  policeT(14, false);
+  int aA = asc();
+  if (gare[0] && b.h >= 4 * aA + 30) {
+    char t[80];
+    snprintf(t, sizeof t, "Trains - %s", gare);
+    texteTronque(b.x, y + aA, t, b.w);
+    y += aA + 10;
+  }
+  if (D.isNull() || D.size() == 0) { policeT(20, false); texteTronque(b.x, y + asc() + 4, "Aucun train direct", b.w); return; }
+  policeT(20, true);  int aH = asc(), largHeure = largeurTexte("88:88") + 12;
+  policeT(17, false); int aD = asc();
+  int marge = max(10, aH * 2 / 3);
+  char t[48];
+  y += marge / 2;
+  for (JsonObject p : D) {
+    bool supprime = (p["x"] | 0) == 1;
+    int retard = p["r"] | 0;
+    const char* dest = p["v"] | "";
+    const char* h = p["h"] | "";
+    // Largeur prise a droite par la pastille du retard ou par "supprimé"
+    int wDroite = 0;
+    policeT(14, true);
+    if (supprime) wDroite = largeurTexte("supprimé");
+    else if (retard > 0) { snprintf(t, sizeof t, "+%d min", retard); wDroite = largeurTexte(t) + 12; }
+    int place = b.w - largHeure - (wDroite ? wDroite + 10 : 0);
+    policeT(17, false);
+    int wDest = largeurTexte(dest);
+    // Destination trop longue pour la ligne : elle passe dessous, en entier, plutot que d'etre coupee
+    bool dessous = wDest > place;
+    int hLigne = aH + (dessous ? aD + 6 : 0);
+    if (y + hLigne > b.y + b.h) break;
+    int base = y + aH;
+    policeT(20, true);
+    texte(b.x, base, h);
+    if (supprime) canvas.fillRect(b.x - 1, base - aH / 2, largeurTexte(h) + 2, 2, NOIR);
+    int xr = b.x + b.w, x = b.x + largHeure;
+    if (supprime) {
+      policeT(14, true);
+      if (xr - wDroite >= x) texteDroite(xr, base, "supprimé");
+      xr -= wDroite + 10;
+    } else if (retard > 0) {
+      policeT(14, true);
+      int hp = asc() + 8;
+      canvas.fillRoundRect(xr - wDroite, base - asc() - 4, wDroite, hp, 5, NOIR);
+      u8g2.setForegroundColor(BLANC); texte(xr - wDroite + 6, base, t); u8g2.setForegroundColor(NOIR);
+      xr -= wDroite + 10;
+    }
+    // Type de train et heure d'arrivee, seulement s'ils tiennent a cote du reste
+    const char* arrivee = p["a"] | "";
+    policeT(14, false);
+    if (*arrivee) snprintf(t, sizeof t, "%s > %s", (const char*)(p["m"] | ""), arrivee); else snprintf(t, sizeof t, "%s", (const char*)(p["m"] | ""));
+    int wi = largeurTexte(t);
+    if (xr - x - wi - 12 >= (dessous ? 0 : wDest)) { texteDroite(xr, base, t); xr -= wi + 12; }
+    if (dessous) { policeAjustee(17, false, dest, b.w); texteTronque(b.x, base + 6 + aD, dest, b.w); }
+    else { policeT(17, false); texte(x, base, dest); }
+    y += hLigne + marge;
   }
 }
 
@@ -1188,7 +1422,11 @@ void dessinerTableau(JsonVariant e, float vBat) {
     }
     else if (!strcmp(id, "agenda")) widgetAgenda(e["agenda"], b);
     else if (!strcmp(id, "rebours")) widgetRebours(e["rebours"], b);
+    else if (!strcmp(id, "astro")) widgetAstro(e["astro"], b);
+    else if (!strcmp(id, "mois")) widgetMois(e["mois"], b);
+    else if (!strcmp(id, "taches")) widgetTaches(e["taches"], b);
     else if (!strcmp(id, "bus")) widgetBus(e["bus"], b);
+    else if (!strcmp(id, "trains")) widgetTrains(e["trains"], b);
     else if (!strcmp(id, "f1")) widgetF1(e["f1"], b);
     else if (!strcmp(id, "f1meteo")) widgetMeteoCircuit(e["f1"], b);
     else if (!strcmp(id, "courbe")) {

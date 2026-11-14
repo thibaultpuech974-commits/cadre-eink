@@ -160,12 +160,44 @@
   <pre id="busTest" class="cache"></pre>
 </details>
 
+<details class="menu" id="menu-trains">
+  <summary>Prochains trains (SNCF)</summary>
+  <p class="aide">Gare de départ :</p>
+  <div id="trainsGare" class="puces"></div>
+  <input type="text" id="trainsRechGare" placeholder="Chercher une gare, par ex. Nîmes" oninput="chercherGareDepart()">
+  <div class="resultats" id="trainsResGare"></div>
+  <p class="aide" style="margin-top:12px">Destinations (3 au maximum) : seuls les trains directs vers ces gares sont affichés.</p>
+  <div id="trainsVers" class="puces"></div>
+  <input type="text" id="trainsRechVers" placeholder="Ajouter une destination, par ex. Montpellier" oninput="chercherGareVers()">
+  <div class="resultats" id="trainsResVers"></div>
+  <label style="flex-wrap:wrap">Afficher
+    <select id="trainsNb" style="width:auto"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option></select>
+    départs</label>
+  <button style="width:100%;margin-top:8px" onclick="testerTrains()">Voir les prochains trains</button>
+  <pre id="trainsTest" class="cache"></pre>
+  <div class="msg" id="msgTrains"></div>
+  <p class="aide repliable">Le bloc « Prochains trains » (à ajouter dans « Scènes et disposition ») montre l'heure de départ, la destination, l'heure d'arrivée et le retard éventuel. Les horaires viennent de l'API SNCF, qui demande une clé gratuite à enregistrer une fois dans Cloudflare (voir le README, « Prochains trains »). Place plutôt le bloc dans une scène, aux heures où tu prends le train : chaque réveil du cadre compte dans le quota de la clé.</p>
+</details>
+
 <details class="menu" id="menu-rebours">
   <summary>Compte à rebours</summary>
   <p class="aide">Dates à attendre, une par ligne : le nom puis la date. Sans année, la date revient chaque année.</p>
   <textarea id="rTexte" placeholder="Vacances de Noël 19/12/2026&#10;Concours blanc 14/01/2027"></textarea>
   <div class="msg" id="msgRebours"></div>
   <p class="aide repliable">Le bloc « Compte à rebours » (à ajouter dans « Scènes et disposition ») affiche en grand les jours restants avant la date la plus proche (« J-39 », puis « Jour J »), et les suivantes en dessous ou à côté s'il a la place. Une date passée disparaît toute seule. 12 dates au plus.</p>
+</details>
+
+<details class="menu" id="menu-taches">
+  <summary>À faire</summary>
+  <p class="aide">Tâches à afficher dans le bloc « À faire », une par ligne. Efface une ligne quand c'est fait.</p>
+  <textarea id="tTexte" placeholder="Rendre le DM de maths&#10;Réviser la colle de physique"></textarea>
+  <div id="tRappels" class="cache">
+    <p class="aide" id="tRappelsInfo"></p>
+    <ul id="tRappelsListe"></ul>
+    <button type="button" style="width:100%;margin-top:8px" onclick="effacerRappels()">Effacer la liste reçue</button>
+  </div>
+  <div class="msg" id="msgTaches"></div>
+  <p class="aide repliable">Le bloc « À faire » (à ajouter dans « Scènes et disposition ») affiche ces tâches, puis celles de l'app Rappels si un raccourci de l'iPhone les envoie (voir le README, « Raccourci iPhone pour les rappels »). Le raccourci remplace à chaque envoi la liste reçue, sans toucher aux tâches saisies ici. 20 tâches au plus.</p>
 </details>
 
 <details class="menu" id="menu-photo">
