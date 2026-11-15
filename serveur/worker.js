@@ -156,6 +156,18 @@ async function routeEtat(url, env) {
     dev: cfg.dev ? 1 : 0,
   };
   let contenu;
+  // Dernier etat enregistre de cette carte (lu ici : la temperature interieure en a besoin avant la signature)
+  const cleStatut = ecran ? 'statut' + ecran : 'statut';
+  const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
+  // Temperature interieure mesuree par la carte (thermistance), et valeur affichee, au demi-degre. Celle-ci
+  // ne change que si la mesure s'en ecarte d'au moins 0,4 degre : une mesure qui hesite entre deux valeurs
+  // ne fait pas rafraichir l'ecran a chaque reveil.
+  const tiMesure = parseFloat(url.searchParams.get('ti'));
+  const ti = isNaN(tiMesure) || tiMesure < -20 || tiMesure > 60 ? null : Math.round(tiMesure * 10) / 10;
+  let tia = null;
+  if (ti !== null) tia = ancien && typeof ancien.tia === 'number' && Math.abs(ti - ancien.tia) < 0.4 ? ancien.tia : Math.round(ti * 2) / 2;
+  // Page web : la valeur affichee au dernier reveil, si la carte la mesure encore
+  else if (pourInterface && ancien && typeof ancien.tia === 'number' && maintenant - ancien.vu < 3 * 3600e3) tia = ancien.tia;
 
   if (cfg.mode === 'tableau') {
     contenu = await construireTableau(cfg, maintenant, env);
@@ -165,6 +177,8 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
+    // Temperature interieure : dans le bloc Meteo (sur une copie : la meteo vient d'une memoire partagee)
+    else if (tia !== null && ici.has('meteo') && contenu.meteo && !contenu.meteo.erreur) contenu.meteo = Object.assign({}, contenu.meteo, { int: tia });
     for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois', 'taches', 'trains']) if (!ici.has(id)) delete contenu[id];
     // Les blocs « Grand Prix » et « Meteo du circuit » partagent f1 : chacun ne recoit que sa part
     if (!ici.has('f1') && !ici.has('f1meteo')) delete contenu.f1;
@@ -227,8 +241,6 @@ async function routeEtat(url, env) {
     const ev = entier('ev'), ee = entier('ee');
     // Redemarrages anormaux de la carte depuis sa mise sous tension, et cause du dernier
     const pa = entier('pa'), ra = /^[PWBL]$/.test(url.searchParams.get('ra') || '') ? url.searchParams.get('ra') : null;
-    const cleStatut = ecran ? 'statut' + ecran : 'statut';
-    const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
     const nouveau = { vu: maintenant, bat: isNaN(bat) ? null : bat, mode: cfg.mode, r: etat.reveil, sc: etat.scene || null,
       fw: fwCarte || (ancien && ancien.fw) || null, hb: (ancien && ancien.hb) || 0 };
     // Version des reglages que la carte vient de recevoir, et depuis quand : la page affiche "en attente"
@@ -238,6 +250,7 @@ async function routeEtat(url, env) {
     if (pct !== null) nouveau.pct = pct;
     if (crate !== null) nouveau.crate = crate;
     if (ev !== null) { nouveau.ev = ev; nouveau.ee = ee || 0; }
+    if (ti !== null) { nouveau.ti = ti; nouveau.tia = tia; }
     // Plantages : date du dernier (quand le compteur de la carte augmente), pour la page
     if (pa) { nouveau.pa = pa; nouveau.ra = ra; }
     nouveau.pat = (ancien && ancien.pat) || null;
@@ -264,7 +277,7 @@ async function routeEtat(url, env) {
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
       ancien.fw !== nouveau.fw || Math.abs((ancien.r || 0) - nouveau.r) > 60 || ancien.sc !== nouveau.sc || ancien.pat !== nouveau.pat ||
-      ancien.fwko !== nouveau.fwko || ancien.cv !== nouveau.cv ||
+      ancien.fwko !== nouveau.fwko || ancien.cv !== nouveau.cv || ancien.tia !== nouveau.tia ||
       // carte redemarree (bouton RESET, nouveau programme...) : son compteur d'eveil repart de zero
       (ev !== null && typeof ancien.ev === 'number' && ev < ancien.ev) || (nouveau.bat !== null && Math.abs((ancien.bat || 0) - nouveau.bat) >= 0.05) ||
       // debut ou fin de charge : la page le montre tout de suite (ecart d'au moins 1 % par heure, pour
