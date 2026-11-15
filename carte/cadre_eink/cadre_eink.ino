@@ -190,6 +190,8 @@ const float THERM_BETA = 3950;
 const float THERM_ALIM_MV = 3300;      // tension de la broche d'alimentation a l'etat haut
 const float THERM_CORRECTION = 0.0;    // degres ajoutes a la mesure (voir ci-dessus)
 
+float thermMv = 0;                     // derniere tension lue (mV), affichee au moniteur serie pour depanner
+
 // Renvoie la temperature en degres, ou NAN si la mesure n'a pas de sens (thermistance debranchee, fil coupe)
 float lireTemperatureInterieure() {
 #if THERM_PRESENTE
@@ -202,6 +204,7 @@ float lireTemperatureInterieure() {
   // dans leur etat, et le pont consommerait 165 uA toute la nuit s'il restait alimente
   digitalWrite(THERM_ALIM, LOW);
   float mv = somme / 16.0f;
+  thermMv = mv;
   if (mv < 50 || mv > THERM_ALIM_MV - 50) return NAN;
   float r = THERM_R_FIXE * mv / (THERM_ALIM_MV - mv);
   float t = 1.0f / (1.0f / 298.15f + log(r / THERM_R25) / THERM_BETA) - 273.15f + THERM_CORRECTION;
@@ -736,8 +739,10 @@ uint32_t cycle() {
   // Mesuree avant d'allumer le Wi-Fi : moins de bruit sur l'entree analogique
   float tInt = lireTemperatureInterieure();
 #if THERM_PRESENTE
-  if (isnan(tInt)) Serial.println("Temperature interieure : mesure impossible (thermistance branchee ?)");
-  else Serial.printf("Temperature interieure : %.1f degres\n", tInt);
+  // Tension attendue vers 20 degres : 1800 a 1900 mV. Pres de 0 : pont pas alimente (broche 11) ou A5 a la
+  // masse. Pres de 3100 ou plus : thermistance pas reliee a la masse, ou A5 relie directement a la broche 11.
+  if (isnan(tInt)) Serial.printf("Temperature interieure : mesure impossible (%.0f mV lus sur A5, thermistance branchee ?)\n", thermMv);
+  else Serial.printf("Temperature interieure : %.1f degres (%.0f mV)\n", tInt, thermMv);
 #endif
 
   // Batterie presque vide : on le signale une fois, puis on dort longtemps
