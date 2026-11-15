@@ -101,6 +101,7 @@ export default {
       if (chemin === '/api/previsualiser' && m === 'POST') return await routePrevisualiser(req, env);
       if (chemin === '/api/frise' && m === 'POST') return await routeFrise(req, env);
       if (chemin === '/api/apercu.wasm' && m === 'GET') return new Response(APERCU_WASM, { headers: { 'content-type': 'application/wasm', 'cache-control': 'private, max-age=3600' } });
+      if (chemin === '/api/temperature' && m === 'GET') return texte((await env.CADRE.get('temperature')) || '{"pts":[]}');
       if (chemin === '/api/batterie' && m === 'GET') return texte((await env.CADRE.get('batterie' + (url.searchParams.get('ecran') === '1' ? '1' : ''))) || '{"pts":[]}');
       if (chemin === '/api/sauvegarde' && m === 'GET') return await routeSauvegarde(env);
       if (chemin === '/api/sauvegarde' && m === 'POST') return await routeRestaurer(req, env);
@@ -273,6 +274,19 @@ async function routeEtat(url, env) {
         h.pts.push(p);
         await env.CADRE.put(cleH, JSON.stringify(h));
         nouveau.hb = maintenant; historique = true;
+      } catch (e) { /* limite d'ecriture */ }
+    }
+    // Historique de la temperature interieure (page web) : un point par demi-heure, 30 jours
+    // (48 ecritures par jour au plus) ; minutes, dixiemes de degre
+    if (ancien && ancien.ht) nouveau.ht = ancien.ht;
+    if (ti !== null && maintenant - (nouveau.ht || 0) >= 28 * 60000) {
+      try {
+        const h = JSON.parse((await env.CADRE.get('temperature')) || '{"pts":[]}');
+        const debut = Math.floor((maintenant - 30 * 86400e3) / 60000);
+        h.pts = h.pts.filter(p => p[0] >= debut);
+        h.pts.push([Math.floor(maintenant / 60000), Math.round(ti * 10)]);
+        await env.CADRE.put('temperature', JSON.stringify(h));
+        nouveau.ht = maintenant; historique = true;
       } catch (e) { /* limite d'ecriture */ }
     }
     const aEcrire = historique || !ancien || maintenant - ancien.vu >= 10 * 60000 || ancien.mode !== nouveau.mode ||
