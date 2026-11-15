@@ -60,6 +60,11 @@
 #define EPD_PWR       A2          // (sera partagee avec le 2e ecran)
 // Reserve pour le 2e ecran : CS -> 12, RST -> A0, BUSY -> A1
 // Batterie : lue par la jauge MAX17048 integree a la Feather (I2C, adresse 0x36)
+// Temperature interieure : thermistance (10 kOhm a 25 degres, B = 3950) en pont diviseur.
+//   broche 11 -> resistance fixe 10 kOhm -> A5 -> thermistance -> GND, et 100 nF entre A5 et GND
+#define THERM_PRESENTE 1          // 0 = pas de thermistance branchee : rien n'est mesure ni envoye
+#define THERM_ALIM    11          // broche 11 : alimente le pont le temps de la mesure seulement
+#define THERM_MESURE  A5          // GPIO8, sur l'ADC1 (l'ADC2, broches 11 a 20, est gene par le Wi-Fi)
 
 // Dessin de l'image (dimensions, polices, blocs du tableau de bord, pochette...) : voir dessin.h
 #include "dessin.h"
@@ -169,6 +174,41 @@ float lireBatterie() {
   // (plusieurs % par heure), pas pour la consommation du cadre (~ 0,04 % par heure, sous une unite).
   if (v > 2.5f && lireJauge(0x16, crate)) { vitesseJauge = (int16_t)crate * 0.208f; vitesseLue = true; }
   return v;
+}
+
+// ---------------------------------------------------------------------
+//  Temperature interieure (thermistance)
+//
+//  Pont diviseur : la tension lue vaut V = Valim x R / (R_FIXE + R), d'ou R, puis la loi "beta" :
+//  1/T = 1/T25 + ln(R / R25) / B   (T en kelvins, T25 = 298,15 K)
+//  La thermistance est donnee a +/- 5 % : environ 1 degre d'ecart, constant. Pour le corriger, comparer
+//  une fois avec un thermometre fiable et mettre la difference dans THERM_CORRECTION.
+// ---------------------------------------------------------------------
+const float THERM_R_FIXE = 10000;      // resistance fixe du pont (ohms)
+const float THERM_R25 = 10000;         // thermistance a 25 degres (ohms)
+const float THERM_BETA = 3950;
+const float THERM_ALIM_MV = 3300;      // tension de la broche d'alimentation a l'etat haut
+const float THERM_CORRECTION = 0.0;    // degres ajoutes a la mesure (voir ci-dessus)
+
+// Renvoie la temperature en degres, ou NAN si la mesure n'a pas de sens (thermistance debranchee, fil coupe)
+float lireTemperatureInterieure() {
+#if THERM_PRESENTE
+  pinMode(THERM_ALIM, OUTPUT);
+  digitalWrite(THERM_ALIM, HIGH);
+  delay(10);                           // le condensateur de 100 nF se charge en ~2,5 ms a travers le pont
+  uint32_t somme = 0;
+  for (int i = 0; i < 16; i++) somme += analogReadMilliVolts(THERM_MESURE);
+  // Broche remise a LOW avant la veille : gpio_deep_sleep_hold_en (voir eteindreEcran) fige les broches
+  // dans leur etat, et le pont consommerait 165 uA toute la nuit s'il restait alimente
+  digitalWrite(THERM_ALIM, LOW);
+  float mv = somme / 16.0f;
+  if (mv < 50 || mv > THERM_ALIM_MV - 50) return NAN;
+  float r = THERM_R_FIXE * mv / (THERM_ALIM_MV - mv);
+  float t = 1.0f / (1.0f / 298.15f + log(r / THERM_R25) / THERM_BETA) - 273.15f + THERM_CORRECTION;
+  return (t < -20 || t > 60) ? NAN : t;
+#else
+  return NAN;
+#endif
 }
 
 // Connexion rapide : on garde en memoire (pendant la veille) le canal, la borne et
@@ -693,6 +733,12 @@ uint32_t cycle() {
   Serial.printf("Memoire libre : interne %u Ko (plus grand bloc %u Ko), PSRAM %u Ko\n",
                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024, ESP.getFreePsram() / 1024);
+  // Mesuree avant d'allumer le Wi-Fi : moins de bruit sur l'entree analogique
+  float tInt = lireTemperatureInterieure();
+#if THERM_PRESENTE
+  if (isnan(tInt)) Serial.println("Temperature interieure : mesure impossible (thermistance branchee ?)");
+  else Serial.printf("Temperature interieure : %.1f degres\n", tInt);
+#endif
 
   // Batterie presque vide : on le signale une fois, puis on dort longtemps
   if (vBat > 2.5 && vBat < 3.4) {
@@ -715,8 +761,9 @@ uint32_t cycle() {
 
   // 1. Que faut-il afficher ?
   uint8_t* brut = nullptr;
-  char chemin[200];
+  char chemin[220];
   int lg = snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
+  if (!isnan(tInt)) lg += snprintf(chemin + lg, sizeof chemin - lg, "&ti=%.1f", tInt);
   if (pctJauge >= 0) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pct=%.1f", pctJauge);
   if (vitesseLue) lg += snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
   lg += snprintf(chemin + lg, sizeof chemin - lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);

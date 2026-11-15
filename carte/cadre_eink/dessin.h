@@ -433,7 +433,7 @@ void widgetDate(JsonVariant e, Boite b, float vBat) {
 }
 
 void widgetMeteo(JsonVariant m, Boite b) {
-  char t[64];
+  char t[96];
   if (m.isNull() || m["erreur"].is<const char*>()) {
     policeT(25, true);
     texteTronque(b.x, b.y + (b.h + asc()) / 2, "Météo indisponible", b.w);
@@ -476,9 +476,27 @@ void widgetMeteo(JsonVariant m, Boite b) {
   if (avecMinMax) {
     policeT(20, false);
     y += ligneM;
-    if (m["ressenti"].is<int>())
+    // Temperature interieure (thermistance de la carte, renvoyee par le serveur), au demi-degre
+    char ti[12] = "";
+    if (m["int"].is<float>()) {
+      int d = lroundf((float)m["int"] * 10);
+      if (d % 10) snprintf(ti, sizeof ti, "%s%d,%d", d < 0 ? "-" : "", abs(d) / 10, abs(d) % 10);
+      else snprintf(ti, sizeof ti, "%d", d / 10);
+    }
+    // La ligne la plus complete qui tient : le ressenti cede la place en premier
+    bool tient = false;
+    if (ti[0] && m["ressenti"].is<int>()) {
+      snprintf(t, sizeof t, "Intérieur %s°  ·  Min %d°  ·  Max %d°  ·  Ressenti %d°", ti, (int)m["min"], (int)m["max"], (int)m["ressenti"]);
+      tient = largeurTexte(t) <= largTexte;
+    }
+    if (ti[0] && !tient) {
+      snprintf(t, sizeof t, "Intérieur %s°  ·  Min %d°  ·  Max %d°", ti, (int)(m["min"] | 0), (int)(m["max"] | 0));
+      tient = largeurTexte(t) <= largTexte;
+      if (!tient) snprintf(t, sizeof t, "Int. %s°  ·  Min %d°  ·  Max %d°", ti, (int)(m["min"] | 0), (int)(m["max"] | 0));
+    }
+    if (!ti[0] && m["ressenti"].is<int>())
       snprintf(t, sizeof t, "Min %d°  ·  Max %d°  ·  Ressenti %d°", (int)m["min"], (int)m["max"], (int)m["ressenti"]);
-    if (!m["ressenti"].is<int>() || largeurTexte(t) > largTexte)
+    if (!ti[0] && (!m["ressenti"].is<int>() || largeurTexte(t) > largTexte))
       snprintf(t, sizeof t, "Min %d°  ·  Max %d°", (int)(m["min"] | 0), (int)(m["max"] | 0));
     policeAjustee(20, false, t, largTexte);
     texteTronque(xt, y, t, largTexte);
