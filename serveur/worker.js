@@ -178,8 +178,6 @@ async function routeEtat(url, env) {
     contenu.disposition.forEach(d => delete d.n);
     const ici = new Set(contenu.disposition.map(d => d.id));
     if (!['meteo', 'heures', 'jours', 'courbe'].some(id => ici.has(id))) delete contenu.meteo;
-    // Temperature interieure : dans le bloc Meteo (sur une copie : la meteo vient d'une memoire partagee)
-    else if (tia !== null && ici.has('meteo') && contenu.meteo && !contenu.meteo.erreur) contenu.meteo = Object.assign({}, contenu.meteo, { int: tia });
     for (const id of ['agenda', 'bus', 'rebours', 'astro', 'mois', 'taches', 'trains']) if (!ici.has(id)) delete contenu[id];
     // Les blocs « Grand Prix » et « Meteo du circuit » partagent f1 : chacun ne recoit que sa part
     if (!ici.has('f1') && !ici.has('f1meteo')) delete contenu.f1;
@@ -194,6 +192,15 @@ async function routeEtat(url, env) {
       etat.reveil = sc.reveilMin ? calerSurHorloge(Math.max(3, sc.reveilMin) * 60, maintenant) : reveilNuit(cfg, maintenant, etat.reveil);
       if (sc.changement) etat.reveil = Math.min(etat.reveil, Math.max(60, Math.ceil((sc.changement - maintenant) / 1000) + MARGE_REVEIL));
     }
+    // Temperature interieure, dans le bloc Meteo. Quand le rafraichissement complet periodique tombe a ce
+    // reveil (meme calcul que la carte, qui envoie dc : secondes depuis le dernier complet), la valeur
+    // affichee est recalee sur la mesure : l'ecran est redessine de toute facon, et une mesure restee
+    // longtemps a 0,3 degre de la valeur affichee ne la laisse pas fausse indefiniment.
+    const dc = parseInt(url.searchParams.get('dc'), 10);
+    const reveilCarte = Math.min(86400, Math.max(cfg.dev ? 10 : 60, etat.reveil));
+    if (ti !== null && dc >= 0 && dc + reveilCarte > ((cfg.rafraich && cfg.rafraich.completH) || 24) * 3600) tia = Math.round(ti * 2) / 2;
+    // (sur une copie : la meteo vient d'une memoire partagee)
+    if (tia !== null && ici.has('meteo') && contenu.meteo && !contenu.meteo.erreur) etat.meteo = contenu.meteo = Object.assign({}, contenu.meteo, { int: tia });
   } else if (cfg.mode === 'photo') {
     if (!cfg.dev) etat.reveil = reveilNuit(cfg, maintenant, etat.reveil);
     contenu = { p: cfg.photo.version, ecran };

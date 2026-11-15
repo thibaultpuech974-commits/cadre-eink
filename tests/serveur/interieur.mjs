@@ -22,6 +22,15 @@ console.log('mesure qui hésite :', vues.join(' '), '| écritures', ecritures);
 // Vrai changement : nouvelle valeur, nouvelle signature, état réécrit
 e = await reveil(22.0);
 console.log('22,0 ->', e.meteo.int, '| signature changée', e.sig !== sig, '| écritures', ecritures);
+// Mesure restée longtemps à 0,3 °C de la valeur affichée : recalée au rafraîchissement complet périodique
+// (toutes les 24 h par défaut ; dc = secondes depuis le dernier complet, envoyées par la carte), pas avant
+const suite = [];
+for (const dc of ['', '&dc=3600', '&dc=80000', '&dc=86000', '&dc=0']) suite.push((await reveil(22.3, dc)).meteo.int);
+console.log('22,3 affiché 22 : sans dc, 1 h, 22 h, complet dû, après ->', suite.join(' '));
+await post({ rafraich: { completH: 6 } });
+e = await reveil(22.8, '&dc=3600'); const e6 = await reveil(22.8, '&dc=21500');
+console.log('complet toutes les 6 h : 1 h ->', e.meteo.int, '| complet dû ->', e6.meteo.int);
+await post({ rafraich: { completH: 24 } });
 // Mesures absurdes : ignorées
 pas = 1;
 e = await reveil(95); const e2 = await reveil('abc');

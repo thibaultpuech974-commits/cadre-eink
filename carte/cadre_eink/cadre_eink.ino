@@ -768,7 +768,9 @@ uint32_t cycle() {
   uint8_t* brut = nullptr;
   char chemin[220];
   int lg = snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
-  if (!isnan(tInt)) lg += snprintf(chemin + lg, sizeof chemin - lg, "&ti=%.1f", tInt);
+  // dc : secondes depuis le dernier rafraichissement complet. Le serveur sait ainsi quand le complet
+  // periodique tombe a ce reveil, et en profite pour recaler la temperature affichee sur la mesure.
+  if (!isnan(tInt)) lg += snprintf(chemin + lg, sizeof chemin - lg, "&ti=%.1f&dc=%lu", tInt, (unsigned long)secondesDepuisComplet);
   if (pctJauge >= 0) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pct=%.1f", pctJauge);
   if (vitesseLue) lg += snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
   lg += snprintf(chemin + lg, sizeof chemin - lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);
