@@ -18,13 +18,14 @@ import TRAINS from './page/trains.html';
 import PHOTO from './page/photo.html';
 import PROGRAMME from './page/programme.html';
 import BATTERIE from './page/batterie.html';
+import TEMPERATURE from './page/temperature.html';
 import JETONS from './page/jetons.html';
 import ALERTES from './page/alertes.html';
 import SAUVEGARDE from './page/sauvegarde.html';
 import PREVISU from './page/previsu.html';
 import MENUS from './page/menus.html';
 
-const SCRIPTS = [COMMUN, DISPOSITION, ETAT, REGLAGES, BUS, TRAINS, PHOTO, PROGRAMME, BATTERIE, ALERTES, JETONS, SAUVEGARDE, PREVISU, MENUS];
+const SCRIPTS = [COMMUN, DISPOSITION, ETAT, REGLAGES, BUS, TRAINS, PHOTO, PROGRAMME, BATTERIE, TEMPERATURE, ALERTES, JETONS, SAUVEGARDE, PREVISU, MENUS];
 
 // (fonctions de remplacement : un "$" du texte inséré n'est alors pas interprété)
 export const PAGE = STRUCTURE.replace('<!-- STYLE -->', () => STYLE).replace('<!-- SCRIPTS -->', () => SCRIPTS.join(''));

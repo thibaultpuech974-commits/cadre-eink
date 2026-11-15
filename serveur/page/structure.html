@@ -294,6 +294,17 @@
   <p class="aide" id="resumeBatterie">Chargement…</p>
 </details>
 
+<details class="menu" id="menu-temperature">
+  <summary>Température intérieure</summary>
+  <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
+    <button data-jours-temp="1" onclick="dessinerTemperature(1)">24 heures</button>
+    <button data-jours-temp="7" onclick="dessinerTemperature(7)">7 jours</button>
+    <button data-jours-temp="30" onclick="dessinerTemperature(30)">30 jours</button>
+  </div>
+  <canvas id="courbeTemperature" style="width:100%;height:220px;display:block"></canvas>
+  <p class="aide" id="resumeTemperature">Chargement…</p>
+</details>
+
 <details class="menu" id="menu-alertes">
   <summary>Alertes sur l'iPhone</summary>
   <label><input type="checkbox" id="alActif"> Me prévenir par une notification quand quelque chose ne va pas</label>

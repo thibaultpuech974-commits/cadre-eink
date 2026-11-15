@@ -36,3 +36,19 @@ console.log('page :', ui.meteo.int, '| après un réveil sans mesure :', 'int' i
 await post({ disposition: [{ id: 'date', x: 0, y: 0, w: 12, h: 1 }, { id: 'jours', x: 0, y: 1, w: 12, h: 2 }] });
 e = await reveil(20);
 console.log('sans le bloc Météo :', e.meteo && 'int' in e.meteo ? 'présente (erreur)' : 'absente');
+// Historique pour la page web : un point par demi-heure, 30 jours, sans écriture de plus entre deux points
+kv.delete('temperature'); kv.delete('statut');
+let ecrituresH = 0; const set1 = kv.set.bind(kv);
+kv.set = (k, v) => { if (k === 'temperature') ecrituresH++; return set1(k, v); };
+const t1 = Date.UTC(2026, 10, 16, 0, 0);
+for (let i = 0; i < 144; i++) { horloge(new Date(t1 + i * 600e3).toISOString()); await req('/api/etat?bat=4.05&ti=' + (20 + 2 * Math.sin(i / 144 * 2 * Math.PI)).toFixed(1)); }
+let h = JSON.parse(await (await req('/api/temperature')).text());
+console.log('24 h, 144 réveils :', ecrituresH, 'écritures,', h.pts.length, 'points, de', Math.min(...h.pts.map(p => p[1])), 'à', Math.max(...h.pts.map(p => p[1])), '| écart', h.pts[1][0] - h.pts[0][0], 'min');
+// Réveils sans mesure : aucun point ; 40 jours plus tard : les vieux points sont supprimés
+horloge(new Date(t1 + 2 * 86400e3).toISOString()); await req('/api/etat?bat=4.05');
+const avant = JSON.parse(kv.get('temperature').v).pts.length;
+horloge(new Date(t1 + 40 * 86400e3).toISOString()); await req('/api/etat?bat=4.05&ti=18.2');
+h = JSON.parse(kv.get('temperature').v);
+console.log('sans mesure :', avant === 48 ? 'aucun point' : 'point ajouté (erreur)', '| après 40 jours :', h.pts.length, 'point', JSON.stringify(h.pts[0].slice(1)));
+kv.delete('temperature');
+console.log('rien enregistré :', await (await req('/api/temperature')).text());

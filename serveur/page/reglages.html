@@ -8,6 +8,7 @@ function charger() {
     viderHistorique();
     afficherStatut(d.statut, d.maintenant, d.statut1);
     if ($('menu-batterie').open) chargerBatterie();     // menu reste ouvert depuis la derniere visite
+    if ($('menu-temperature').open) chargerTemperature();
     if ($('menu-jetons').open) chargerJetons();
     if ($('menu-alertes').open) chargerEtatAlertes();
     if ($('menu-agenda').open) verifierCalendriers();

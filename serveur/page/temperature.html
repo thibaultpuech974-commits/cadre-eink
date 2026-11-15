@@ -1,0 +1,108 @@
+<!-- Page web du cadre : menu Température intérieure (courbe des mesures de la thermistance de la carte) -->
+<script>
+// --- Historique de la temperature interieure : un point par demi-heure, envoye par la carte ---
+var histoTemp = null, joursTemp = 7;
+function chargerTemperature() {
+  return api('/api/temperature').then(function (r) { return r.json(); }).catch(function () { return { pts: [] }; })
+    .then(function (h) { histoTemp = h; dessinerTemperature(joursTemp); });
+}
+function degres(dixiemes) { return (dixiemes / 10).toFixed(1).replace('.', ',') + ' °C'; }
+function dessinerTemperature(jours) {
+  joursTemp = jours;
+  var b = document.querySelectorAll('[data-jours-temp]');
+  for (var i = 0; i < b.length; i++) b[i].classList.toggle('actif', +b[i].getAttribute('data-jours-temp') === jours);
+  if (!histoTemp) return;
+  var cv = $('courbeTemperature'), r = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W) {                                        // page pas encore affichee : on reessaie un peu plus tard
+    if ($('menu-temperature').open) setTimeout(function () { dessinerTemperature(jours); }, 200);
+    return;
+  }
+  cv.width = W * r; cv.height = H * r;
+  var ctx = cv.getContext('2d'); ctx.scale(r, r);
+  var css = getComputedStyle(document.documentElement);
+  var cTexte = css.getPropertyValue('--texte').trim(), cDoux = css.getPropertyValue('--doux').trim(), cTrait = css.getPropertyValue('--trait').trim();
+  var g = 46, d = 8, hh = 10, bas = 22, fin = Date.now() / 60000, debut = fin - jours * 1440;
+  var pts = histoTemp.pts.filter(function (q) { return q[0] >= debut; });
+  // Echelle : degres entiers autour des mesures, 4 degres d'ecart au moins (sinon le bruit de mesure
+  // remplirait toute la hauteur), et un pas de graduation qui laisse 6 lignes au plus
+  var min = 190, max = 230;
+  if (pts.length) { min = max = pts[0][1]; pts.forEach(function (q) { min = Math.min(min, q[1]); max = Math.max(max, q[1]); }); }
+  var yMin = Math.floor(min / 10 - 0.5), yMax = Math.ceil(max / 10 + 0.5);
+  while (yMax - yMin < 4) { if ((yMax - yMin) % 2) yMax++; else yMin--; }
+  var pasY = yMax - yMin <= 6 ? 1 : yMax - yMin <= 12 ? 2 : yMax - yMin <= 30 ? 5 : 10;
+  yMin = Math.floor(yMin / pasY) * pasY; yMax = Math.ceil(yMax / pasY) * pasY;
+  var X = function (m) { return g + (m - debut) / (fin - debut) * (W - g - d); };
+  var Y = function (t) { return hh + (yMax - t) / (yMax - yMin) * (H - hh - bas); };
+  ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.lineWidth = 1;
+  for (var t = yMin; t <= yMax; t += pasY) {
+    ctx.strokeStyle = cTrait; ctx.beginPath(); ctx.moveTo(g, Y(t) + 0.5); ctx.lineTo(W - d, Y(t) + 0.5); ctx.stroke();
+    ctx.fillStyle = cDoux; ctx.textAlign = 'right'; ctx.fillText(t + ' °C', g - 6, Y(t) + 4);
+  }
+  ctx.textAlign = 'center';
+  if (jours === 1) {
+    // Sur 24 heures : une graduation toutes les 3 ou 6 heures (heure du navigateur)
+    var pasH = W - g - d >= 420 ? 3 : 6, h0 = new Date(debut * 60000); h0.setMinutes(0, 0, 0);
+    for (var dh = new Date(h0); dh.getTime() < fin * 60000; dh.setHours(dh.getHours() + 1)) {
+      if (dh.getTime() < debut * 60000 || dh.getHours() % pasH) continue;
+      var xh = X(dh.getTime() / 60000);
+      ctx.strokeStyle = cTrait; ctx.beginPath(); ctx.moveTo(xh + 0.5, hh); ctx.lineTo(xh + 0.5, H - bas); ctx.stroke();
+      ctx.fillStyle = cDoux; ctx.fillText(dh.getHours() + ' h', xh, H - 6);
+    }
+  } else {
+    // Jours en bas (minuit, heure du navigateur)
+    var j0 = new Date(debut * 60000); j0.setHours(24, 0, 0, 0);
+    var pas = Math.max(1, Math.ceil(52 * jours / (W - g - d)));          // assez de place pour chaque date
+    for (var dj = new Date(j0), k = 0; dj.getTime() < fin * 60000; dj.setDate(dj.getDate() + 1), k++) {
+      if (k % pas) continue;
+      var x = X(dj.getTime() / 60000);
+      ctx.strokeStyle = cTrait; ctx.beginPath(); ctx.moveTo(x + 0.5, hh); ctx.lineTo(x + 0.5, H - bas); ctx.stroke();
+      ctx.fillStyle = cDoux; ctx.fillText(['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'][dj.getDay()] + ' ' + dj.getDate(), x, H - 6);
+    }
+  }
+  ctx.strokeStyle = cTexte; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  pts.forEach(function (q, i) {
+    var x = X(q[0]), y = Y(q[1] / 10);
+    if (i && q[0] - pts[i - 1][0] <= 180) ctx.lineTo(x, y); else ctx.moveTo(x, y);   // trou > 3 h : pas de trait
+  });
+  ctx.stroke();
+  // Une mesure isolee (la premiere, ou entre deux trous) ne trace aucun trait : un point
+  ctx.fillStyle = cTexte;
+  pts.forEach(function (q, i) {
+    var seulAvant = !i || q[0] - pts[i - 1][0] > 180, seulApres = i === pts.length - 1 || pts[i + 1][0] - q[0] > 180;
+    if (seulAvant && seulApres) { ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1] / 10), 2.5, 0, 2 * Math.PI); ctx.fill(); }
+  });
+  var texte = [];
+  // Derniere mesure : celle du dernier reveil si la carte la mesure encore, sinon le dernier point
+  var st = statutCourant && statutCourant.s, tous = histoTemp.pts;
+  if (st && typeof st.ti === 'number') texte.push('Dernière mesure : ' + degres(st.ti * 10) + ', ' + duree(Date.now() - st.vu) + '.');
+  else if (tous.length) texte.push('Dernière mesure : ' + degres(tous[tous.length - 1][1]) + ', ' + duree(Date.now() - tous[tous.length - 1][0] * 60000) +
+    '. La carte ne mesure plus la température.');
+  if (!tous.length) texte.push('Pas encore de mesure. La carte envoie la température de sa thermistance à chaque réveil ; un point est gardé toutes les 30 min.');
+  else if (!pts.length) texte.push('Aucune mesure sur cette période.');
+  else {
+    var somme = 0; pts.forEach(function (q) { somme += q[1]; });
+    texte.push('Sur la période : de ' + degres(min) + ' à ' + degres(max) + ', moyenne ' + degres(somme / pts.length) + '.');
+  }
+  $('resumeTemperature').textContent = texte.join('\n');
+  $('resumeTemperature').style.whiteSpace = 'pre-line';
+}
+// A l'ouverture du menu (si les reglages sont deja charges ; sinon, charger() s'en occupe)
+$('menu-temperature').addEventListener('toggle', function () { if (this.open && config) chargerTemperature(); });
+// Comme la courbe de la batterie : le dessin garde les couleurs du theme et la largeur du moment ou il est fait
+(function () {
+  var redessiner = function () { if (histoTemp && $('menu-temperature').open) dessinerTemperature(joursTemp); };
+  try {
+    var sombre = window.matchMedia('(prefers-color-scheme: dark)');
+    if (sombre.addEventListener) sombre.addEventListener('change', redessiner); else if (sombre.addListener) sombre.addListener(redessiner);
+  } catch (e) {}
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) redessiner(); });
+  window.addEventListener('pageshow', redessiner);
+  var largeur = 0, attente = null;
+  window.addEventListener('resize', function () {
+    var w = $('courbeTemperature').clientWidth;
+    if (!w || w === largeur) return;
+    largeur = w; clearTimeout(attente); attente = setTimeout(redessiner, 150);
+  });
+})();
+</script>
