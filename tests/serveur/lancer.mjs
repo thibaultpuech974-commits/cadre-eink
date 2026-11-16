@@ -74,7 +74,8 @@ const ATTENDU = {
     /rien enregistré : \{"pts":\[\]\}/],
   'batterie.mjs': [/288 réveils : 48 écritures, 48 points, de 4100 à 3904 mV/, /après 40 jours : 1 point/, /sans mesure : rien enregistré/,
     /jauge : état 85\.3 12\.5 \| point \[4050,853,125\]/, /fin de charge enregistrée : 0$/m, /valeurs bornées : 110 -200/, /seuil hésitant, 20 réveils en 10 min : 1 écriture\(s\)/,
-    /éveil : état 123456 45678 \| point \[4050,853,-2,1235,457\]/, /éveil sans jauge : point \[4050,null,null,20,9\]/],
+    /éveil : état 123456 45678 \| point \[4050,853,-2,1235,457\]/, /éveil sans jauge : point \[4050,null,null,20,9\]/,
+    /versions : 2 entrées \| 0 h 20261101-120000 ; 2 h 20261117-090000/, /sans version : pas de liste/],
   'rafraichissement.mjs': [/démarrage +: N +\| écran juste : true/, /image identique +: R +\| écran juste : true/,
     /température +: P \| zones 96,200 64x40 \| 330 octets \| écran juste : true/,
     /deux zones +: P \| zones 16,30 24x20 ; 800,600 80x30 \| \d+ octets \| écran juste : true/,
@@ -148,7 +149,9 @@ const ATTENDU = {
     /deux jours après : charge ven\. 22:00 -> sam\. 00:00 \| autonomie 1\.0 %\/jour/, /charge lente : mar\. 08:00 -> mer\. 03:00$/m,
     /sans charge : aucune/, /après un trou : 1\.9 %\/jour/, /jauge : charge lun\. 23:00 -> mar\. 01:00 \| autonomie 1\.0 %\/jour/,
     /presque pleine : mer\. 10:00 -> mer\. 13:00 \(en cours\)/,
-    /éveil : 1 min 58 s par jour, dont 47 s d'écran \| sans compteurs : null/],
+    /éveil : 1 min 58 s par jour, dont 47 s d'écran \| sans compteurs : null/,
+    /programme : sans versions 1\.1 %\/jour \| avec 0\.7 %\/jour ± 0\.[1-4] sur 3\.0 jours, programme true \| une seule version : false/,
+    /programme tout neuf : null/],
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
 let echecs = 0;

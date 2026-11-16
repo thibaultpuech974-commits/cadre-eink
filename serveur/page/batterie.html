@@ -11,16 +11,31 @@ function chargerBatterie() {
 // Les 6 h qui suivent une charge sont ignorees : la tension y redescend d'elle-meme (relaxation de la
 // batterie) sans qu'elle se vide, ce qui ferait croire a une consommation plusieurs fois trop forte.
 // Apres un trou de plus de 12 h (batterie debranchee, carte changee), on repart des mesures suivantes.
-function estimation(pts) {
-  var debut = 0, ch = periodesCharge(pts);
+// Nouveau programme sur la carte (fw : [minutes, version] enregistres par le serveur) : on repart de son
+// premier point, sinon une correction de la consommation ne se verrait que lentement, melangee a l'ancien.
+// marge : la pente est sure a peu pres a +/- marge pres (% par jour). Deux sources : la dispersion des
+// mesures autour de la droite (deux ecarts-types), et l'erreur lente de la jauge, qui deduit le pourcentage
+// de la tension avec un modele de batterie generique (de l'ordre de 1 % sur la periode).
+function estimation(pts, fw) {
+  var debut = 0, ch = periodesCharge(pts), coupeProgramme = -1;
   if (ch.length) { var apres = ch[ch.length - 1][1] + 6 * 60; while (debut < pts.length && pts[debut][0] < apres) debut++; }
+  if (fw && fw.length > 1) {
+    var dp = fw[fw.length - 1][0], j = 0;
+    while (j < pts.length && pts[j][0] < dp) j++;
+    if (j > debut) debut = coupeProgramme = j;
+  }
   for (var i = debut + 1; i < pts.length; i++) if (pts[i][0] - pts[i - 1][0] > 720) debut = i;
   var p = pts.slice(debut).map(function (q) { return [q[0] / 1440, pctPoint(q)]; });
   if (p.length < 6 || p[p.length - 1][0] - p[0][0] < 0.5) return null;
   var n = p.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
   p.forEach(function (q) { sx += q[0]; sy += q[1]; sxx += q[0] * q[0]; sxy += q[0] * q[1]; });
   var pente = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-  return { pente: pente, depuis: p[0][0], actuel: Math.round(p[n - 1][1]) };
+  var origine = (sy - pente * sx) / n, residus = 0;
+  p.forEach(function (q) { var r = q[1] - origine - pente * q[0]; residus += r * r; });
+  var dispersionX = sxx - sx * sx / n, jours = p[n - 1][0] - p[0][0];
+  var ecartType = n > 2 && dispersionX > 0 ? Math.sqrt(residus / (n - 2) / dispersionX) : 0;
+  return { pente: pente, depuis: p[0][0], actuel: Math.round(p[n - 1][1]), jours: jours,
+    marge: Math.sqrt(4 * ecartType * ecartType + 1 / (jours * jours)), programme: coupeProgramme === debut };
 }
 // Temps d'eveil et d'ecran par jour sur les dernieres 24 h, d'apres les compteurs cumules de la carte
 // (5e et 6e valeurs des points, en dixiemes de seconde). Un compteur qui baisse = carte redemarree.
@@ -153,16 +168,24 @@ function dessinerBatterie(jours) {
       var fin = h.pts.filter(function (q) { return q[0] === dc[1]; })[0];
       texte.push(nom + 'dernière recharge ' + duree(Date.now() - dc[1] * 60000) + ' (jusqu\'à ' + Math.round(pctPoint(fin)) + ' %).');
     } else if (h.pts.length) texte.push(nom + 'pas de recharge sur les 30 derniers jours.');
-    var e = estimation(h.pts);
+    var e = estimation(h.pts, h.fw);
+    // Programme de la carte change depuis moins d'une demi-journee : l'estimation repart de zero
+    var fwRecent = h.fw && h.fw.length > 1 && Date.now() / 60000 - h.fw[h.fw.length - 1][0] < 720;
+    var virgule = function (x) { return x.toFixed(1).replace('.', ','); };
     if (enCharge) { /* pas d'autonomie pendant une charge */ }
     else if (!h.pts.length) texte.push(nom + 'pas encore de mesure (un point par heure).');
+    else if (!e && fwRecent) texte.push(nom + "nouveau programme sur la carte : autonomie estimée après une demi-journée de mesures.");
     else if (!e) texte.push(nom + (dc ? "autonomie estimée une fois la tension stabilisée, environ 18 h après la recharge."
       : "pas encore assez de mesures pour estimer l'autonomie (une demi-journée)."));
     else if (e.pente >= -0.2) texte.push(nom + 'la batterie ne baisse presque pas (' + e.actuel + ' %).');
     else {
       var restant = e.actuel / -e.pente;
-      texte.push(nom + 'environ ' + (-e.pente).toFixed(1).replace('.', ',') + ' % par jour : il reste à peu près ' +
+      texte.push(nom + 'environ ' + virgule(-e.pente) + ' % par jour (± ' + virgule(Math.max(0.1, e.marge)) + ') : il reste à peu près ' +
         (restant < 2 ? Math.round(restant * 24) + ' heures' : Math.round(restant) + ' jours') + ' (' + e.actuel + ' %).');
+      // D'ou part le calcul, quand c'est la mise a jour du programme : la marge diminue avec les jours
+      if (e.programme) texte.push(nom + 'calcul depuis le programme installé le ' +
+        new Date(e.depuis * 86400e3).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) +
+        ' (' + virgule(e.jours) + ' jour' + (e.jours >= 2 ? 's' : '') + ' de mesures).');
     }
     // Temps passe hors veille : le meilleur indicateur de consommation sans multimetre
     var ev = eveilParJour(h.pts);
