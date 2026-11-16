@@ -617,6 +617,14 @@ bool ecranEnAttente = false;
 void dormir(uint32_t secondes) {
   fermerConnexion();
   if (WiFi.getMode() != WIFI_OFF) { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
+#ifdef NEOPIXEL_POWER
+  // La LED NeoPixel n'est jamais utilisee, mais son alimentation n'etait jamais coupee non plus : la broche
+  // restait libre, et une NeoPixel eteinte mais alimentee consomme de l'ordre du milliampere.
+  pinMode(NEOPIXEL_POWER, OUTPUT);
+  digitalWrite(NEOPIXEL_POWER, !NEOPIXEL_POWER_ON);
+  gpio_hold_en((gpio_num_t)NEOPIXEL_POWER);
+  gpio_deep_sleep_hold_en();
+#endif
 #ifdef PIN_I2C_POWER
   // Bus I2C (resistances de tirage, prise STEMMA QT) coupe pendant la veille. Sans cela, la broche
   // restait a HIGH, et gpio_deep_sleep_hold_en (voir eteindreEcran) pouvait la figer ainsi toute la nuit.
