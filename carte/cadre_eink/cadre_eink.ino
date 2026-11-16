@@ -511,7 +511,11 @@ static char envoyerApercu(int rotation, uint8_t** plan, int* taillePlan) {
   return type;
 }
 
+// Broches de commande de l'ecran, mises a LOW pendant la veille (voir eteindreEcran)
+const uint8_t BROCHES_ECRAN[] = { EPD_CS, EPD_DC, EPD_RST, MOSI, SCK };
+
 void allumerEcran(bool nettoyage) {
+  for (uint8_t b : BROCHES_ECRAN) gpio_hold_dis((gpio_num_t)b);
   gpio_hold_dis((gpio_num_t)EPD_PWR);
   pinMode(EPD_PWR, OUTPUT);
   digitalWrite(EPD_PWR, HIGH);
@@ -524,6 +528,11 @@ void allumerEcran(bool nettoyage) {
 
 void eteindreEcran() {
   display.hibernate();
+  // Apres hibernate, CS (et RST) restent a HIGH : une fois l'ecran coupe, ces broches figees par
+  // gpio_deep_sleep_hold_en l'alimenteraient a l'envers, par les diodes de protection de sa carte
+  // pilote, toute la veille. On les met a LOW avant de couper. display.init (allumerEcran) relance le SPI.
+  SPI.end();
+  for (uint8_t b : BROCHES_ECRAN) { pinMode(b, OUTPUT); digitalWrite(b, LOW); }
   digitalWrite(EPD_PWR, LOW);
   gpio_hold_en((gpio_num_t)EPD_PWR);
   gpio_deep_sleep_hold_en();
@@ -608,6 +617,14 @@ bool ecranEnAttente = false;
 void dormir(uint32_t secondes) {
   fermerConnexion();
   if (WiFi.getMode() != WIFI_OFF) { WiFi.disconnect(true); WiFi.mode(WIFI_OFF); }
+#ifdef NEOPIXEL_POWER
+  // La LED NeoPixel n'est jamais utilisee, mais son alimentation n'etait jamais coupee non plus : la broche
+  // restait libre, et une NeoPixel eteinte mais alimentee consomme de l'ordre du milliampere.
+  pinMode(NEOPIXEL_POWER, OUTPUT);
+  digitalWrite(NEOPIXEL_POWER, !NEOPIXEL_POWER_ON);
+  gpio_hold_en((gpio_num_t)NEOPIXEL_POWER);
+  gpio_deep_sleep_hold_en();
+#endif
 #ifdef PIN_I2C_POWER
   // Bus I2C (resistances de tirage, prise STEMMA QT) coupe pendant la veille. Sans cela, la broche
   // restait a HIGH, et gpio_deep_sleep_hold_en (voir eteindreEcran) pouvait la figer ainsi toute la nuit.
