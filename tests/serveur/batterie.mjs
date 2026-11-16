@@ -58,3 +58,17 @@ kv.delete('batterie');
 horloge(new Date(t0 + 45 * 86400e3).toISOString());
 await req('/api/etat?bat=4.05&ev=2000&ee=900');
 console.log('éveil sans jauge : point', JSON.stringify(JSON.parse(kv.get('batterie').v).pts.at(-1).slice(1)));
+// Versions du programme de la carte : la première notée part de la plus ancienne mesure (pas de coupure au
+// déploiement), un changement de version ajoute une entrée, une même version n'en ajoute pas
+kv.delete('batterie'); kv.delete('statut');
+for (let i = 0; i < 4; i++) {
+  horloge(new Date(t0 + 46 * 86400e3 + i * 3600e3).toISOString());
+  await req('/api/etat?bat=4.05&pct=80&fw=' + (i < 2 ? '20261101-120000' : '20261117-090000'));
+}
+h = JSON.parse(kv.get('batterie').v);
+console.log('versions :', h.fw.length, 'entrées |', h.fw.map(v => (v[0] - h.pts[0][0]) / 60 + ' h ' + v[1]).join(' ; '));
+// Sans version envoyée (ancien programme) : pas de liste
+kv.delete('batterie'); kv.delete('statut');
+horloge(new Date(t0 + 47 * 86400e3).toISOString());
+await req('/api/etat?bat=4.05&pct=80');
+console.log('sans version :', JSON.parse(kv.get('batterie').v).fw === undefined ? 'pas de liste' : 'liste (erreur)');

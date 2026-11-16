@@ -69,3 +69,18 @@ const eveil = [];
 for (let k = 0; k < 24; k++) eveil.push([min('2026-11-08T00:00+01:00') + k * 60, 4050, 800, 0, k < 12 ? 50 * k : 30 + 50 * (k - 12), k < 12 ? 20 * k : 10 + 20 * (k - 12)]);
 const e7 = eveilParJour(eveil);
 console.log('éveil :', enMinSec(e7.eveil), 'par jour, dont', enMinSec(e7.ecran), "d'écran | sans compteurs :", eveilParJour(jauge));
+
+// 8. Nouveau programme sur la carte : 3 jours à 1,5 % par jour (fuite), puis le programme corrigé, 3 jours à
+//    0,7 % par jour. Sans les versions, la droite mélange les deux ; avec, elle repart du nouveau programme
+const prog = [], debutProg = min('2026-11-10T00:00+01:00'), changement = debutProg + 3 * 1440;
+for (let k = 0; k <= 144; k++) {
+  const t = debutProg + k * 60, j = (t - debutProg) / 1440;
+  const pct = j <= 3 ? 90 - 1.5 * j : 90 - 4.5 - 0.7 * (j - 3);
+  prog.push([t, 4000, Math.round(pct * 10) + bruit(2), -1]);
+}
+const fwProg = [[debutProg, '20261101-120000'], [changement, '20261117-090000']];
+const e8 = estimation(prog, fwProg), e8sans = estimation(prog);
+console.log('programme : sans versions', (-e8sans.pente).toFixed(1), '%/jour | avec', (-e8.pente).toFixed(1), '%/jour ± ' + e8.marge.toFixed(1) +
+  ' sur', e8.jours.toFixed(1), 'jours, programme', e8.programme, '| une seule version :', estimation(prog, fwProg.slice(0, 1)).programme);
+// Juste après le changement (moins d'une demi-journée) : pas encore d'estimation
+console.log('programme tout neuf :', estimation(prog.filter(q => q[0] <= changement + 360), fwProg));

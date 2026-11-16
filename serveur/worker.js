@@ -279,6 +279,19 @@ async function routeEtat(url, env) {
         if (pct !== null || ev !== null) p.push(pct !== null ? Math.round(pct * 10) : null, crate !== null ? Math.round(crate * 10) : null);
         if (ev !== null) p.push(Math.round(ev / 100), Math.round((ee || 0) / 100));
         h.pts.push(p);
+        // Versions du programme de la carte : [minutes du premier point, version]. La page estime la
+        // consommation depuis la derniere, pour ne pas melanger deux programmes (une correction de la veille
+        // ne se verrait sinon que lentement). A la premiere version notee, la plus ancienne mesure sert de
+        // depart : aucune coupure n'apparait le jour du deploiement de ce suivi.
+        if (fwCarte) {
+          if (!Array.isArray(h.fw)) h.fw = [];
+          if (!h.fw.length) h.fw.push([h.pts[0][0], fwCarte]);
+          else if (h.fw[h.fw.length - 1][1] !== fwCarte) h.fw.push([p[0], fwCarte]);
+          // 30 jours, comme les points, en gardant la version en cours au debut de la periode
+          let k = 0;
+          while (k + 1 < h.fw.length && h.fw[k + 1][0] <= debut) k++;
+          h.fw = h.fw.slice(k);
+        }
         await env.CADRE.put(cleH, JSON.stringify(h));
         nouveau.hb = maintenant; historique = true;
       } catch (e) { /* limite d'ecriture */ }
