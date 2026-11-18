@@ -84,3 +84,12 @@ console.log('programme : sans versions', (-e8sans.pente).toFixed(1), '%/jour | a
   ' sur', e8.jours.toFixed(1), 'jours, programme', e8.programme, '| une seule version :', estimation(prog, fwProg.slice(0, 1)).programme);
 // Juste après le changement (moins d'une demi-journée) : pas encore d'estimation
 console.log('programme tout neuf :', estimation(prog.filter(q => q[0] <= changement + 360), fwProg));
+
+// 9. Vitesse de jauge isolée au-dessus de +2 %/h (jauge qui reprend après un arrêt, sans chargeur) : pas une
+//    charge. Deux mesures de suite : une charge. La toute dernière seule : une charge qui commence.
+const isole = [], t9 = min('2026-11-18T00:00+01:00');
+for (let k = 0; k < 24; k++) isole.push([t9 + k * 60, 3950 - k, 900 - k, k === 10 ? 23 : -1]);
+const deuxDeSuite = isole.map((q, k) => k === 11 ? [q[0], q[1], q[2], 21] : q);
+const derniere = isole.map((q, k) => k === 23 ? [q[0], q[1], q[2], 25] : (k === 10 ? [q[0], q[1], q[2], -1] : q));
+console.log('vitesse isolée :', periodesCharge(isole).length, 'charge | deux de suite :', periodesCharge(deuxDeSuite).length,
+  '| dernière seule :', periodesCharge(derniere).length);

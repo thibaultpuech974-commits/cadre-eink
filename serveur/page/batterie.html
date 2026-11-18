@@ -81,11 +81,14 @@ function periodesCharge(pts) {
     i = Math.max(max, i + 1);
   }
   // Avec la jauge (4e valeur : vitesse en dixiemes de % par heure), toute mesure faite pendant une charge
-  // (au moins +2 % par heure) en fait partie, depuis la mesure precedente
+  // (au moins +2 % par heure) en fait partie, depuis la mesure precedente. Il en faut deux de suite : une
+  // vitesse isolee peut etre fausse (jauge qui reprend apres un arret), et une vraie charge dure des heures.
+  // Une fausse charge ferait aussi repartir l'estimation de l'autonomie.
   for (var a = 0; a < pts.length; a++) {
     if (!(pts[a][3] >= 20)) continue;
     var b = a;
     while (b + 1 < pts.length && pts[b + 1][3] >= 20 && pts[b + 1][0] - pts[b][0] <= 300) b++;
+    if (b === a && b < pts.length - 1) continue;   // isolee (sauf la derniere : charge qui commence)
     res.push([a && pts[a][0] - pts[a - 1][0] <= 300 ? pts[a - 1][0] : pts[a][0], pts[b][0], b === pts.length - 1]);
     a = b;
   }
