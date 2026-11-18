@@ -151,7 +151,8 @@ const ATTENDU = {
     /presque pleine : mer\. 10:00 -> mer\. 13:00 \(en cours\)/,
     /éveil : 1 min 58 s par jour, dont 47 s d'écran \| sans compteurs : null/,
     /programme : sans versions 1\.1 %\/jour \| avec 0\.7 %\/jour ± 0\.[1-4] sur 3\.0 jours, programme true \| une seule version : false/,
-    /programme tout neuf : null/],
+    /programme tout neuf : null/,
+    /vitesse isolée : 0 charge \| deux de suite : 1 \| dernière seule : 1/],
 };
 const INTERDIT = [/fetch inattendu/, /ERREUR/, /TypeError|ReferenceError|SyntaxError/];
 let echecs = 0;
