@@ -23,7 +23,7 @@
 // =====================================================================
 
 // ======================= A PERSONNALISER ==============================
-// Identifiants (Wi-Fi, adresse du serveur, mot de passe, jeton Access) : dans secrets.h, a cote de
+// Identifiants (Wi-Fi, adresse du serveur, jeton Access) : dans secrets.h, a cote de
 // ce fichier, jamais envoye sur GitHub. La premiere fois : copier secrets.exemple.h en secrets.h,
 // puis le remplir.
 #if __has_include("secrets.h")
@@ -50,6 +50,7 @@
 #include <esp_timer.h>
 #include <esp_system.h>
 #include <Preferences.h>
+#include <stdarg.h>
 
 // --- Broches (Feather ESP32-S3) ---
 // Ecran : DIN -> MO, CLK -> SCK, VCC -> 3V, GND -> GND
@@ -293,26 +294,26 @@ void fermerConnexion() {
   clientServeur.stop();
 }
 
-// Identifie la carte aupres du serveur : jeton de service Cloudflare Access s'il est rempli,
-// et mot de passe CLE (utilise seulement si Access n'est pas active).
+// Identifie la carte aupres du serveur par son jeton de service Cloudflare Access : le serveur n'a
+// pas d'autre entree (l'ancien mot de passe CLE a ete retire).
 // (static : les tests sur ordinateur, sans HTTPClient, ne generent pas son prototype)
 static void identifier(HTTPClient* http) {
-  http->addHeader("X-Cle", CLE);
-  if (ACCES_ID[0]) {
-    http->addHeader("CF-Access-Client-Id", ACCES_ID);
-    http->addHeader("CF-Access-Client-Secret", ACCES_SECRET);
-  }
+  http->addHeader("CF-Access-Client-Id", ACCES_ID);
+  http->addHeader("CF-Access-Client-Secret", ACCES_SECRET);
 }
 
-// Encode le mot de passe pour le mettre dans une adresse
-String encoderURL(const char* s) {
-  String r;
-  for (; *s; s++) {
-    char c = *s;
-    if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') r += c;
-    else { char h[4]; snprintf(h, sizeof h, "%%%02X", (unsigned char)c); r += h; }
-  }
-  return r;
+// Ajoute du texte au bout d'une adresse en construction. snprintf rend la longueur qu'il AURAIT
+// ecrite : additionnee telle quelle, lg pourrait depasser le tampon, et taille - lg (non signe)
+// deviendrait enorme a l'ajout suivant. Ici lg ne depasse jamais taille - 1 : une adresse trop
+// longue est tronquee, jamais ecrite hors du tampon.
+// (format(printf) : le compilateur verifie les %... contre les valeurs, comme pour snprintf)
+static void __attribute__((format(printf, 4, 5))) ajouter(char* buf, size_t taille, size_t& lg, const char* fmt, ...) {
+  if (lg + 1 >= taille) return;
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(buf + lg, taille - lg, fmt, ap);
+  va_end(ap);
+  if (n > 0) lg = (lg + (size_t)n < taille - 1) ? lg + (size_t)n : taille - 1;
 }
 
 // ---------------------------------------------------------------------
@@ -389,7 +390,7 @@ void mettreAJourProgramme(const char* version) {
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.setLedPin(LED_BUILTIN, HIGH);  // la LED rouge s'allume pendant l'ecriture
   // le 4e argument ajoute les en-tetes d'identification a la requete de telechargement
-  t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin?cle=" + encoderURL(CLE), "",
+  t_httpUpdate_return r = httpUpdate.update(client, String(SERVEUR) + "/api/firmware.bin", "",
                                             [](HTTPClient* h) { identifier(h); });
   if (r == HTTP_UPDATE_OK) {
     Preferences p;               // le nouveau programme demarre a l'essai
@@ -785,16 +786,17 @@ uint32_t cycle() {
   // 1. Que faut-il afficher ?
   uint8_t* brut = nullptr;
   char chemin[220];
-  int lg = snprintf(chemin, sizeof chemin, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
+  size_t lg = 0;
+  ajouter(chemin, sizeof chemin, lg, "/api/etat?bat=%.2f&fw=%s", vBat, versionCarte);
   // dc : secondes depuis le dernier rafraichissement complet. Le serveur sait ainsi quand le complet
   // periodique tombe a ce reveil, et en profite pour recaler la temperature affichee sur la mesure.
-  if (!isnan(tInt)) lg += snprintf(chemin + lg, sizeof chemin - lg, "&ti=%.1f&dc=%lu", tInt, (unsigned long)secondesDepuisComplet);
-  if (pctJauge >= 0) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pct=%.1f", pctJauge);
-  if (vitesseLue) lg += snprintf(chemin + lg, sizeof chemin - lg, "&crate=%.1f", vitesseJauge);
-  lg += snprintf(chemin + lg, sizeof chemin - lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);
+  if (!isnan(tInt)) ajouter(chemin, sizeof chemin, lg, "&ti=%.1f&dc=%lu", tInt, (unsigned long)secondesDepuisComplet);
+  if (pctJauge >= 0) ajouter(chemin, sizeof chemin, lg, "&pct=%.1f", pctJauge);
+  if (vitesseLue) ajouter(chemin, sizeof chemin, lg, "&crate=%.1f", vitesseJauge);
+  ajouter(chemin, sizeof chemin, lg, "&ev=%lu&ee=%lu", (unsigned long)eveilTotalMs, (unsigned long)ecranTotalMs);
   // Redemarrages anormaux depuis la mise sous tension, et programme refuse (retour arriere)
-  if (gf.total) lg += snprintf(chemin + lg, sizeof chemin - lg, "&pa=%u&ra=%c", gf.total, gf.dernier ? gf.dernier : 'P');
-  if (versionRefusee[0]) snprintf(chemin + lg, sizeof chemin - lg, "&fwko=%s", versionRefusee);
+  if (gf.total) ajouter(chemin, sizeof chemin, lg, "&pa=%u&ra=%c", gf.total, gf.dernier ? gf.dernier : 'P');
+  if (versionRefusee[0]) ajouter(chemin, sizeof chemin, lg, "&fwko=%s", versionRefusee);
   int n = telecharger(chemin, &brut, 32768);
   if (!n) { free(brut); return echecContact(causeEchec); }
   JsonDocument etat;
@@ -891,6 +893,7 @@ void setup() {
   }
   calculerVersion();
   Serial.printf("Cadre e-ink, programme du %s\n", versionCarte);
+  if (!ACCES_ID[0]) Serial.println("ACCES_ID vide dans secrets.h : le serveur refusera la carte (README, partie 1 bis)");
   // Valeurs gardees pendant la veille : remises a zero si elles viennent d'un autre programme (apres une
   // mise a jour, leur place en memoire a pu changer). L'ecran sera alors nettoye au prochain affichage.
   if (strncmp(versionRtc, versionCarte, sizeof versionRtc) != 0) {

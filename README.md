@@ -65,7 +65,7 @@ L'interface web marche sur ordinateur, iPhone et iPad. Sur iPhone, **Partager �
    - `WIFI_SSID` et `WIFI_MDP` (Wi-Fi 2,4 GHz)
    - `SERVEUR` : l'adresse du Worker, sans `/` à la fin
    - `ACCES_ID` et `ACCES_SECRET` : le jeton de service du cadre (partie 1 bis)
-   - `CLE` : n'importe quelle valeur. Le serveur ne s'en sert plus ; le champ reste tant que le programme de la carte l'utilise
+   - Un ancien `secrets.h` peut encore contenir une ligne `CLE` : elle ne sert plus, tu peux la supprimer
 
    `secrets.h` est ignoré par Git (`.gitignore`) : il reste sur ton ordinateur, et une nouvelle version du programme récupérée sur GitHub ne l'écrase pas. Sans lui, la compilation s'arrête sur « Fichier secrets.h introuvable ».
 
