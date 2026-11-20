@@ -1,5 +1,6 @@
 import fs from 'fs';
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 // --- KV simulé ---
 const kv = new Map();
 const KV = {
@@ -7,7 +8,7 @@ const KV = {
   async getWithMetadata(k, type) { const e = kv.get(k); return e ? { value: e.v, metadata: e.m } : { value: null, metadata: null }; },
   async put(k, v, o) { kv.set(k, { v, m: o && o.metadata }); },
 };
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 // --- fetch simulé : météo + ICS ---
 const now = new Date();
 const pad = n => String(n).padStart(2, '0');
@@ -41,15 +42,22 @@ globalThis.fetch = async (u) => {
 };
 import http from 'http';
 // apercu initial = rendu du tableau complet
-const pbm = fs.readFileSync('/tmp/claude-0/-home-claude/ddece4b2-ab1a-5083-ad3a-3f963bcd7421/scratchpad/hote/rendu_complet.pbm');
-const bitsApercu = pbm.subarray(pbm.length - 81600);
-await KV.put('apercu', bitsApercu.buffer.slice(bitsApercu.byteOffset, bitsApercu.byteOffset + 81600), { metadata: { t: Date.now() - 4 * 60000 } });
+// (seulement si le rendu existe : sinon la page démarre sans aperçu)
+const RENDU = '/tmp/claude-0/-home-claude/ddece4b2-ab1a-5083-ad3a-3f963bcd7421/scratchpad/hote/rendu_complet.pbm';
+if (fs.existsSync(RENDU)) {
+  const pbm = fs.readFileSync(RENDU);
+  const bitsApercu = pbm.subarray(pbm.length - 81600);
+  await KV.put('apercu', bitsApercu.buffer.slice(bitsApercu.byteOffset, bitsApercu.byteOffset + 81600), { metadata: { t: Date.now() - 4 * 60000 } });
+}
 await KV.put('statut', JSON.stringify({ vu: Date.now() - 4 * 60000, bat: 4.02, mode: 'tableau' }));
 await KV.put('config', JSON.stringify({ agenda: { urls: ['webcal://ics.test/cal.ics'] } }));
+// Sur ordinateur, pas de Cloudflare Access devant le serveur : chaque requête arrive comme si Access
+// avait laissé passer moi@exemple.fr
+const appeler = await connecter(w, env);
 http.createServer(async (rq, rs) => {
   const chunks = []; for await (const c of rq) chunks.push(c);
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
-  const r = await w.fetch(new Request('http://localhost:8787' + rq.url, { method: rq.method, headers: rq.headers, body: (rq.method === 'GET' || rq.method === 'HEAD') ? undefined : body }), env);
+  const r = await appeler(new Request('http://localhost:8787' + rq.url, { method: rq.method, headers: rq.headers, body: (rq.method === 'GET' || rq.method === 'HEAD') ? undefined : body }));
   const h = {}; r.headers.forEach((v, k) => h[k] = v);
   rs.writeHead(r.status, h); rs.end(Buffer.from(await r.arrayBuffer()));
 }).listen(8787, () => console.log('ok'));

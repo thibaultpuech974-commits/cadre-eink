@@ -11,8 +11,8 @@
 //  A configurer dans Cloudflare :
 //   - un espace KV lie sous le nom  CADRE
 //   - Cloudflare Access sur le Worker (connexion + double authentification
-//     pour la page web, jetons de service pour la carte et le raccourci iPhone)
-//   - en secours, sans Access : une variable secrete CLE (mot de passe)
+//     pour la page web, jetons de service pour la carte et le raccourci iPhone).
+//     Sans Access, le serveur refuse toutes les routes /api/ (l'ancien mot de passe CLE a ete retire).
 //
 //  Ce fichier garde le point d'entree et les routes (/api/...). Le reste est range par theme :
 //   commun.js            dimensions de l'ecran, reponses HTTP, copie de secours, texte pour l'ecran
@@ -40,7 +40,7 @@
 import { PAGE } from './page.js';
 // Code de dessin de la carte compile en WebAssembly (outils/apercu/construire.sh), pour la previsualisation
 import APERCU_WASM from './apercu.wasm';
-import { OCTETS, empreinte, fusionner, json, pourEcran, texte } from './commun.js';
+import { OCTETS, empreinte, fusionner, json, lireJSON, pourEcran, texte } from './commun.js';
 import { JOURS_COURTS, MOIS, TZ, dateDuJour, deux, mural, versUTC } from './temps.js';
 import { CONFIG_DEFAUT, METHODES_PARTIEL, ecrireConfig, lireConfig, migrerScenes, preparerModif } from './config.js';
 import { ROTATIONS } from './disposition.js';
@@ -58,7 +58,7 @@ import { routeEssaiAlerte, routeEtatAlertes, verifierAlertes } from './alertes.j
 // ---------------------------------------------------------------------
 //  Point d'entree
 // ---------------------------------------------------------------------
-export default {
+const serveur = {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const chemin = url.pathname;
@@ -70,16 +70,12 @@ export default {
     }
     if (!chemin.startsWith('/api/')) return new Response('Introuvable', { status: 404 });
     // Cloudflare Access : ctx.access n'existe que si Access a authentifie la requete
-    // (personne connectee a la page web, ou carte / raccourci avec leur jeton de service)
+    // (personne connectee a la page web, ou carte / raccourci avec leur jeton de service).
+    // Sans lui, aucune route : une adresse que Access ne couvrirait pas ne donne acces a rien.
+    // La carte envoie encore l'ancien mot de passe (X-Cle, ?cle=) : il est ignore.
     const access = ctx && ctx.access ? ctx.access : null;
-    if (!access && !env.CLE) return texte('Ni Cloudflare Access ni la variable secrete CLE ne sont configures.', 500);
+    if (!access) return texte('Cloudflare Access n\'est pas actif sur cette adresse : le serveur refuse tout (voir le README, partie 1 bis).', 403);
     if (!env.CADRE) return texte('L\'espace KV "CADRE" n\'est pas lie au Worker.', 500);
-
-    // Sans Access (mode de secours) : mot de passe CLE
-    if (!access) {
-      const cle = req.headers.get('X-Cle') || url.searchParams.get('cle');
-      if (cle !== env.CLE) return texte('Cle incorrecte', 401);
-    }
 
     try {
       const m = req.method;
@@ -122,9 +118,12 @@ export default {
       if (chemin === '/api/bus-test' && m === 'GET') return json(await prochainsBus((await lireConfig(env)).bus, Date.now(), env, true));
       return texte('Route inconnue', 404);
     } catch (e) {
-      // Garde une trace dans les journaux du Worker (voir "observability" dans wrangler.jsonc)
-      console.error('Erreur', req.method, chemin, ':', e && e.stack ? e.stack : e);
-      return texte('Erreur : ' + (e && e.message ? e.message : e), 500);
+      // Le detail reste dans les journaux du Worker (voir "observability" dans wrangler.jsonc). La reponse
+      // n'en donne qu'une reference, pour ne pas montrer l'interieur du serveur (requete vers un service
+      // exterieur, contenu du KV)
+      const ref = crypto.randomUUID().slice(0, 8);
+      console.error('Erreur', ref, req.method, chemin, ':', e && e.stack ? e.stack : e);
+      return texte('Erreur interne du serveur (réf. ' + ref + ', détail dans les journaux du Worker)', 500);
     }
   },
   // Declencheur planifie (une fois par heure, "triggers" de wrangler.jsonc) : alertes sur l'iPhone
@@ -134,9 +133,26 @@ export default {
     return travail;
   },
 };
-// Comment la page web est connectee : par Cloudflare Access (avec l'adresse email) ou par mot de passe
+
+// En-tetes de securite sur toutes les reponses. La politique de contenu ne limite pas encore les scripts
+// (la page est faite de scripts en ligne) : elle empeche d'afficher la page dans le cadre d'un autre site,
+// de changer l'adresse de base des liens, et les plugins.
+const ENTETES_SECURITE = {
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'content-security-policy': "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+};
+export default {
+  async fetch(req, env, ctx) {
+    const rep = await serveur.fetch(req, env, ctx);
+    const r = new Response(rep.body, rep);     // en-tetes modifiables, quelle que soit l'origine de la reponse
+    for (const [k, v] of Object.entries(ENTETES_SECURITE)) r.headers.set(k, v);
+    return r;
+  },
+  scheduled: (evenement, env, ctx) => serveur.scheduled(evenement, env, ctx),
+};
+// Qui est connecte a la page web (adresse email de la session Cloudflare Access)
 async function routeSession(access) {
-  if (!access) return json({ access: false });
   let email = '';
   try { const id = await access.getIdentity(); email = (id && id.email) || ''; } catch (e) { /* jeton de service : pas d'identite */ }
   return json({ access: true, email });
@@ -159,7 +175,7 @@ async function routeEtat(url, env) {
   let contenu;
   // Dernier etat enregistre de cette carte (lu ici : la temperature interieure en a besoin avant la signature)
   const cleStatut = ecran ? 'statut' + ecran : 'statut';
-  const ancien = JSON.parse((await env.CADRE.get(cleStatut)) || 'null');
+  const ancien = await lireJSON(env, cleStatut);
   // Temperature interieure mesuree par la carte (thermistance), et valeur affichee, au demi-degre. Celle-ci
   // ne change que si la mesure s'en ecarte d'au moins 0,4 degre : une mesure qui hesite entre deux valeurs
   // ne fait pas rafraichir l'ecran a chaque reveil.
@@ -270,7 +286,7 @@ async function routeEtat(url, env) {
     if (nouveau.bat > 2.5 && maintenant - nouveau.hb >= 55 * 60000) {
       try {
         const cleH = 'batterie' + (ecran ? ecran : '');
-        const h = JSON.parse((await env.CADRE.get(cleH)) || '{"pts":[]}');
+        const h = await lireJSON(env, cleH, { pts: [] });
         const debut = Math.floor((maintenant - 30 * 86400e3) / 60000);
         h.pts = h.pts.filter(p => p[0] >= debut);
         // minutes, millivolts, et si la carte a une jauge : dixiemes de %, dixiemes de % par heure ;
@@ -301,7 +317,7 @@ async function routeEtat(url, env) {
     if (ancien && ancien.ht) nouveau.ht = ancien.ht;
     if (ti !== null && maintenant - (nouveau.ht || 0) >= 28 * 60000) {
       try {
-        const h = JSON.parse((await env.CADRE.get('temperature')) || '{"pts":[]}');
+        const h = await lireJSON(env, 'temperature', { pts: [] });
         const debut = Math.floor((maintenant - 30 * 86400e3) / 60000);
         h.pts = h.pts.filter(p => p[0] >= debut);
         h.pts.push([Math.floor(maintenant / 60000), Math.round(ti * 10)]);
@@ -325,8 +341,8 @@ async function routeEtat(url, env) {
 }
 async function routeLireConfig(env) {
   const cfg = await lireConfig(env);
-  const statut = JSON.parse((await env.CADRE.get('statut')) || 'null');
-  const statut1 = cfg.ecrans && cfg.ecrans.nb === 2 ? JSON.parse((await env.CADRE.get('statut1')) || 'null') : null;
+  const statut = await lireJSON(env, 'statut');
+  const statut1 = cfg.ecrans && cfg.ecrans.nb === 2 ? await lireJSON(env, 'statut1') : null;
   return json({ config: cfg, statut, statut1, maintenant: Date.now() });
 }
 async function routeEcrireConfig(req, env) {
@@ -519,8 +535,9 @@ async function routeGTFS() {
 async function routeIndexBus(req, env) {
   const t = await req.text();
   if (t.length > 3000000) return texte('Index trop gros : choisis moins d\'arrets', 400);
-  const idx = JSON.parse(t);
-  if (!Array.isArray(idx.passages)) return texte('Index invalide', 400);
+  let idx;
+  try { idx = JSON.parse(t); } catch (e) { return texte('Index illisible', 400); }
+  if (!idx || !Array.isArray(idx.passages)) return texte('Index invalide', 400);
   await enregistrerIndexBus(env, t, idx);
   return json({ ok: true, passages: idx.passages.length });
 }

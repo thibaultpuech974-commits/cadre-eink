@@ -1,7 +1,7 @@
 // Heures creuses (réveils espacés sur des plages jours + heures) et alertes sur l'iPhone (Bark)
 import w from '../../serveur/worker.js';
 import { kv, KV, req, post, etat, horloge } from './simu.mjs';
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 const D = ids => ids.map((id, i) => ({ id, x: 0, y: i ? 2 * i - 1 : 0, w: 12, h: i ? 2 : 1 }));
 // --- 1. Heures creuses : lun-ven 8 h-17 h, réveil toutes les 2 h ; une scène à son propre rythme le mardi midi
 let r = await post({ reveilMin: 10, disposition: D(['date', 'meteo']),

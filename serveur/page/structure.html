@@ -8,10 +8,8 @@
 
 <section id="connexion" class="cache">
   <h2>Cadre</h2>
-  <p class="aide">Entre le mot de passe défini dans Cloudflare (variable CLE).</p>
-  <input type="password" id="champCle" placeholder="Mot de passe">
-  <button class="principal" onclick="seConnecter()">Se connecter</button>
-  <div class="msg" id="msgCle"></div>
+  <p class="aide">Le serveur ne répond pas à cette page. Elle s'ouvre par Cloudflare Access : vérifie qu'Access protège bien le Worker (guide d'installation, partie 1 bis), puis recharge la page.</p>
+  <div class="msg" id="msgConnexion"></div>
 </section>
 
 <div id="app" class="cache">
@@ -227,7 +225,7 @@
   <p class="aide" id="pochetteActuelle">Aucune pochette reçue pour l'instant.</p>
   <p class="aide">Adresse à mettre dans le raccourci iPhone :</p>
   <p><code id="urlPochette"></code></p>
-  <p class="aide cache" id="aidePochetteAccess">Dans l'action « Obtenir le contenu de l'URL », ajoute les en-têtes <code>CF-Access-Client-Id</code> et <code>CF-Access-Client-Secret</code> du jeton de service du raccourci (voir le guide d'installation).</p>
+  <p class="aide" id="aidePochetteAccess">Dans l'action « Obtenir le contenu de l'URL », ajoute les en-têtes <code>CF-Access-Client-Id</code> et <code>CF-Access-Client-Secret</code> du jeton de service du raccourci (voir le guide d'installation).</p>
 </details>
 </div>
 
