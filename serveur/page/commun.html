@@ -1,40 +1,30 @@
 <!-- Page web du cadre : outils communs (connexion, appels au serveur, petites fonctions, créneaux jours + heures) -->
 <script>
 var LARG = 960, HAUT = 680, OCTETS = 81600;
-var cle = '';
 var config = null;
 var image = null;
-try { cle = localStorage.getItem('cadre-cle') || ''; } catch (e) {}
+// L'ancien mot de passe de secours etait garde en clair dans le navigateur : on efface la copie restante
+try { localStorage.removeItem('cadre-cle'); } catch (e) {}
 function $(id) { return document.getElementById(id); }
-// Connexion : par Cloudflare Access (cookie envoye automatiquement par le navigateur)
-// ou, en secours sans Access, par le mot de passe CLE
-var session = { access: false, email: '' };
+// Connexion par Cloudflare Access : le navigateur envoie le cookie de session tout seul
+var session = { access: true, email: '' };
 function api(chemin, options) {
   options = options || {};
   options.headers = options.headers || {};
-  if (cle) options.headers['X-Cle'] = cle;
   // Session Access expiree : Access repond par une redirection vers sa page de connexion,
   // qu'un fetch ne peut pas suivre. On recharge la page pour se reconnecter.
   options.redirect = 'manual';
   return fetch(chemin, options).then(function (r) {
     if (r.type === 'opaqueredirect') { location.reload(); throw new Error('Session expirée, reconnexion…'); }
-    if (r.status === 401) { afficherConnexion(cle ? 'Mot de passe incorrect' : ''); throw new Error('cle'); }
     if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
     return r;
   });
 }
 function message(id, t) { $(id).textContent = t; if (t) setTimeout(function () { $(id).textContent = ''; }, 6000); }
 
-function afficherConnexion(t) { $('app').classList.add('cache'); $('connexion').classList.remove('cache'); $('msgCle').textContent = t || ''; }
-function seConnecter() { cle = $('champCle').value.trim(); try { localStorage.setItem('cadre-cle', cle); } catch (e) {} demarrer(); }
-function deconnexion() {
-  try { localStorage.removeItem('cadre-cle'); } catch (e) {}
-  cle = '';
-  if (session.access) { location.href = '/cdn-cgi/access/logout'; return false; }   // ferme la session Access
-  afficherConnexion(''); return false;
-}
+function afficherConnexion(t) { $('app').classList.add('cache'); $('connexion').classList.remove('cache'); $('msgConnexion').textContent = t || ''; }
+function deconnexion() { location.href = '/cdn-cgi/access/logout'; return false; }   // ferme la session Access
 
-// Sans mot de passe enregistre, on essaie quand meme : avec Access, la session suffit
 function demarrer() {
   api('/api/session').then(function (r) { return r.json(); }).then(function (s) {
     session = s;
@@ -42,7 +32,7 @@ function demarrer() {
     return charger();
   }).then(function () {
     $('connexion').classList.add('cache'); $('app').classList.remove('cache');
-  }).catch(function () {});
+  }).catch(function (e) { afficherConnexion(e.message); });
 }
 // Met a jour l'etat et l'apercu sans toucher aux formulaires en cours d'edition
 function rafraichir() {

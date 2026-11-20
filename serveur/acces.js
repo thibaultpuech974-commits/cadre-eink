@@ -12,12 +12,22 @@
 // le role n'est ni devine ni choisi n'a aucun droit : il apparait dans la page, ou on lui en donne un.
 import { json, texte } from './commun.js';
 
-// Routes permises a chaque role ('tout' : aucune limite)
+// Routes permises a chaque role ('tout' : aucune limite). Un role se teste avec estRole et non avec
+// « in » : 'toString' in ROLES vaut true (propriete heritee d'Object).
 export const ROLES = {
   carte: ['GET /api/etat', 'GET /api/photo', 'GET /api/pochette.jpg', 'POST /api/apercu', 'GET /api/firmware.bin'],
   raccourci: ['POST /api/pochette', 'POST /api/taches'],
   tout: null,
 };
+
+const estRole = r => typeof r === 'string' && Object.hasOwn(ROLES, r);
+// Liste des jetons vus, gardee dans le KV. Objet sans prototype : un identifiant comme '__proto__' ou
+// 'toString' y est une cle ordinaire, et non une propriete heritee.
+async function lireJetons(env) {
+  let lu = null;
+  try { lu = JSON.parse((await env.CADRE.get('jetons')) || 'null'); } catch (e) { /* copie illisible : on repart de zero */ }
+  return Object.assign(Object.create(null), lu && typeof lu === 'object' && !Array.isArray(lu) ? lu : {});
+}
 
 function deviner(route, url) {
   if (route === 'GET /api/etat' && url.searchParams.has('fw')) return 'carte';
@@ -106,11 +116,12 @@ export async function lireJwt(jwt, aud, env, maintenant = Date.now()) {
 }
 
 // Qui appelle, et a-t-il le droit ? Renvoie { refus } (une reponse a renvoyer telle quelle) ou
-// { personne } : true pour une personne connectee ou le mot de passe de secours.
+// { personne } : true pour une personne connectee, false pour un jeton de service dans son role.
 export async function controlerAcces(req, access, env, url) {
-  if (!access) return { personne: true };            // mode de secours (mot de passe CLE)
+  if (!access) return { refus: texte('Cloudflare Access requis', 403) };
+  // Access ajoute toujours ce jeton ; s'il manque quand meme, on refuse plutot que de tout permettre
   const jwt = req.headers.get('cf-access-jwt-assertion');
-  if (!jwt) return { personne: true };               // pas de jeton a lire (ne se produit pas chez Cloudflare)
+  if (!jwt) return { refus: texte('Jeton Cloudflare Access absent', 403) };
   let p;
   try { p = await lireJwt(jwt, access.aud, env); } catch (e) { return { refus: texte('Vérification du jeton impossible : ' + e.message, 503) }; }
   if (!p) return { refus: texte('Jeton Cloudflare Access invalide', 403) };
@@ -118,7 +129,7 @@ export async function controlerAcces(req, access, env, url) {
   // Jeton de service
   const id = String(p.common_name).slice(0, 120);
   const route = req.method + ' ' + url.pathname;
-  const jetons = JSON.parse((await env.CADRE.get('jetons')) || '{}');
+  const jetons = await lireJetons(env);
   // Jeton jamais vu, ou encore sans role : on essaie de le deviner a cette requete
   if (!jetons[id] || !jetons[id].role) {
     const devine = deviner(route, url);
@@ -129,7 +140,7 @@ export async function controlerAcces(req, access, env, url) {
   }
   const role = jetons[id].role;
   // Sans role : aucun droit (et non tous, comme avant), jusqu'a ce qu'on lui en choisisse un dans la page
-  if (!role || !(role in ROLES)) {
+  if (!estRole(role)) {
     return { refus: texte('Ce jeton n\'a pas encore de rôle : choisis-le dans la page web (menu Accès des jetons)', 403) };
   }
   if (!ROLES[role] || ROLES[role].includes(route)) return { personne: false };
@@ -138,14 +149,15 @@ export async function controlerAcces(req, access, env, url) {
 
 // --- Page web : liste des jetons vus et choix de leur role (personnes seulement) ---
 export async function routeLireJetons(env) {
-  return json({ jetons: JSON.parse((await env.CADRE.get('jetons')) || '{}'), roles: Object.keys(ROLES) });
+  return json({ jetons: await lireJetons(env), roles: Object.keys(ROLES) });
 }
 export async function routeEcrireJetons(req, env) {
-  const m = await req.json();
-  const jetons = JSON.parse((await env.CADRE.get('jetons')) || '{}');
-  if (!m || !jetons[m.id]) return texte('Jeton inconnu', 400);
+  let m;
+  try { m = await req.json(); } catch (e) { return texte('Demande illisible', 400); }
+  const jetons = await lireJetons(env);
+  if (!m || typeof m.id !== 'string' || !Object.hasOwn(jetons, m.id)) return texte('Jeton inconnu', 400);
   if (m.oublier) delete jetons[m.id];
-  else if (m.role in ROLES) jetons[m.id].role = m.role;
+  else if (estRole(m.role)) jetons[m.id].role = m.role;
   else return texte('Rôle inconnu', 400);
   await env.CADRE.put('jetons', JSON.stringify(jetons));
   return json({ jetons });

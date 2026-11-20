@@ -6,7 +6,7 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 const ici = dirname(fileURLToPath(import.meta.url));
 const ATTENDU = {
-  'test.mjs': [/UI 200/, /sans cle 401/, /sig stable true/, /^photo 200/m, /get photo 200 81600/, /pochette 200/, /apercu get 200 true/,
+  'test.mjs': [/UI 200/, /sans Access 403/, /sig stable true/, /^photo 200/m, /get photo 200 81600/, /pochette 200/, /apercu get 200 true/,
     /"h": "Jour",\s+"t": "Anniversaire de Léa"/],      // évènement sur toute la journée
   'scenes.mjs': [/migration : Bus \[date,bus\].*Grand Prix \[date,meteo,f1\].*f1=semaine/, /scène invalide -> \[\] reveil 0 blocs 0/,
     /ven 16\/10 17h50 +Par défaut/, /ven 16\/10 18h30 +Bus +date,bus +réveil 185 s/, /ven 16\/10 19h58 +Bus .*réveil 125 s/,
@@ -63,9 +63,16 @@ const ATTENDU = {
     /scène forcée : Grand Prix \| blocs date,f1 \| GP GP des États-Unis \| dessin true/, /deux écrans : date \| courbe/, /rien enregistré : true/, /prévision météo\/agenda : true \| aucune écriture : true/],
   'agenda.mjs': [/ok 1 évènement\(s\) \| webcal:\/\/ics.test\/maths.ics/, /erreur : adresse invalide .* \| pas une adresse/,
     /erreur : introuvable \(HTTP 404\) .* \| https:\/\/introuvable.test\/x.ics/, /fenêtre : 14 jours/, /panne : inaccessible \(réseau coupé\)/],
-  'access.mjs': [/access sans CLE : 200/, /access \+ mauvaise CLE : 200/, /session personne : \{"access":true,"email":"moi@exemple.fr"\}/,
-    /session jeton : \{"access":true,"email":""\}/, /pochette par jeton : 200 So What/, /secours sans cle : 401/,
-    /secours avec cle : 200/, /session secours : \{"access":false\}/, /rien de configure : 500/],
+  'access.mjs': [/personne connectée : 200/, /personne \+ mauvais mot de passe : 200/, /session personne : \{"access":true,"email":"moi@exemple.fr"\}/,
+    /sans Access, mot de passe en en-tête : 403 Cloudflare Access n'est pas actif/, /sans Access, mot de passe dans l'adresse : 403/,
+    /sans Access ni secret : 403/, /Access sans jeton : 403 Jeton Cloudflare Access absent/,
+    /carte installée, état : 200 \| rôle carte/, /carte installée, programme : 404/, /carte, réglages : 403/,
+    /en-têtes page : 200 nosniff \| no-referrer \| frame-ancestors 'none'; base-uri 'none'; object-src 'none' \| text\/html/,
+    /en-têtes API : nosniff \| no-referrer \| frame-ancestors 'none'/,
+    /erreur imprévue : 500 \| réf\. true \| détail caché true \| détail journalisé true/,
+    /statut abîmé : état 200 \| réglages 200 \| signalé true/, /index de bus illisible : 400 Index illisible/,
+    /rôle toString : 400 Rôle inconnu/, /rôle toString déjà enregistré : 403/, /jeton __proto__ : 200 \| enregistré carte \| réglages 403/,
+    /jeton toString inconnu : 400/, /demande illisible : 400/],
   'interieur.mjs': [/sans mesure : absente \| état undefined/, /21,37 -> 21\.5 \| état 21\.4 21\.5 \| écritures 1/,
     /mesure qui hésite : 21\.5 21\.5 21\.5 21\.5 21\.5 \| écritures 0/, /22,0 -> 22 \| signature changée true \| écritures 1/,
     /22,3 affiché 22 : sans dc, 1 h, 22 h, complet dû, après -> 22 22 22 22\.5 22\.5/, /complet toutes les 6 h : 1 h -> 22\.5 \| complet dû -> 23/, /absurde : ignorée/,

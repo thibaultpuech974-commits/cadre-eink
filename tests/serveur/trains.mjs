@@ -1,12 +1,13 @@
 // Bloc « Prochains trains » : API SNCF simulée (recherche de gares, trajets directs, retards, suppressions)
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 const kv = new Map();
 const KV = {
   async get(k) { const e = kv.get(k); return e ? e.v : null; },
   async getWithMetadata(k) { const e = kv.get(k); return e ? { value: e.v, metadata: e.m } : { value: null, metadata: null }; },
   async put(k, v, o) { kv.set(k, { v, m: o && o.metadata }); }, async delete(k) { kv.delete(k); },
 };
-const env = { CLE: 'secret', CADRE: KV, SNCF: 'cle-de-test' };
+const env = { CADRE: KV, SNCF: 'cle-de-test' };
 const NIMES = 'stop_area:SNCF:87775007', MONTP = 'stop_area:SNCF:87773002', PARIS = 'stop_area:SNCF:87686006';
 // Un trajet au format Navitia : marche jusqu'au quai, puis le train
 const trajet = (prevu, reel, arrivee, mode, numero, plus = {}) => Object.assign({ nb_transfers: 0, status: '', sections: [
@@ -37,7 +38,8 @@ globalThis.fetch = async (u, o) => {
   if (u.includes('open-meteo') || u.includes('jolpi.ca')) return new Response('{}');
   throw new Error('fetch inattendu ' + u);
 };
-const req = (p, o = {}) => w.fetch(new Request('https://cadre.test' + p, Object.assign({ headers: { 'X-Cle': 'secret' } }, o)), env);
+const appeler = await connecter(w, env);
+const req = (p, o = {}) => appeler(new Request('https://cadre.test' + p, o));
 const post = async b => (await req('/api/config', { method: 'POST', body: JSON.stringify(b) })).json();
 const etat = async () => { demandes = []; return (await req('/api/etat?ui=1')).json(); };
 Date.now = () => Date.parse('2026-11-14T18:31:20+01:00');

@@ -14,6 +14,13 @@ export function json(obj, statut = 200) {
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
 }
+// Valeur JSON gardee dans le KV. Une valeur illisible (abimee, ancien format) vaut le defaut au lieu de
+// faire echouer la route : /api/etat en depend, et la carte ne peut pas reparer le KV elle-meme.
+export async function lireJSON(env, cle, defaut = null) {
+  const t = await env.CADRE.get(cle);
+  if (!t) return defaut;
+  try { return JSON.parse(t); } catch (e) { console.log('KV « ' + cle + ' » illisible, ignoré :', e.message); return defaut; }
+}
 export function fusionner(cible, source) {
   for (const k of Object.keys(source || {})) {
     const v = source[k];

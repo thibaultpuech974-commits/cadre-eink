@@ -6,7 +6,7 @@
 //  - bus      : les horaires de bus chargés arrivent à leur fin (le bloc Prochains bus deviendrait vide)
 // Une notification par problème, puis un rappel tant qu'il dure (une fois par jour ; tous les 3 jours
 // pour les bus).
-import { json, texte } from './commun.js';
+import { json, lireJSON, texte } from './commun.js';
 import { notifierBark, verifierCleApple, nettoyerToken, nettoyerCle, TOKEN_VALIDE, CLE_VALIDE } from './bark.js';
 import { lireConfig } from './config.js';
 import { finValiditeBus } from './bus.js';
@@ -28,7 +28,7 @@ const duree = ms => { const h = ms / 3600e3; return h < 48 ? Math.round(h) + ' h
 // info (une ligne pour la page web, qu'il y ait un probleme ou non)
 export async function etatAlertes(cfg, env, maintenant) {
   const a = cfg.alertes || {};
-  const statut = JSON.parse((await env.CADRE.get('statut')) || 'null');
+  const statut = await lireJSON(env, 'statut');
   const res = [];
   // 1. Cadre muet : pas de contact depuis 3 h, et depuis plus de 2,5 fois son intervalle de reveil
   //    (la nuit ou en heures creuses, il peut dormir 4 h). Pas en mode ecran blanc : le cadre est
@@ -96,7 +96,7 @@ export async function verifierAlertes(env, maintenant = Date.now()) {
   const a = cfg.alertes || {};
   if (!a.actif || !aDestinataire(a)) return { envoyees: [] };
   const etats = await etatAlertes(cfg, env, maintenant);
-  const memo = JSON.parse((await env.CADRE.get('alertes')) || '{}');
+  const memo = await lireJSON(env, 'alertes', {});
   const envoyees = [];
   let change = false;
   // Retient le resultat d'un envoi pour la page : un envoi direct rate est signale meme quand le secours
@@ -160,7 +160,7 @@ export async function verifierAlertes(env, maintenant = Date.now()) {
 export async function routeEtatAlertes(env) {
   const cfg = await lireConfig(env);
   const etats = await etatAlertes(cfg, env, Date.now());
-  const memo = JSON.parse((await env.CADRE.get('alertes')) || '{}');
+  const memo = await lireJSON(env, 'alertes', {});
   const liste = etats.map(e => ({ cle: e.cle, probleme: e.probleme, info: e.info, envoyee: memo[e.cle] || 0 }));
   // Cle Apple de Bark (seulement si l'envoi direct est utilise)
   const a = cfg.alertes || {};

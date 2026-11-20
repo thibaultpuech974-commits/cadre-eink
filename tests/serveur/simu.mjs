@@ -1,13 +1,14 @@
 // Serveur simulé : KV en mémoire, météo et calendrier F1 factices, horloge réglable
 import fs from 'fs';
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 export const kv = new Map();
 export const KV = {
   async get(k) { const e = kv.get(k); return e ? e.v : null; },
   async getWithMetadata(k) { const e = kv.get(k); return e ? { value: e.v, metadata: e.m } : { value: null, metadata: null }; },
   async put(k, v, o) { kv.set(k, { v, m: o && o.metadata }); }, async delete(k) { kv.delete(k); },
 };
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 const pad = n => String(n).padStart(2, '0');
 // Météo simulée (heure de Paris) autour de l'instant fixé
 function meteo(now) {
@@ -49,6 +50,7 @@ globalThis.fetch = async (u) => {
   if (u.includes('jolpi.ca')) return new Response(JSON.stringify({ MRData: { RaceTable: { Races: [] } } }));
   throw new Error('fetch inattendu ' + u);
 };
-export const req = (p, o = {}) => w.fetch(new Request('https://cadre.test' + p, Object.assign({ headers: { 'X-Cle': 'secret' } }, o)), env);
+export const appeler = await connecter(w, env);
+export const req = (p, o = {}) => appeler(new Request('https://cadre.test' + p, o));
 export const post = async b => (await req('/api/config', { method: 'POST', body: JSON.stringify(b) })).json();
 export const etat = async iso => { maintenant = new Date(iso).getTime(); Date.now = () => maintenant; return (await req('/api/etat?ui=1')).json(); };

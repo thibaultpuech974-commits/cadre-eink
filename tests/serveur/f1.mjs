@@ -1,13 +1,14 @@
 // Blocs « Grand Prix de F1 » et « Graphique de température » : données envoyées à la carte
 import fs from 'fs';
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 const kv = new Map();
 const KV = {
   async get(k) { const e = kv.get(k); return e ? e.v : null; },
   async getWithMetadata(k) { const e = kv.get(k); return e ? { value: e.v, metadata: e.m } : { value: null, metadata: null }; },
   async put(k, v, o) { kv.set(k, { v, m: o && o.metadata }); }, async delete(k) { kv.delete(k); },
 };
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 const pad = n => String(n).padStart(2, '0');
 // Météo simulée (heure de Paris) autour de l'instant fixé
 function meteo(now) {
@@ -40,7 +41,8 @@ globalThis.fetch = async (u) => {
   if (u.includes('jolpi.ca')) return new Response(JSON.stringify({ MRData: { RaceTable: { Races: [] } } }));
   throw new Error('fetch inattendu ' + u);
 };
-const req = (p, o = {}) => w.fetch(new Request('https://cadre.test' + p, Object.assign({ headers: { 'X-Cle': 'secret' } }, o)), env);
+const appeler = await connecter(w, env);
+const req = (p, o = {}) => appeler(new Request('https://cadre.test' + p, o));
 const post = async b => (await req('/api/config', { method: 'POST', body: JSON.stringify(b) })).json();
 const etat = async iso => { maintenant = new Date(iso).getTime(); Date.now = () => maintenant; return (await req('/api/etat?ui=1')).json(); };
 await post({ disposition: [{ id: 'date', x: 0, y: 0, w: 12, h: 1 }, { id: 'courbe', x: 0, y: 1, w: 7, h: 4 }, { id: 'f1', x: 7, y: 1, w: 5, h: 7 }, { id: 'meteo', x: 0, y: 5, w: 7, h: 3 }] });

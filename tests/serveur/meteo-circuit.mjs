@@ -1,13 +1,14 @@
 // Bloc « Météo du circuit » : prévisions aux coordonnées du circuit, limitées aux créneaux des séances
 import fs from 'fs';
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 const kv = new Map(); let ecritures = [];
 const KV = {
   async get(k) { const e = kv.get(k); return e ? e.v : null; },
   async getWithMetadata(k) { const e = kv.get(k); return e ? { value: e.v, metadata: e.m } : { value: null, metadata: null }; },
   async put(k, v, o) { ecritures.push(k); kv.set(k, { v, m: o && o.metadata }); }, async delete(k) { kv.delete(k); },
 };
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 const deux = n => String(n).padStart(2, '0');
 // Calendrier simulé au format Jolpica : un week-end avec sprint (Austin), un week-end classique (Mexico)
 const s = (d, t) => ({ date: d, time: t });
@@ -43,7 +44,8 @@ globalThis.fetch = async (u) => {
   if (u.includes('jolpi.ca')) return new Response(JSON.stringify({ MRData: { RaceTable: { Races: [] } } }));
   throw new Error('fetch inattendu ' + u);
 };
-const req = (p, o = {}) => w.fetch(new Request('https://cadre.test' + p, Object.assign({ headers: { 'X-Cle': 'secret' } }, o)), env);
+const appeler = await connecter(w, env);
+const req = (p, o = {}) => appeler(new Request('https://cadre.test' + p, o));
 const post = async b => (await req('/api/config', { method: 'POST', body: JSON.stringify(b) })).json();
 const etat = async iso => { maintenant = new Date(iso).getTime(); Date.now = () => maintenant; demandes = []; return (await req('/api/etat?ui=1')).json(); };
 const jour = o => o.j + ' ' + o.min + '°/' + o.max + '° pluie ' + o.p + ' % vent ' + o.d + ' ' + o.v + ' | ' + o.g.h0 + 'h, ' + o.g.t.length + ' points, ' + o.g.s.map(c => c[2] + ' ' + c[0] + '-' + c[1]).join(', ');

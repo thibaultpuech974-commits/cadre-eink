@@ -22,7 +22,7 @@ Le guide d'utilisation est `README.md`. Ce fichier-ci dit comment travailler dan
 - `npm run references` : enregistre les images de référence après un changement voulu du dessin.
 - `bash outils/apercu/preparer-outils.sh` (une seule fois), puis `bash outils/apercu/construire.sh` : recompile `serveur/apercu.wasm`.
 - `bash tests/rendu/lancer.sh` : rendus sur ordinateur, y compris la pochette et les écrans « Hors ligne » et « Batterie vide » (g++ et Pillow).
-- `cd tests/serveur && node --import ./html-texte.mjs serveur_bus.mjs` : serveur local avec la page web, sur http://localhost:8787 (mot de passe `secret`).
+- `cd tests/serveur && node --import ./html-texte.mjs serveur_bus.mjs` : serveur local avec la page web, sur http://localhost:8787, sans connexion (`acces-test.mjs` simule Cloudflare Access ; les tests s'en servent aussi : `connecter(w, env)`).
 
 ## Règles à ne pas casser
 
@@ -33,8 +33,9 @@ Le guide d'utilisation est `README.md`. Ce fichier-ci dit comment travailler dan
 5. **Offre gratuite de Cloudflare** : 10 ms de calcul par requête, environ 1 000 écritures KV par jour. Pas d'écriture KV à chaque réveil du cadre (l'état n'est écrit que toutes les 10 min ou quand quelque chose change).
 6. **Mémoire de la carte** : 2 Mo de PSRAM, mémoire interne juste pendant une connexion sécurisée, programme limité à 1 966 080 octets. Les grosses allocations vont en PSRAM (`ps_malloc`).
 7. **Le programme de la carte ne se compile et ne s'essaie que chez l'utilisateur** (IDE Arduino, carte réelle). Toute modification de `carte/` doit le dire dans la demande de fusion (« ni compilé ni essayé sur la carte ») et indiquer quoi vérifier au moniteur série, en téléversant d'abord par USB.
-8. **Aucun secret dans le dépôt** : ni `secrets.h`, ni jeton, ni nom de Wi-Fi. Le secret `CLE` et les réglages d'Access restent dans Cloudflare.
+8. **Aucun secret dans le dépôt** : ni `secrets.h`, ni jeton, ni nom de Wi-Fi. Les secrets (`SNCF`) et les réglages d'Access restent dans Cloudflare.
 9. **Page web** : aucune bibliothèque externe. Une donnée (titre d'agenda, de chanson, nom d'arrêt) s'insère avec `textContent` ; `innerHTML` ne reçoit que du texte fixe.
+10. **Pas d'entrée sans Cloudflare Access** : toute route `/api/` exige `ctx.access` et un jeton JWT vérifié (`acces.js`). Ne pas rajouter de mot de passe ni de contournement, même pour les tests.
 
 ## Conventions
 

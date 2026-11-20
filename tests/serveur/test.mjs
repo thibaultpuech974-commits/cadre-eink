@@ -1,4 +1,5 @@
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 // --- KV simulé ---
 const kv = new Map();
 const KV = {
@@ -6,7 +7,7 @@ const KV = {
   async getWithMetadata(k, type) { const e = kv.get(k); return e ? { value: e.v, metadata: e.m } : { value: null, metadata: null }; },
   async put(k, v, o) { kv.set(k, { v, m: o && o.metadata }); },
 };
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 // --- fetch simulé : météo + ICS ---
 const now = new Date();
 const pad = n => String(n).padStart(2, '0');
@@ -36,23 +37,24 @@ globalThis.fetch = async (u) => {
   if (u.startsWith('https://ics.test')) return new Response(ics);
   throw new Error('fetch inattendu ' + u);
 };
-const req = (p, o={}) => w.fetch(new Request('https://cadre.test' + p, o), env);
+const appeler = await connecter(w, env);
+const req = (p, o={}) => appeler(new Request('https://cadre.test' + p, o));
 let r;
 r = await req('/'); console.log('UI', r.status, (await r.text()).length);
-r = await req('/api/etat'); console.log('sans cle', r.status);
-r = await req('/api/config', { method: 'POST', headers: { 'X-Cle': 'secret', 'content-type': 'application/json' }, body: JSON.stringify({ agenda: { urls: ['webcal://ics.test/cal.ics', ''], nb: 6 } }) });
+r = await w.fetch(new Request('https://cadre.test/api/etat'), env); console.log('sans Access', r.status);
+r = await req('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agenda: { urls: ['webcal://ics.test/cal.ics', ''], nb: 6 } }) });
 console.log('config', r.status, JSON.stringify((await r.json()).config.agenda));
-r = await req('/api/etat?cle=secret&bat=4.02'); const e1 = await r.json(); console.log(JSON.stringify(e1, null, 1));
-r = await req('/api/etat?cle=secret&bat=4.02'); const e2 = await r.json(); console.log('sig stable', e1.sig === e2.sig);
+r = await req('/api/etat?bat=4.02'); const e1 = await r.json(); console.log(JSON.stringify(e1, null, 1));
+r = await req('/api/etat?bat=4.02'); const e2 = await r.json(); console.log('sig stable', e1.sig === e2.sig);
 console.log('statut', kv.get('statut').v);
 const bits = new Uint8Array(81600); bits[0] = 0xff;
-r = await req('/api/photo?cle=secret', { method: 'POST', body: bits }); console.log('photo', r.status);
-r = await req('/api/etat?cle=secret'); console.log('etat photo', await r.text());
-r = await req('/api/photo?cle=secret'); console.log('get photo', r.status, (await r.arrayBuffer()).byteLength);
-r = await req('/api/pochette?cle=secret&titre=So%20What&artiste=Miles%20Davis&album=Kind%20of%20Blue', { method: 'POST', body: new Uint8Array(5000) }); console.log('pochette', r.status, await r.text());
-r = await req('/api/etat?cle=secret'); console.log('etat pochette', await r.text());
-r = await req('/api/config', { method: 'POST', headers: { 'X-Cle': 'secret' }, body: JSON.stringify({ mode: 'blanc' }) }); console.log('blanc', r.status);
-r = await req('/api/etat?cle=secret'); console.log('etat blanc', await r.text());
-r = await req('/api/apercu?cle=secret', { method: 'POST', body: bits }); console.log('apercu post', r.status);
-r = await req('/api/apercu?cle=secret'); console.log('apercu get', r.status, r.headers.get('x-date') > 0);
-r = await req('/api/config', { headers: { 'X-Cle': 'secret' } }); const c = await r.json(); console.log('config ui', c.config.mode, c.config.version, !!c.statut);
+r = await req('/api/photo', { method: 'POST', body: bits }); console.log('photo', r.status);
+r = await req('/api/etat'); console.log('etat photo', await r.text());
+r = await req('/api/photo'); console.log('get photo', r.status, (await r.arrayBuffer()).byteLength);
+r = await req('/api/pochette?titre=So%20What&artiste=Miles%20Davis&album=Kind%20of%20Blue', { method: 'POST', body: new Uint8Array(5000) }); console.log('pochette', r.status, await r.text());
+r = await req('/api/etat'); console.log('etat pochette', await r.text());
+r = await req('/api/config', { method: 'POST', body: JSON.stringify({ mode: 'blanc' }) }); console.log('blanc', r.status);
+r = await req('/api/etat'); console.log('etat blanc', await r.text());
+r = await req('/api/apercu', { method: 'POST', body: bits }); console.log('apercu post', r.status);
+r = await req('/api/apercu'); console.log('apercu get', r.status, r.headers.get('x-date') > 0);
+r = await req('/api/config'); const c = await r.json(); console.log('config ui', c.config.mode, c.config.version, !!c.statut);

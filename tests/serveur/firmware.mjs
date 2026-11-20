@@ -1,5 +1,6 @@
 // Mise à jour par Wi-Fi : envoi du programme, proposition à la carte, statut
 import w from '../../serveur/worker.js';
+import { connecter } from './acces-test.mjs';
 const kv = new Map();
 const KV = {
   async get(k, type) { const e = kv.get(k); return e ? e.v : null; },
@@ -7,9 +8,10 @@ const KV = {
   async put(k, v, o) { kv.set(k, { v, m: o && o.metadata }); },
   async delete(k) { kv.delete(k); },
 };
-const env = { CLE: 'secret', CADRE: KV };
+const env = { CADRE: KV };
 globalThis.fetch = async () => new Response('{}');
-const req = (p, o = {}) => w.fetch(new Request('https://cadre.test' + p, Object.assign({ headers: { 'X-Cle': 'secret' } }, o)), env);
+const appeler = await connecter(w, env);
+const req = (p, o = {}) => appeler(new Request('https://cadre.test' + p, o));
 await req('/api/config', { method: 'POST', body: JSON.stringify({ mode: 'blanc' }) });
 // faux binaire : 0xE9 + marqueur de version
 const bin = new Uint8Array(300000); bin[0] = 0xE9;
@@ -25,7 +27,7 @@ console.log('carte ancienne 20261001-120000 -> fw proposé :', await etat('20261
 console.log('carte identique               -> fw proposé :', await etat(v));
 console.log('carte plus récente            -> fw proposé :', await etat('20261020-080000'));
 console.log('carte sans version            -> fw proposé :', await etat(''));
-const b = await req('/api/firmware.bin?cle=secret', { headers: {} }); console.log('téléchargement :', b.status, (await b.arrayBuffer()).byteLength);
+const b = await req('/api/firmware.bin', { headers: {} }); console.log('téléchargement :', b.status, (await b.arrayBuffer()).byteLength);
 console.log('statut fw :', JSON.parse(kv.get('statut').v).fw);
 // Programme refusé par la carte (retour arrière) : plus proposé ; 3 téléchargements sans succès : plus proposé
 console.log('programme refusé par la carte -> fw proposé :', await etat('20261001-120000&fwko=' + v));
